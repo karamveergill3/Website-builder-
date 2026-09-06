@@ -1,7 +1,7 @@
 /* Lead list: stat tiles, status filter pills, search, and row actions. */
 import { api } from '../api.js';
 import {
-  html, mount, on, $, modal, confirmDialog, toast,
+  html, mount, on, $, $$, modal, confirmDialog, toast,
   statusPill, fmtDate, relative,
 } from '../dom.js';
 
@@ -100,10 +100,12 @@ export default async function leadsView(root, params, { refresh }) {
   const q = params.q ?? '';
   const sort = params.sort ?? 'created';
 
-  const [{ leads }, stats] = await Promise.all([
+  const [{ leads }, stats, gmail] = await Promise.all([
     api.leads.list({ status, q, sort }),
     api.leads.stats(),
+    api.get('/api/gmail/status').catch(() => null),
   ]);
+  const canQueue = gmail?.connected === true;
 
   const setParam = (key, value) => {
     const next = new URLSearchParams({ status, q, sort });
@@ -154,6 +156,17 @@ export default async function leadsView(root, params, { refresh }) {
         They are hard-excluded from every send.</div>
       </div>` : ''}
 
+    <div id="bulkbar" hidden class="note note-info"
+         style="margin-bottom:14px;align-items:center;gap:12px">
+      <strong id="bulk-count" style="flex:1"></strong>
+      <select id="bulk-status" style="max-width:170px">
+        <option value="">Set status…</option>
+        ${STATUSES.map((s) => html`<option value="${s}">${s}</option>`)}
+      </select>
+      ${canQueue ? html`<button class="primary" data-act="bulk-queue">Queue emails</button>` : ''}
+      <button class="tiny" data-act="bulk-clear">Clear</button>
+    </div>
+
     <div class="card">
       ${leads.length === 0 ? html`
         <div class="empty">
@@ -167,12 +180,18 @@ export default async function leadsView(root, params, { refresh }) {
         <div class="table-scroll">
         <table class="ledger">
           <thead><tr>
+            <th style="width:32px"><input type="checkbox" id="pick-all"
+                  style="width:15px;height:15px;accent-color:var(--green)" aria-label="Select all"></th>
             <th>Business</th><th>Category</th><th>Location</th><th>Contact</th>
             <th>Status</th><th class="nowrap">Last contacted</th><th></th>
           </tr></thead>
           <tbody>
             ${leads.map((l) => html`
               <tr data-id="${l.id}">
+                <td><input type="checkbox" class="pick" value="${l.id}"
+                           data-emailable="${!l.opted_out && Boolean(l.email)}"
+                           style="width:15px;height:15px;accent-color:var(--green)"
+                           aria-label="Select ${l.business_name}"></td>
                 <td>
                   <span class="biz">${l.business_name}</span>
                   <span class="sub">${fmtDate(l.created_at)}${l.source ? ` · ${l.source}` : ''}</span>
@@ -249,5 +268,74 @@ export default async function leadsView(root, params, { refresh }) {
 
   on(root, 'click', '[data-act="compose"]', (_e, el) => {
     location.hash = `/compose?lead=${el.dataset.id}`;
+  });
+
+  /* ---- multi-select ---- */
+
+  const picked = () => $$('.pick:checked', root);
+  const syncBulk = () => {
+    const bar = $('#bulkbar', root);
+    if (!bar) return;
+    const n = picked().length;
+    bar.hidden = n === 0;
+    bar.style.display = n === 0 ? 'none' : 'flex';
+    const emailable = picked().filter((c) => c.dataset.emailable === 'true').length;
+    $('#bulk-count', root).textContent =
+      `${n} selected` + (canQueue ? ` · ${emailable} can be emailed` : '');
+  };
+
+  on(root, 'change', '.pick', syncBulk);
+  $('#pick-all', root)?.addEventListener('change', (ev) => {
+    $$('.pick', root).forEach((c) => { c.checked = ev.target.checked; });
+    syncBulk();
+  });
+  on(root, 'click', '[data-act="bulk-clear"]', () => {
+    $$('.pick', root).forEach((c) => { c.checked = false; });
+    const all = $('#pick-all', root);
+    if (all) all.checked = false;
+    syncBulk();
+  });
+
+  $('#bulk-status', root)?.addEventListener('change', async (ev) => {
+    const next = ev.target.value;
+    if (!next) return;
+    const ids = picked().map((c) => Number(c.value));
+    await api.leads.bulkStatus(ids, next);
+    toast(`${ids.length} lead(s) marked ${next}`);
+    refresh();
+  });
+
+  on(root, 'click', '[data-act="bulk-queue"]', async () => {
+    const emailable = picked().filter((c) => c.dataset.emailable === 'true').map((c) => Number(c.value));
+    if (emailable.length === 0) {
+      toast('None of those have an email address, or they have opted out', { error: true });
+      return;
+    }
+    const { templates } = await api.templates.list();
+    if (!templates.length) { toast('Write a template first', { error: true }); return; }
+
+    const chosen = await modal({
+      title: `Queue ${emailable.length} email${emailable.length === 1 ? '' : 's'}`,
+      body: html`
+        <div class="field">
+          <label for="bq-template">Template</label>
+          <select id="bq-template" name="template_id">
+            ${templates.map((t) => html`<option value="${t.id}">${t.name}</option>`)}
+          </select>
+        </div>
+        <p class="hint">
+          These go to the Outbox for review. Nothing is sent until you read them there
+          and confirm.
+        </p>`,
+      footer: html`
+        <button type="button" data-close>Cancel</button>
+        <button type="submit" class="primary">Queue for review</button>`,
+      onSubmit: (data) => Number(data.template_id),
+    });
+    if (!chosen) return;
+
+    const res = await api.post('/api/gmail/queue', { template_id: chosen, lead_ids: emailable });
+    toast(`Queued ${res.queued}` + (res.skipped.length ? ` · ${res.skipped.length} skipped` : ''));
+    location.hash = '/outbox';
   });
 }

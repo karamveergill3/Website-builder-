@@ -132,6 +132,29 @@ const MIGRATIONS = [
       CREATE INDEX idx_send_queue_status ON send_queue(status);
     `,
   },
+  {
+    name: '005_run_places',
+    up: `
+      -- Which places each sweep surfaced, so a review list can show "found by
+      -- this run" without re-querying (and re-paying for) Google.
+      CREATE TABLE run_places (
+        run_id   INTEGER NOT NULL REFERENCES search_runs(id) ON DELETE CASCADE,
+        place_id TEXT    NOT NULL REFERENCES place_cache(place_id) ON DELETE CASCADE,
+        area     TEXT,
+        PRIMARY KEY (run_id, place_id)
+      );
+    `,
+  },
+  {
+    name: '006_place_cache_refreshed',
+    up: `
+      -- Google's terms cap how long most Places content may be cached; only
+      -- the place ID may be kept indefinitely. This column drives the purge
+      -- in server/lib/places.js.
+      ALTER TABLE place_cache ADD COLUMN refreshed_at TEXT;
+      UPDATE place_cache SET refreshed_at = first_seen_at;
+    `,
+  },
 ];
 
 function migrate() {

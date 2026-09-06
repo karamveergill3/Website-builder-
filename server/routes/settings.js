@@ -27,9 +27,17 @@ export const DEFAULTS = {
   optout_line: DEFAULT_OPTOUT_LINE,
 };
 
+/** Secrets live in the settings table but are never exposed through this API. */
+const SECRET_KEYS = new Set([
+  'gmail_refresh_token', 'gmail_access_token', 'gmail_token_expiry',
+]);
+
+const publicSettings = (stored) =>
+  Object.fromEntries(Object.entries(stored).filter(([k]) => !SECRET_KEYS.has(k)));
+
 router.get('/', wrap((_req, res) => {
   const stored = getSettings();
-  const settings = { ...DEFAULTS, ...stored };
+  const settings = { ...DEFAULTS, ...publicSettings(stored) };
   res.json({
     settings,
     schema: {
@@ -46,6 +54,8 @@ router.get('/', wrap((_req, res) => {
       gmail_client_configured: Boolean(
         process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET
       ),
+      gmail_connected: Boolean(stored.gmail_refresh_token),
+      gmail_email: stored.gmail_email ?? null,
     },
   });
 }));
@@ -73,7 +83,7 @@ router.put('/', wrap((req, res) => {
 
   const stored = getSettings();
   res.json({
-    settings: { ...DEFAULTS, ...stored },
+    settings: { ...DEFAULTS, ...publicSettings(stored) },
     compliance: {
       complete: missingIdentityFields(stored).length === 0,
       missing: missingIdentityFields(stored),

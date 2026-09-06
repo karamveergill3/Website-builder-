@@ -3,6 +3,8 @@ import { db, getSettings } from '../db.js';
 import { wrap, badRequest, notFound, nowIso, int, str, looksLikeEmail } from '../lib/http.js';
 import { renderTemplate, unknownPlaceholders } from '../lib/template.js';
 import { withFooter, buildFooter } from '../lib/compliance.js';
+import { sendability } from '../lib/pecr.js';
+import { isSuppressed } from '../lib/suppression.js';
 
 const router = Router();
 
@@ -16,10 +18,13 @@ export function composeFor(leadId, templateId, { requireEmail = false, requireCo
   const template = db.prepare('SELECT * FROM templates WHERE id = ?').get(templateId);
   if (!template) throw notFound('Template not found');
 
-  if (lead.opted_out === 1) {
-    throw badRequest(
-      `${lead.business_name} has opted out. Opted-out leads are excluded from all sends.`
-    );
+  // One gate for every path that can produce a sendable email.
+  const verdict = sendability(lead, { suppressed: isSuppressed(lead.email) });
+  if (!verdict.allowed && ['OPTED_OUT', 'SUPPRESSED', 'FREE_MAIL', 'INDIVIDUAL_SUBSCRIBER'].includes(verdict.code)) {
+    throw badRequest(verdict.reason);
+  }
+  if (requireEmail && !verdict.allowed) {
+    throw badRequest(verdict.reason);
   }
   if (requireEmail && !looksLikeEmail(lead.email ?? '')) {
     throw badRequest(`${lead.business_name} has no usable email address`);
@@ -46,6 +51,7 @@ export function composeFor(leadId, templateId, { requireEmail = false, requireCo
 
   return {
     lead,
+    verdict,
     template,
     subject: rendered.subject,
     // Body without the footer, plus the compliant body, so the UI can show both.
@@ -60,6 +66,7 @@ export function composeFor(leadId, templateId, { requireEmail = false, requireCo
         ? [`Unrecognised placeholder(s): ${unknownPlaceholders(template.subject, template.body).map((u) => `{{${u}}}`).join(', ')}`]
         : []),
       ...(looksLikeEmail(lead.email ?? '') ? [] : ['This lead has no email address — you can still copy the text or phone them.']),
+      ...(verdict.allowed || verdict.code === 'NO_EMAIL' ? [] : [verdict.reason]),
     ],
   };
 }
@@ -71,8 +78,8 @@ router.get('/preview', wrap((req, res) => {
   if (!leadId || !templateId) throw badRequest('lead_id and template_id are required');
 
   const c = composeFor(leadId, templateId);
-  // No draft link until the email would be compliant.
-  const mailto = c.footer.complete && looksLikeEmail(c.lead.email ?? '')
+  // No draft link until the email would be both compliant and lawful to send.
+  const mailto = c.footer.complete && c.verdict.allowed
     ? `mailto:${encodeURIComponent(c.lead.email)}` +
       `?subject=${encodeURIComponent(c.subject)}&body=${encodeURIComponent(c.body)}`
     : null;
@@ -85,8 +92,11 @@ router.get('/preview', wrap((req, res) => {
     body_without_footer: c.body_without_footer,
     footer: c.footer,
     mailto,
-    can_send: c.footer.complete && looksLikeEmail(c.lead.email ?? ''),
+    can_send: c.footer.complete && c.verdict.allowed,
     compliant: c.footer.complete,
+    lawful: c.verdict.allowed,
+    block_code: c.verdict.allowed ? null : c.verdict.code,
+    block_reason: c.verdict.reason,
     warnings: c.warnings,
   });
 }));
@@ -107,7 +117,7 @@ router.post('/log', wrap((req, res) => {
     throw badRequest('channel must be "mailto" or "copy" for manually sent email');
   }
 
-  const c = composeFor(leadId, templateId, { requireCompliance: true });
+  const c = composeFor(leadId, templateId, { requireCompliance: true, requireEmail: true });
   // Trust the client's snapshot if it edited the draft, else use the render.
   const subject = str(req.body.subject) ?? c.subject;
   const body = str(req.body.body) ?? c.body;

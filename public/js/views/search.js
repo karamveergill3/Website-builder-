@@ -136,16 +136,25 @@ export default async function searchView(root, params, { navigate }) {
     const pages = $('#pages', root).value;
     if (!areas.trim()) return;
     const e = await api.get('/api/places/estimate', { areas, pages_per_area: pages });
-    mount($('#estimate', root), html`
+    const box = $('#estimate', root);
+    box.className = `note ${e.verified_on ? 'note-info' : 'note-warn'}`;
+    mount(box, html`
       <div>
         <strong>${e.requests} billed request${e.requests === 1 ? '' : 's'}</strong>
-        — about <strong>$${e.approx_usd.toFixed(2)}</strong> at $${e.per_1000_usd}/1,000.
-        Google currently includes ${e.free_calls_per_month.toLocaleString('en-GB')} free calls
-        per SKU per month, so a sweep this size is usually free.
-        <span class="hint" style="display:block;margin-top:4px">
-          Rates checked ${e.pricing_checked} — Google reprices periodically, so confirm against
-          <a href="${e.pricing_source}" target="_blank" rel="noopener">their billing page</a>.
-        </span>
+        — roughly <strong>$${e.approx_usd.toFixed(2)}</strong> at $${e.per_1000_usd}/1,000,
+        against a free allowance of about
+        ${e.free_calls_per_month.toLocaleString('en-GB')} calls per SKU per month.
+        ${e.verified_on
+          ? html`<span class="hint" style="display:block;margin-top:4px">
+              Rates confirmed by you on ${e.verified_on}. Re-check occasionally at
+              <a href="${e.pricing_source}" target="_blank" rel="noopener">Google's billing page</a>.
+            </span>`
+          : html`<span style="display:block;margin-top:6px">
+              <strong>These rates are unverified.</strong> They are a starting figure, not a quote —
+              check the current numbers on
+              <a href="${e.pricing_source}" target="_blank" rel="noopener">Google's billing page</a>
+              and enter them under <a href="#/settings">Settings</a> before you rely on this.
+            </span>`}
       </div>`);
   };
 
@@ -178,6 +187,7 @@ async function renderRun(root, runId, navigate) {
     const data = await api.get(`/api/places/runs/${runId}`);
     const { run, candidates, summary, running } = data;
     const fresh = candidates.filter((c) => !c.is_lead);
+    const expired = data.content_available === false;
 
     mount(root, html`
       <div class="view-head">
@@ -205,7 +215,24 @@ async function renderRun(root, runId, navigate) {
           <div><strong>The search stopped early.</strong><br>${run.error}</div>
         </div>` : ''}
 
-      ${fresh.length === 0 && !running ? html`
+      ${expired ? html`
+        <div class="note note-warn" style="margin-bottom:14px">
+          <div>
+            <strong>These results have expired.</strong>
+            Google's terms let this tool keep a place ID but not the business names, addresses or
+            phone numbers behind it, so those are held in memory for
+            ${data.content_ttl_minutes} minutes and then gone. This run still knows that
+            ${summary.candidates} place(s) had no website — run the search again to see who they are.
+          </div>
+        </div>` : ''}
+
+      ${expired ? html`
+        <div class="card"><div class="empty">
+          <h3>Nothing left to review here</h3>
+          <p>Run the same search again to bring the details back.</p>
+          <p style="margin-top:14px"><button class="primary" data-act="back">← New search</button></p>
+        </div></div>`
+        : fresh.length === 0 && !running ? html`
         <div class="card"><div class="empty">
           <h3>No new candidates</h3>
           <p>${summary.candidates > 0
@@ -244,8 +271,10 @@ async function renderRun(root, runId, navigate) {
           </table></div>
         </div>
         <p class="hint" style="margin-top:10px">
-          Google returns no website for these. Phone numbers come straight from the listing —
+          Google returns no website for these. Phone numbers come straight from the listing;
           email addresses it does not hold, so you will need to find those or ring them.
+          Details shown here are held in memory for ${data.content_ttl_minutes} minutes and are
+          never written to your database — only the place ID is.
         </p>`}
     `);
 

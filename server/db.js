@@ -155,6 +155,62 @@ const MIGRATIONS = [
       UPDATE place_cache SET refreshed_at = first_seen_at;
     `,
   },
+  {
+    name: '007_pecr_entity_and_suppression',
+    up: `
+      -- PECR reg 22 turns on the recipient's LEGAL FORM, not on whether the
+      -- address looks like a business one. Corporate subscribers (Ltd, PLC,
+      -- LLP, Scottish partnerships, CICs, public bodies) may be cold-emailed
+      -- without consent; sole traders and ordinary partnerships may not.
+      -- Everything starts 'unknown' and is blocked until positively classified.
+      ALTER TABLE leads ADD COLUMN entity_type TEXT NOT NULL DEFAULT 'unknown';
+      ALTER TABLE leads ADD COLUMN company_number TEXT;
+      ALTER TABLE leads ADD COLUMN entity_note TEXT;
+
+      -- The ICO's position on opt-out is suppress, do not delete: a deleted
+      -- record just gets re-scraped and re-mailed. This list outlives the lead.
+      CREATE TABLE suppression_list (
+        email         TEXT PRIMARY KEY,
+        business_name TEXT,
+        reason        TEXT NOT NULL,
+        added_at      TEXT NOT NULL
+      );
+    `,
+  },
+  {
+    name: '008_places_content_not_persisted',
+    up: `
+      -- Google Maps Platform ToS 3.2.3(a)(iii) names "copy and save business
+      -- names, addresses" as a prohibited example of scraping, and 3.2.3(b)
+      -- forbids caching Maps Content except where the Service Specific Terms
+      -- allow it. The only durable permission is for the place ID itself
+      -- (SST A.3); lat/lng gets 30 days (SST 14.3) and we do not request it.
+      --
+      -- So place_cache keeps IDs and the derived has-a-website flag, and
+      -- nothing that came out of the listing. Candidate names, addresses and
+      -- phone numbers live in memory for the length of a review session only.
+      CREATE TABLE place_cache_new (
+        place_id      TEXT PRIMARY KEY,
+        has_website   INTEGER NOT NULL CHECK (has_website IN (0,1)),
+        imported      INTEGER NOT NULL DEFAULT 0 CHECK (imported IN (0,1)),
+        first_seen_at TEXT NOT NULL,
+        refreshed_at  TEXT,
+        query_text    TEXT
+      );
+      INSERT INTO place_cache_new (place_id, has_website, imported, first_seen_at, refreshed_at, query_text)
+        SELECT place_id, has_website, imported, first_seen_at, refreshed_at, query_text FROM place_cache;
+      DROP TABLE place_cache;
+      ALTER TABLE place_cache_new RENAME TO place_cache;
+      CREATE INDEX idx_place_cache_seen ON place_cache(first_seen_at DESC);
+
+      -- Track which lead fields came from a Places listing, so the retention
+      -- panel can say exactly what is affected and purge only that.
+      ALTER TABLE leads ADD COLUMN details_source TEXT;
+      ALTER TABLE leads ADD COLUMN details_imported_at TEXT;
+      UPDATE leads SET details_source = 'google_places', details_imported_at = created_at
+        WHERE source = 'Google Places';
+    `,
+  },
 ];
 
 function migrate() {

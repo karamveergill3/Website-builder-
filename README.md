@@ -20,7 +20,7 @@ The database is created automatically at `data/prospect-book.db` on first run.
 There is nothing else to set up for the lead tracker.
 
 Before you can produce an email, fill in **Settings → Your business details**.
-Sending is deliberately blocked until you do — see [Compliance](#compliance).
+Sending is deliberately blocked until you do — see [Compliance](#compliance--read-this-before-sending-anything).
 
 ---
 
@@ -40,7 +40,8 @@ Each phase works on its own. Phase 1 is useful with no API keys at all.
 
 **Leads** — every business you're tracking. Filter by status with the pills,
 search across name, town and notes, and watch the stat tiles across the top:
-total, awaiting reply, replied, won, and how many are actually emailable.
+total, awaiting reply, replied, won, and how many can lawfully be emailed.
+Select several to change status or queue emails in one go.
 
 Statuses run `new → sent → replied → won / lost`. Marking a lead `sent` by hand
 stamps the contact date for you.
@@ -68,25 +69,81 @@ rewrite history, and deleting a lead does not erase the proof.
 
 ---
 
-## Compliance
+## Phase 2 — finding leads
 
-Cold emailing UK businesses is legal in specific circumstances and unlawful in
-others. The rules are set out in full, with sources, in
-[`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) — **read it before you send anything.**
+Search a category across as many towns as you paste in. There is no fixed
+location bias: the sweep goes wherever you point it.
 
-What the software enforces for you:
+`websiteUri` is requested on the Text Search call itself, so **one billed
+request covers a page of up to 20 businesses** rather than one Place Details
+call each. A business becomes a candidate only when Google returns no website
+for it, candidates always land in a checkbox review list, and nothing is ever
+imported without you ticking it.
 
-- **No email is produced without your identity block.** Your name, trading name,
-  postal address and contact email are appended to every email. Until those four
-  are filled in, Compose is blocked, the mail-app draft link is withheld, and the
-  API refuses to log a send.
-- **Every email carries a one-line opt-out.** Editable, but it cannot be removed.
-- **Opted-out leads are hard-excluded.** Setting `opted_out` on a lead blocks it
-  from preview, from logging, and from the Gmail queue. There is no override.
+Every place ID ever seen is remembered, so re-sweeping the same town costs
+almost nothing and never re-imports what you already have.
 
-What it can't do for you: judging whether a given business is one you're allowed
-to email without consent. `docs/COMPLIANCE.md` explains the distinction that
-matters (limited companies and LLPs vs sole traders and partnerships).
+Setup, costs, storage rules and error handling:
+[`docs/PHASE2-PLACES.md`](docs/PHASE2-PLACES.md).
+
+## Phase 3 — sending
+
+Queue emails from Compose or straight from the lead list. The Outbox shows each
+one in full — real recipient, real subject, real body — and one explicit
+confirmation sends them, spaced at a randomised interval under a daily cap.
+
+Before *each individual* send the tool re-checks opt-out, suppression,
+classification and your footer, so anything that changed since you reviewed is
+still honoured. Successes are logged with their Gmail message ID; failures are
+recorded against the queue item and never appear as sent.
+
+Setup, send rates and the account risk:
+[`docs/PHASE3-GMAIL.md`](docs/PHASE3-GMAIL.md).
+
+---
+
+## Compliance — read this before sending anything
+
+Two things constrain this tool that are not preferences, and the software
+enforces both rather than reminding you about them.
+
+### You may not cold-email most small businesses
+
+Under PECR regulation 22 you may send unsolicited marketing email to **corporate
+subscribers** — limited companies, PLCs, LLPs, CICs — but **not** to sole
+traders, ordinary partnerships, or any personal mailbox. Most small trades are
+sole traders, so **expect a large share of any Places sweep to be unsendable.**
+That is the filter working.
+
+So every lead starts blocked, and to unblock one you must record its **company
+number**. A trading name ending in "Ltd" is not evidence: Google shows trading
+names, which routinely differ from registered names.
+
+Also enforced: no email is produced without your full identity block and an
+opt-out line; opted-out addresses go on a suppression list that outlives the
+lead; and every guard is re-checked immediately before each individual send.
+
+Full detail, with sources and an honest note on what could not be verified:
+**[`docs/COMPLIANCE.md`](docs/COMPLIANCE.md)**, or the **Rules** screen in the app.
+
+### Google will not let you keep most of what Places returns
+
+Maps Platform ToS §3.2.3 permits storing a **place ID**, and names *"copy and
+save business names, addresses"* as a prohibited example of scraping. So this
+tool stores place IDs and a has-a-website flag, and holds names, addresses and
+phone numbers **in memory for one review session only**.
+
+Anything you mean to keep long-term should come from a source you may store —
+Companies House, or the business itself. Since you have to check Companies House
+anyway to classify a lead, that is usually the same piece of work.
+See [`docs/PHASE2-PLACES.md`](docs/PHASE2-PLACES.md).
+
+### Sending from a personal Gmail is riskier than it looks
+
+Gmail's programme policies prohibit unsolicited commercial mail with no volume
+exemption, and the stated sanction includes disabling the Google Account.
+Don't use your main personal account.
+See [`docs/PHASE3-GMAIL.md`](docs/PHASE3-GMAIL.md).
 
 ---
 
@@ -117,12 +174,15 @@ data/               SQLite file (gitignored)
 
 - **leads** — `business_name`, `category`, `location`, `phone`, `email`,
   `google_place_id` (unique, nullable), `status`, `notes`, `source`,
-  `opted_out`, `created_at`, `last_contacted_at`
+  `opted_out`, `created_at`, `last_contacted_at`, plus `entity_type`,
+  `company_number` and `entity_note` for the PECR classification gate
 - **templates** — `name` (unique), `subject`, `body`
 - **email_log** — `lead_id`, `template_id`, `lead_name`, `to_email`,
   `subject_snapshot`, `body_snapshot`, `sent_at`, `channel`, `provider_message_id`
-- **place_cache** — every Google `place_id` ever resolved, so no place is ever
-  paid for twice
+- **place_cache** — every Google `place_id` ever resolved and whether it had a
+  website, so no place is paid for twice. Deliberately holds **no** listing
+  content — see the compliance note above
+- **suppression_list** — opted-out addresses, normalised, outliving the lead
 - **settings**, **search_runs**, **send_queue** — supporting tables for Phases 2–3
 
 Migrations in `server/db.js` are append-only: add a new one rather than editing
@@ -145,5 +205,9 @@ sqlite3 data/prospect-book.db ".backup 'backup.db'"
 npm test
 ```
 
-Covers placeholder rendering, lead and template CRUD with validation, stats,
-the compliance gate, opt-out exclusion, and log-snapshot immutability.
+72 tests covering placeholder rendering, lead and template CRUD with
+validation, stats, the PECR classification gate, suppression across lead
+deletion, log-snapshot immutability, the Places field mask and dedupe, Google's
+error-reason handling, the review-then-send confirmation, the daily cap, and
+header-injection resistance in message building. The Places and Gmail suites run
+against stubbed APIs, so they never spend money or need credentials.

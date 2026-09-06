@@ -45,15 +45,25 @@ const connectGmail = () => {
 /** Decode the base64url RFC 5322 message the route handed to Gmail. */
 const decode = (raw) => Buffer.from(raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
 
-async function seed({ name, email = 'a@b.example', opted_out = false } = {}) {
-  const lead = (await post('/api/leads', { business_name: name, email, opted_out, category: 'roofers', location: 'Leeds' })).body.lead;
+/**
+ * A lead that may lawfully be emailed. entity_type defaults to 'corporate'
+ * because an unclassified lead is blocked by the PECR gate by design; tests
+ * that care about the gate override it.
+ */
+async function seed({ name, email = 'a@b.example', opted_out = false,
+                      entity_type = 'corporate' } = {}) {
+  const lead = (await post('/api/leads', {
+    business_name: name, email, opted_out, entity_type,
+    company_number: entity_type === 'corporate' ? '01234567' : null,
+    category: 'roofers', location: 'Leeds',
+  })).body.lead;
   return lead;
 }
 
 let templateId;
 test('setup: identity and a template', async () => {
   stubGoogle();
-  await put('/api/settings', { ...IDENTITY, send_delay_seconds: '0', daily_cap: '50' });
+  await put('/api/settings', { ...IDENTITY, send_delay_min_seconds: '0', send_delay_max_seconds: '0', daily_cap: '50' });
   const t = await post('/api/templates', { name: 'Cold', subject: 'A website for {{business}}?', body: 'Hi there.' });
   templateId = t.body.template.id;
 });
@@ -213,7 +223,7 @@ test('the daily cap stops sending and leaves the rest queued', async () => {
   connectGmail();
   // Earlier tests have already sent today, so set the cap relative to that.
   const usedSoFar = (await get('/api/gmail/status')).body.daily.used;
-  await put('/api/settings', { daily_cap: String(usedSoFar + 2), send_delay_seconds: '0' });
+  await put('/api/settings', { daily_cap: String(usedSoFar + 2), send_delay_min_seconds: '0', send_delay_max_seconds: '0' });
 
   const leads = [];
   for (const n of ['Cap One', 'Cap Two', 'Cap Three', 'Cap Four']) {

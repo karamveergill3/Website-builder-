@@ -77,13 +77,71 @@ export default async function settingsView(root, _p, { refresh }) {
             <div class="field">
               <label for="s-daily_cap">Daily send cap</label>
               <input id="s-daily_cap" name="daily_cap" type="number" min="1" max="500" value="${s.daily_cap}">
-              <p class="hint">Hard stop on emails sent per calendar day.</p>
+              <p class="hint">
+                A hard stop this tool enforces. Gmail applies its own, much larger, daily limit
+                on top — but hitting that is not the risk. Sending a lot of unsolicited mail from
+                a personal account is what gets it rate-limited or suspended, so keep this low.
+              </p>
             </div>
             <div class="field">
-              <label for="s-send_delay_seconds">Delay between sends (seconds)</label>
-              <input id="s-send_delay_seconds" name="send_delay_seconds" type="number" min="0" max="3600"
-                     value="${s.send_delay_seconds}">
-              <p class="hint">Spacing sends out looks less like a blast to spam filters.</p>
+              <label for="s-send_delay_min_seconds">Gap between sends — from (seconds)</label>
+              <input id="s-send_delay_min_seconds" name="send_delay_min_seconds"
+                     type="number" min="0" max="3600" value="${s.send_delay_min_seconds}">
+            </div>
+            <div class="field">
+              <label for="s-send_delay_max_seconds">…to (seconds)</label>
+              <input id="s-send_delay_max_seconds" name="send_delay_max_seconds"
+                     type="number" min="0" max="3600" value="${s.send_delay_max_seconds}">
+              <p class="hint">
+                Each gap is picked at random between these two. A fixed interval is the clearest
+                signal that a program rather than a person is sending, so don't set them equal.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Places pricing</h3></div>
+        <div class="card-body">
+          <div class="note ${s.places_pricing_verified_on ? 'note-info' : 'note-warn'}"
+               style="margin-bottom:16px">
+            <div>
+              ${s.places_pricing_verified_on
+                ? html`You confirmed these against Google on <strong>${s.places_pricing_verified_on}</strong>.`
+                : html`<strong>These figures have not been checked.</strong> They are a plausible
+                       starting point, not a quote — the cost estimate on Find leads will say so
+                       until you confirm them.`}
+              Google reprices Maps Platform from time to time, so read the current numbers on
+              <a href="https://developers.google.com/maps/documentation/places/web-service/usage-and-billing"
+                 target="_blank" rel="noopener">Google's usage and billing page</a>,
+              enter them here, and put today's date in the last box.
+            </div>
+          </div>
+          <div class="grid3">
+            <div class="field">
+              <label for="s-places_text_search_per_1000">Text Search, USD per 1,000</label>
+              <input id="s-places_text_search_per_1000" name="places_text_search_per_1000"
+                     type="text" value="${s.places_text_search_per_1000 ?? '35'}">
+              <p class="hint">The tier that includes websiteUri.</p>
+            </div>
+            <div class="field">
+              <label for="s-places_details_per_1000">Place Details, USD per 1,000</label>
+              <input id="s-places_details_per_1000" name="places_details_per_1000"
+                     type="text" value="${s.places_details_per_1000 ?? '20'}">
+              <p class="hint">Only used by the optional verification pass.</p>
+            </div>
+            <div class="field">
+              <label for="s-places_free_calls_per_month">Free calls per SKU per month</label>
+              <input id="s-places_free_calls_per_month" name="places_free_calls_per_month"
+                     type="text" value="${s.places_free_calls_per_month ?? '5000'}">
+            </div>
+            <div class="field">
+              <label for="s-places_pricing_verified_on">I checked these on</label>
+              <input id="s-places_pricing_verified_on" name="places_pricing_verified_on"
+                     type="text" placeholder="2026-09-06"
+                     value="${s.places_pricing_verified_on ?? ''}">
+              <p class="hint">Leave blank until you actually have.</p>
             </div>
           </div>
         </div>

@@ -3,6 +3,8 @@ import { db } from '../db.js';
 import {
   wrap, badRequest, notFound, conflict, nowIso, str, requiredStr, bool, int, looksLikeEmail,
 } from '../lib/http.js';
+import { ENTITY_TYPES, sendability, looksCorporate } from '../lib/pecr.js';
+import { isSuppressed, suppress } from '../lib/suppression.js';
 
 export const STATUSES = ['new', 'sent', 'replied', 'won', 'lost'];
 
@@ -15,8 +17,24 @@ const SORTS = {
   contacted:'last_contacted_at DESC NULLS LAST, id DESC',
 };
 
-/** Shape a DB row for the client: SQLite has no booleans. */
-const toApi = (row) => (row ? { ...row, opted_out: row.opted_out === 1 } : row);
+/**
+ * Shape a DB row for the client: SQLite has no booleans, and every lead
+ * carries the verdict on whether it may lawfully be emailed.
+ */
+function toApi(row) {
+  if (!row) return row;
+  const suppressed = isSuppressed(row.email);
+  const verdict = sendability(row, { suppressed });
+  return {
+    ...row,
+    opted_out: row.opted_out === 1,
+    suppressed,
+    can_email: verdict.allowed,
+    block_code: verdict.allowed ? null : verdict.code,
+    block_reason: verdict.reason,
+    looks_corporate: looksCorporate(row.business_name),
+  };
+}
 
 function parseLeadBody(body, { partial = false } = {}) {
   const out = {};
@@ -25,8 +43,16 @@ function parseLeadBody(body, { partial = false } = {}) {
   if (!partial || has('business_name')) {
     out.business_name = requiredStr(body.business_name, 'business_name');
   }
-  for (const f of ['category', 'location', 'phone', 'notes', 'source', 'google_place_id']) {
+  for (const f of ['category', 'location', 'phone', 'notes', 'source',
+                   'google_place_id', 'company_number', 'entity_note']) {
     if (!partial || has(f)) out[f] = str(body[f]);
+  }
+  if (!partial || has('entity_type')) {
+    const et = str(body.entity_type) ?? 'unknown';
+    if (!ENTITY_TYPES.includes(et)) {
+      throw badRequest(`entity_type must be one of: ${ENTITY_TYPES.join(', ')}`);
+    }
+    out.entity_type = et;
   }
   if (!partial || has('email')) {
     const email = str(body.email);
@@ -46,6 +72,32 @@ function parseLeadBody(body, { partial = false } = {}) {
   if (has('last_contacted_at')) out.last_contacted_at = str(body.last_contacted_at);
 
   return out;
+}
+
+/**
+ * A trading name ending in "Ltd" is not evidence of incorporation. Google shows
+ * TRADING names, which routinely differ from registered names, and the PECR
+ * "subscriber" is whoever contracts for the communications service -- not
+ * whoever the map listing names. So classifying a lead as a corporate
+ * subscriber requires a company number on the record: "the listing said Ltd"
+ * is not an answer to "how did you know they were a corporate subscriber?".
+ */
+function requireCorporateEvidence(next) {
+  if (next.entity_type !== 'corporate') return;
+  const number = (next.company_number ?? '').replace(/\s+/g, '');
+  if (!number) {
+    throw badRequest(
+      'To mark a lead as a limited company you must record its company number. ' +
+      'Look the business up on the Companies House register — a trading name ' +
+      'ending in "Ltd" is not evidence of incorporation.'
+    );
+  }
+  if (!/^[A-Z0-9]{6,10}$/i.test(number)) {
+    throw badRequest(
+      `"${next.company_number}" does not look like a company number. UK company ` +
+      'numbers are 8 characters, for example 01234567 or SC123456.'
+    );
+  }
 }
 
 /** GET /api/leads — filter by status, free-text search, sort. */
@@ -105,9 +157,16 @@ router.get('/stats', wrap((_req, res) => {
     new:            byStatus.new,
     by_status:      byStatus,
     opted_out:      one('SELECT COUNT(*) n FROM leads WHERE opted_out = 1'),
-    emailable:      one(`SELECT COUNT(*) n FROM leads
-                         WHERE opted_out = 0 AND email IS NOT NULL AND email <> ''`),
     no_email:       one("SELECT COUNT(*) n FROM leads WHERE email IS NULL OR email = ''"),
+    // "Emailable" means lawfully emailable, not merely "has an address".
+    emailable:      db.prepare('SELECT * FROM leads').all()
+                      .filter((l) => sendability(l, { suppressed: isSuppressed(l.email) }).allowed).length,
+    unclassified:   one(`SELECT COUNT(*) n FROM leads
+                         WHERE entity_type = 'unknown' AND opted_out = 0
+                           AND email IS NOT NULL AND email <> ''`),
+    corporate:      one("SELECT COUNT(*) n FROM leads WHERE entity_type = 'corporate'"),
+    individual:     one("SELECT COUNT(*) n FROM leads WHERE entity_type = 'individual'"),
+    suppressed:     one('SELECT COUNT(*) n FROM suppression_list'),
   });
 }));
 
@@ -122,6 +181,7 @@ router.get('/:id', wrap((req, res) => {
 
 router.post('/', wrap((req, res) => {
   const lead = parseLeadBody(req.body);
+  requireCorporateEvidence(lead);
   lead.created_at = nowIso();
   lead.last_contacted_at = lead.last_contacted_at ?? null;
 
@@ -148,6 +208,7 @@ router.patch('/:id', wrap((req, res) => {
 
   const patch = parseLeadBody(req.body, { partial: true });
   if (Object.keys(patch).length === 0) return res.json({ lead: toApi(existing) });
+  requireCorporateEvidence({ ...existing, ...patch });
 
   // Moving a lead to "sent" by hand should stamp the contact date, unless the
   // caller set one explicitly.
@@ -157,6 +218,15 @@ router.patch('/:id', wrap((req, res) => {
 
   db.prepare(`UPDATE leads SET ${Object.keys(patch).map((c) => `${c} = @${c}`).join(', ')}
               WHERE id = @id`).run({ ...patch, id: existing.id });
+
+  // An opt-out is recorded against the address, not just the row, so deleting
+  // or re-importing the lead cannot resurrect it as a target.
+  if (patch.opted_out === 1) {
+    suppress(patch.email ?? existing.email, {
+      businessName: patch.business_name ?? existing.business_name,
+      reason: 'marked opted out',
+    });
+  }
 
   res.json({ lead: toApi(db.prepare('SELECT * FROM leads WHERE id = ?').get(existing.id)) });
 }));

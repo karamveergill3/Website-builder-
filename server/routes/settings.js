@@ -4,6 +4,7 @@ import { wrap, badRequest, looksLikeEmail } from '../lib/http.js';
 import {
   buildFooter, missingIdentityFields, REQUIRED_IDENTITY_FIELDS,
   OPTIONAL_IDENTITY_FIELDS, DEFAULT_OPTOUT_LINE,
+  DEFAULT_MARKETING_LINE, DEFAULT_SOURCE_LINE,
 } from '../lib/compliance.js';
 
 const router = Router();
@@ -13,18 +14,28 @@ export const ALLOWED_KEYS = new Set([
   // Identity block that appears in every email
   'biz_contact_name', 'biz_name', 'biz_address', 'biz_email',
   'biz_phone', 'biz_website', 'biz_company_number', 'biz_vat_number',
-  'optout_line', 'optout_email',
+  'optout_line', 'optout_email', 'marketing_line', 'source_line',
+  'biz_place_of_registration',
   // Sending guard-rails (Phase 3)
-  'daily_cap', 'send_delay_seconds',
+  'daily_cap', 'send_delay_seconds', 'send_delay_min_seconds', 'send_delay_max_seconds',
   // Lead search defaults (Phase 2)
   'default_areas', 'default_region_code',
+  // Places pricing, so Google's repricing does not need a code change
+  'places_text_search_per_1000', 'places_details_per_1000',
+  'places_free_calls_per_month', 'places_pricing_verified_on',
 ]);
 
 export const DEFAULTS = {
-  daily_cap: '20',
-  send_delay_seconds: '45',
+  // 25/day is roughly 5% of Gmail's technical 500/day ceiling. The binding
+  // constraint is not that ceiling but abuse detection, which has no volume
+  // threshold at all -- see docs/PHASE3-GMAIL.md.
+  daily_cap: '25',
+  send_delay_min_seconds: '120',
+  send_delay_max_seconds: '420',
   default_region_code: 'GB',
   optout_line: DEFAULT_OPTOUT_LINE,
+  marketing_line: DEFAULT_MARKETING_LINE,
+  source_line: DEFAULT_SOURCE_LINE,
 };
 
 /** Secrets live in the settings table but are never exposed through this API. */
@@ -71,7 +82,12 @@ router.put('/', wrap((req, res) => {
   if (body.optout_email && !looksLikeEmail(body.optout_email)) {
     throw badRequest('Opt-out email address does not look valid');
   }
-  for (const [key, min, max] of [['daily_cap', 1, 500], ['send_delay_seconds', 0, 3600]]) {
+  for (const [key, min, max] of [
+    ['daily_cap', 1, 500],
+    ['send_delay_seconds', 0, 3600],
+    ['send_delay_min_seconds', 0, 3600],
+    ['send_delay_max_seconds', 0, 3600],
+  ]) {
     if (body[key] === undefined || body[key] === '') continue;
     const n = Number(body[key]);
     if (!Number.isFinite(n) || n < min || n > max) {

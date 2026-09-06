@@ -46,16 +46,38 @@ export default async function outboxView(root, _params, { refresh, navigate }) {
         <h2>Outbox</h2>
         <p class="lede">Send reviewed emails through your own Gmail account.</p>
       </div></div>
-      <div class="card"><div class="card-body" style="text-align:center;padding:46px 20px">
-        <h3 style="margin-bottom:8px">Connect your Gmail</h3>
-        <p class="hint" style="max-width:46ch;margin:0 auto 18px">
-          You will be sent to Google to authorise this app. It asks only for permission to
-          <strong>send</strong> mail — it cannot read your inbox, and it never sends anything
-          you have not confirmed on this screen.
-        </p>
-        <button class="primary" data-act="connect">Connect Gmail</button>
-        <p class="hint" style="margin-top:14px">Scopes requested: <code class="mono">${status.scopes.join(' ')}</code></p>
-      </div></div>`);
+      <div class="card">
+        <div class="card-body">
+          <div class="note note-danger" style="margin-bottom:18px"><div>
+            <strong>Read this before you connect.</strong>
+            Gmail's own programme policies say not to use Gmail to send unsolicited commercial
+            mail, and there is no volume below which that stops applying. Google's stated
+            sanction for a policy breach includes disabling the Google Account — on a personal
+            @gmail.com that means losing the mailbox itself, along with Drive and Photos.
+            <ul>
+              <li>Do not connect your main personal account. Use a separate one.</li>
+              <li>Keep volumes low and the mail genuinely relevant.</li>
+              <li>At any real volume, a proper email service on your own domain is the right
+                  tool — and it still does not exempt you from
+                  <a href="#/compliance">UK PECR</a>.</li>
+            </ul>
+            The full reasoning is in <code class="mono">docs/PHASE3-GMAIL.md</code>.
+          </div></div>
+
+          <div style="text-align:center;padding:10px 0 20px">
+            <h3 style="margin-bottom:8px">Connect your Gmail</h3>
+            <p class="hint" style="max-width:48ch;margin:0 auto 18px">
+              You will be sent to Google to authorise this app. It asks only for permission to
+              <strong>send</strong> mail — it cannot read your inbox, and it never sends
+              anything you have not confirmed on this screen.
+            </p>
+            <button class="primary" data-act="connect">Connect Gmail</button>
+            <p class="hint" style="margin-top:14px">
+              Scopes requested: <code class="mono">${status.scopes.join(' ')}</code>
+            </p>
+          </div>
+        </div>
+      </div>`);
 
     on(root, 'click', '[data-act="connect"]', async () => {
       const { url } = await api.get('/api/gmail/connect');
@@ -79,7 +101,8 @@ export default async function outboxView(root, _params, { refresh, navigate }) {
           <h2>Outbox</h2>
           <p class="lede">
             Sending as <strong>${data.email ?? 'your Gmail account'}</strong> ·
-            ${used} of ${cap} sent today · one email every ${data.delay_seconds}s.
+            ${used} of ${cap} sent today · one email every
+            ${data.delay_min_seconds}–${data.delay_max_seconds}s, at random.
           </p>
         </div>
         <div class="spacer"></div>
@@ -92,7 +115,7 @@ export default async function outboxView(root, _params, { refresh, navigate }) {
             <span class="spinner"></span>
             &nbsp;<strong>Sending ${run.done} of ${run.total}</strong> —
             ${run.sent} sent, ${run.failed} failed, ${run.skipped} skipped.
-            Next in up to ${run.delay_seconds}s.
+            Next in up to ${run.delay_max_seconds}s.
           </div>
           <button class="tiny danger" data-act="cancel">Stop</button>
         </div>` : run?.finished_at ? html`
@@ -228,8 +251,9 @@ export default async function outboxView(root, _params, { refresh, navigate }) {
         wide: true,
         body: html`
           <div class="note note-warn" style="margin-bottom:14px"><div>
-            This sends real email from <strong>${data.email}</strong>, one every
-            ${data.delay_seconds} seconds. It cannot be undone once a message leaves.
+            This sends real email from <strong>${data.email}</strong>, spaced
+            ${data.delay_min_seconds}–${data.delay_max_seconds} seconds apart.
+            It cannot be undone once a message has left.
           </div></div>
           <p style="margin-top:0">Going to:</p>
           <div class="table-scroll" style="max-height:280px;overflow-y:auto">

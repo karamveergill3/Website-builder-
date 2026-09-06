@@ -28,7 +28,9 @@ export default async function composeView(root, params, { navigate }) {
     api.settings.get(),
   ]);
 
-  const sendable = leads.filter((l) => !l.opted_out);
+  // Opted-out and suppressed leads are hidden entirely; leads blocked for a
+  // fixable reason (not yet classified) still appear so the block is visible.
+  const sendable = leads.filter((l) => !l.opted_out && l.block_code !== 'SUPPRESSED');
   const leadId = params.lead ?? sendable[0]?.id ?? '';
   const templateId = params.template ?? templates[0]?.id ?? '';
 
@@ -118,7 +120,7 @@ export default async function composeView(root, params, { navigate }) {
 
     mount(box, html`
       ${data.warnings.map((w) => html`
-        <div class="note ${w.includes('blocked') || w.includes('incomplete') ? 'note-danger' : 'note-warn'}"
+        <div class="note ${w.includes('blocked') || w.includes('incomplete') || w.includes('PECR') ? 'note-danger' : 'note-warn'}"
              style="margin-bottom:12px"><div>${w}</div></div>`)}
 
       <div class="card">
@@ -137,21 +139,25 @@ export default async function composeView(root, params, { navigate }) {
           </div>
 
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;align-items:center">
-            <button data-act="copy" ${data.compliant ? '' : 'disabled'}>Copy email</button>
+            <button data-act="copy" ${data.compliant && data.lawful ? '' : 'disabled'}>Copy email</button>
             ${!data.compliant ? html`
               <a class="btn" href="#/settings">Fill in your business details</a>`
+              : !data.lawful ? html`
+                <a class="btn" href="#/leads">Set this lead's legal form</a>`
               : data.mailto ? html`
                 <a class="btn" href="${data.mailto}" data-act="mailto">Open in mail app</a>` : html`
                 <span class="hint">Add an email address to this lead to draft a message.</span>`}
             ${gmailReady && data.can_send ? html`
               <button class="primary" data-act="queue">Queue for Gmail</button>` : ''}
             <div style="flex:1"></div>
-            <button class="tiny" data-act="mark-sent" ${data.compliant ? '' : 'disabled'}>Mark as sent</button>
+            <button class="tiny" data-act="mark-sent" ${data.compliant && data.lawful ? '' : 'disabled'}>Mark as sent</button>
           </div>
           <p class="hint" style="margin-top:9px">
-            ${data.compliant
-              ? '\u201cCopy\u201d and \u201cOpen in mail app\u201d hand the text to you \u2014 nothing is sent from here. Logging happens automatically so the sent log stays an accurate record.'
-              : 'Blocked until your business details are set: every marketing email must identify you and offer a way to opt out.'}
+            ${!data.compliant
+              ? 'Blocked until your business details are set: every marketing email must identify you and offer a way to opt out.'
+              : !data.lawful
+                ? data.block_reason
+                : '\u201cCopy\u201d and \u201cOpen in mail app\u201d hand the text to you \u2014 nothing is sent from here. Logging happens automatically so the sent log stays an accurate record.'}
           </p>
         </div>
       </div>`);

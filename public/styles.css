@@ -343,5 +343,12 @@ textarea.body-editor { font-family: var(--mono); font-size: .84rem; min-height: 
 
 .table-scroll { overflow-x: auto; }
 
-.ledger td:first-child { min-width: 200px; }
-.ledger td:first-child .sub { display: block; }
+/* The [hidden] attribute must beat any display rule a component sets. */
+[hidden] { display: none !important; }
+
+/* Column widths: checkbox tight, business name roomy, actions never clipped. */
+.ledger td.pick-cell, .ledger th.pick-cell { width: 30px; padding-right: 0; }
+.ledger td.biz-cell { min-width: 210px; }
+.ledger td.biz-cell .sub { display: block; }
+.ledger td.act-cell { width: 1%; white-space: nowrap; }
+.ledger th, .ledger td { padding-left: 11px; padding-right: 11px; }

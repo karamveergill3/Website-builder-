@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 process.env.GOOGLE_MAPS_API_KEY = 'test-key-not-real';
 
-const { get, post, del, teardown } = await import('./helpers.js');
+const { get, post, patch, del, teardown } = await import('./helpers.js');
 
 test.after(teardown);
 
@@ -201,16 +201,78 @@ test('a multi-area sweep queries each area separately', async () => {
   assert.deepEqual(data.candidates.map((c) => c.area).sort(), ['Hull', 'Leeds', 'York']);
 });
 
+/** Google's real error envelope: the machine-readable reason is an ErrorInfo. */
+const googleError = (code, status, message, reason) => ({
+  status: code,
+  body: {
+    error: {
+      code, status, message,
+      ...(reason ? {
+        details: [
+          { '@type': 'type.googleapis.com/google.rpc.LocalizedMessage', locale: 'en-US', message },
+          { '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+            reason, domain: 'googleapis.com', metadata: { service: 'places.googleapis.com' } },
+        ],
+      } : {}),
+    },
+  },
+});
+
 test('an API error is recorded on the run rather than lost', async () => {
   stubPlaces();
-  nextResponses = [{
-    status: 403,
-    body: { error: { message: 'Places API (New) has not been used in project 123 before or it is disabled.' } },
-  }];
+  nextResponses = [googleError(403, 'PERMISSION_DENIED',
+    'Places API (New) has not been used in project 123 before or it is disabled.',
+    'SERVICE_DISABLED')];
   const start = await post('/api/places/search', { category: 'roofers', areas: 'Leeds' });
   const data = await waitForRun(start.body.run.id);
   assert.match(data.run.error, /API_NOT_ENABLED/);
   assert.match(data.run.error, /not enabled/i);
+});
+
+test('each Google error reason maps to advice you can act on', async () => {
+  const cases = [
+    [googleError(400, 'INVALID_ARGUMENT', 'API key not valid.', 'API_KEY_INVALID'),
+     /KEY_INVALID/],
+    [googleError(403, 'PERMISSION_DENIED', 'Billing is disabled.', 'BILLING_DISABLED'),
+     /BILLING_DISABLED.*billing/is],
+    [googleError(403, 'PERMISSION_DENIED', 'Blocked.', 'API_KEY_SERVICE_BLOCKED'),
+     /API restrictions/i],
+    [googleError(403, 'PERMISSION_DENIED', 'Referer blocked.', 'API_KEY_HTTP_REFERRER_BLOCKED'),
+     /referrer restriction/i],
+    // A 403 with no ErrorInfo at all is specifically "no key was sent".
+    [{ status: 403, body: { error: { code: 403, status: 'PERMISSION_DENIED',
+        message: "Method doesn't allow unregistered callers" } } },
+     /NO_API_KEY/],
+  ];
+
+  for (const [response, expected] of cases) {
+    stubPlaces();
+    nextResponses = [response];
+    const start = await post('/api/places/search', { category: 'roofers', areas: 'Leeds' });
+    const data = await waitForRun(start.body.run.id);
+    assert.match(data.run.error, expected);
+  }
+});
+
+test('a rate limit is retried, an exhausted quota is not', async () => {
+  stubPlaces();
+  // Three 429s in a row: the client retries twice, then gives up.
+  nextResponses = [
+    googleError(429, 'RESOURCE_EXHAUSTED', 'Quota exceeded.', 'RATE_LIMIT_EXCEEDED'),
+    googleError(429, 'RESOURCE_EXHAUSTED', 'Quota exceeded.', 'RATE_LIMIT_EXCEEDED'),
+    googleError(429, 'RESOURCE_EXHAUSTED', 'Quota exceeded.', 'RATE_LIMIT_EXCEEDED'),
+  ];
+  let start = await post('/api/places/search', { category: 'roofers', areas: 'Leeds' });
+  let data = await waitForRun(start.body.run.id);
+  assert.match(data.run.error, /RATE_LIMITED/);
+  assert.equal(calls.length, 3, 'retried with backoff');
+
+  stubPlaces();
+  nextResponses = [googleError(429, 'RESOURCE_EXHAUSTED', 'Allocation spent.', 'RESOURCE_QUOTA_EXCEEDED')];
+  start = await post('/api/places/search', { category: 'roofers', areas: 'Leeds' });
+  data = await waitForRun(start.body.run.id);
+  assert.match(data.run.error, /QUOTA_EXHAUSTED/);
+  assert.equal(calls.length, 1, 'backing off cannot refill an exhausted allocation');
 });
 
 test('search input is validated before any request is made', async () => {
@@ -235,4 +297,95 @@ test('duplicate area names in one paste are only searched once', async () => {
   await waitForRun(start.body.run.id);
   // "leeds" differs in case so it is a separate query; exact repeats are dropped.
   assert.equal(calls.length, 2);
+});
+
+/* ------- Google Maps Platform terms: what may and may not be persisted ------ */
+
+test('listing content is never written to the database — only the place ID', async () => {
+  stubPlaces();
+  nextResponses = [{
+    status: 200,
+    body: { places: [place('tos-1', 'Very Distinctive Name Ltd', {
+      phone: '01111 222333', address: '99 Unmistakable Road, Leeds',
+    })] },
+  }];
+  const start = await post('/api/places/search', { category: 'roofers', areas: 'Leeds' });
+  await waitForRun(start.body.run.id);
+
+  const { db } = await import('../server/db.js');
+
+  // The cache keeps the ID and the derived flag, and nothing from the listing.
+  const columns = db.prepare('PRAGMA table_info(place_cache)').all().map((c) => c.name);
+  for (const forbidden of ['display_name', 'address', 'phone', 'website_uri']) {
+    assert.equal(columns.includes(forbidden), false,
+      `place_cache must not have a ${forbidden} column`);
+  }
+
+  const row = db.prepare('SELECT * FROM place_cache WHERE place_id = ?').get('tos-1');
+  assert.equal(row.has_website, 0);
+  assert.equal(JSON.stringify(row).includes('Very Distinctive Name'), false);
+  assert.equal(JSON.stringify(row).includes('Unmistakable Road'), false);
+  assert.equal(JSON.stringify(row).includes('01111 222333'), false);
+
+  // But the review list can still show it, from the in-memory session.
+  const data = await get(`/api/places/runs/${start.body.run.id}`);
+  assert.equal(data.body.content_available, true);
+  assert.equal(data.body.candidates[0].display_name, 'Very Distinctive Name Ltd');
+  assert.equal(data.body.candidates[0].phone, '01111 222333');
+});
+
+test('the status endpoint states plainly that listing content is not stored', async () => {
+  const s = (await get('/api/places/status')).body;
+  assert.equal(s.stores_listing_content, false);
+});
+
+test('an imported lead is tagged as Places-derived so retention can find it', async () => {
+  stubPlaces();
+  nextResponses = [{ status: 200, body: { places: [place('tag-1', 'Tagged Co', {})] } }];
+  const start = await post('/api/places/search', { category: 'joiners', areas: 'Otley' });
+  await waitForRun(start.body.run.id);
+  const res = await post('/api/places/import', { run_id: start.body.run.id, place_ids: ['tag-1'] });
+
+  const { db } = await import('../server/db.js');
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(res.body.leads[0].id);
+  assert.equal(lead.details_source, 'google_places');
+  assert.ok(lead.details_imported_at);
+});
+
+test('imported leads are never auto-classified, whatever the name says', async () => {
+  stubPlaces();
+  nextResponses = [{
+    status: 200,
+    body: { places: [place('ltd-1', 'Definitely A Company Ltd', {})] },
+  }];
+  const start = await post('/api/places/search', { category: 'tilers', areas: 'Ilkley' });
+  await waitForRun(start.body.run.id);
+  const res = await post('/api/places/import', { run_id: start.body.run.id, place_ids: ['ltd-1'] });
+
+  const lead = res.body.leads[0];
+  assert.equal(lead.entity_type, 'unknown',
+    'a trading name ending in Ltd is a hint, never evidence of incorporation');
+
+  // Places never returns an email address, so that is the first thing missing.
+  let full = (await get(`/api/leads/${lead.id}`)).body.lead;
+  assert.equal(full.can_email, false);
+  assert.equal(full.block_code, 'NO_EMAIL');
+
+  // Once an address is found by hand, the classification gate is what remains.
+  await patch(`/api/leads/${lead.id}`, { email: 'info@definitelyacompany.co.uk' });
+  full = (await get(`/api/leads/${lead.id}`)).body.lead;
+  assert.equal(full.can_email, false);
+  assert.equal(full.block_code, 'UNCLASSIFIED');
+  assert.equal(full.looks_corporate, true, 'the UI may still suggest checking Companies House');
+
+  // And it cannot be cleared by asserting it — evidence is required.
+  const noEvidence = await patch(`/api/leads/${lead.id}`, { entity_type: 'corporate' });
+  assert.equal(noEvidence.status, 400);
+  assert.match(noEvidence.body.error, /company number/i);
+
+  const withEvidence = await patch(`/api/leads/${lead.id}`, {
+    entity_type: 'corporate', company_number: '01234567',
+  });
+  assert.equal(withEvidence.status, 200);
+  assert.equal(withEvidence.body.lead.can_email, true);
 });

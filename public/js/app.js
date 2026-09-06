@@ -8,6 +8,7 @@ import logView       from './views/log.js';
 import settingsView  from './views/settings.js';
 import searchView    from './views/search.js';
 import outboxView    from './views/outbox.js';
+import complianceView from './views/compliance.js';
 
 const ROUTES = {
   '/leads':     leadsView,
@@ -17,6 +18,7 @@ const ROUTES = {
   '/outbox':    outboxView,
   '/log':       logView,
   '/settings':  settingsView,
+  '/compliance': complianceView,
 };
 
 const view = () => $('#view');

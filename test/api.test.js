@@ -9,6 +9,17 @@ const newLead = (over = {}) => ({
   email: 'hello@hillside.example', ...over,
 });
 
+/**
+ * A lead that may lawfully be emailed: a limited company on its own domain.
+ * Anything less is blocked by the PECR gate, which is the point of the gate.
+ */
+const sendableLead = (over = {}) => newLead({
+  business_name: 'Hillside Roofing Ltd',
+  entity_type: 'corporate',
+  company_number: '01234567',
+  ...over,
+});
+
 test('health check reports the database in use', async () => {
   const r = await get('/api/health');
   assert.equal(r.status, 200);
@@ -117,7 +128,7 @@ test('compliance: an email cannot be produced until identity details are set', a
   // Start from a blank identity.
   await put('/api/settings', { biz_contact_name: '', biz_name: '', biz_address: '', biz_email: '' });
 
-  const lead = (await post('/api/leads', newLead({ business_name: 'Footer Test' }))).body.lead;
+  const lead = (await post('/api/leads', sendableLead({ business_name: 'Footer Test Ltd' }))).body.lead;
   const tpl = (await post('/api/templates', { name: 'FT', subject: 'Hi {{business}}', body: 'Body.' })).body.template;
 
   const blocked = await get(`/api/emails/preview?lead_id=${lead.id}&template_id=${tpl.id}`);
@@ -142,7 +153,7 @@ test('compliance: an email cannot be produced until identity details are set', a
 
 test('opt-out is a hard exclusion on every path', async () => {
   await put('/api/settings', IDENTITY);
-  const lead = (await post('/api/leads', newLead({ business_name: 'Opted Out Co', opted_out: true }))).body.lead;
+  const lead = (await post('/api/leads', sendableLead({ business_name: 'Opted Out Co Ltd', opted_out: true }))).body.lead;
   const tpl = (await post('/api/templates', { name: 'OO', subject: 's', body: 'b' })).body.template;
 
   assert.equal(lead.opted_out, true);
@@ -155,12 +166,12 @@ test('opt-out is a hard exclusion on every path', async () => {
 
 test('sending logs a snapshot, advances the lead, and survives later edits', async () => {
   await put('/api/settings', IDENTITY);
-  const lead = (await post('/api/leads', newLead({ business_name: 'Snapshot Co' }))).body.lead;
+  const lead = (await post('/api/leads', sendableLead({ business_name: 'Snapshot Co Ltd' }))).body.lead;
   const tpl = (await post('/api/templates', { name: 'Snap', subject: 'Hi {{business}}', body: 'Original wording.' })).body.template;
 
   const sent = await post('/api/emails/log', { lead_id: lead.id, template_id: tpl.id, channel: 'mailto' });
   assert.equal(sent.status, 201);
-  assert.equal(sent.body.entry.subject_snapshot, 'Hi Snapshot Co');
+  assert.equal(sent.body.entry.subject_snapshot, 'Hi Snapshot Co Ltd');
   assert.equal(sent.body.entry.to_email, 'hello@hillside.example');
   assert.match(sent.body.entry.body_snapshot, /Original wording/);
   assert.equal(sent.body.lead.status, 'sent', 'a "new" lead advances to "sent"');
@@ -175,7 +186,7 @@ test('sending logs a snapshot, advances the lead, and survives later edits', asy
   await del(`/api/leads/${lead.id}`);
   const after = (await get(`/api/emails/log/${sent.body.entry.id}`)).body.entry;
   assert.equal(after.lead_id, null);
-  assert.equal(after.lead_name, 'Snapshot Co');
+  assert.equal(after.lead_name, 'Snapshot Co Ltd');
   assert.equal(after.to_email, 'hello@hillside.example');
 
   await del(`/api/templates/${tpl.id}`);
@@ -183,7 +194,7 @@ test('sending logs a snapshot, advances the lead, and survives later edits', asy
 
 test('logging does not demote a lead that is already further along', async () => {
   await put('/api/settings', IDENTITY);
-  const lead = (await post('/api/leads', newLead({ business_name: 'Won Co', status: 'won' }))).body.lead;
+  const lead = (await post('/api/leads', sendableLead({ business_name: 'Won Co Ltd', status: 'won' }))).body.lead;
   const tpl = (await post('/api/templates', { name: 'W', subject: 's', body: 'b' })).body.template;
   const sent = await post('/api/emails/log', { lead_id: lead.id, template_id: tpl.id });
   assert.equal(sent.body.lead.status, 'won');

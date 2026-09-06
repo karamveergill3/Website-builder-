@@ -7,6 +7,15 @@ import {
 
 const STATUSES = ['new', 'sent', 'replied', 'won', 'lost'];
 
+/** Short labels for why a lead cannot be emailed; the full reason is the title. */
+const BLOCK_TAG = {
+  UNCLASSIFIED: 'check legal form',
+  INDIVIDUAL_SUBSCRIBER: 'sole trader',
+  FREE_MAIL: 'personal inbox',
+  SUPPRESSED: 'suppressed',
+  OPTED_OUT: 'opted out',
+};
+
 const FIELDS = [
   { name: 'business_name', label: 'Business name', required: true, width: 'full' },
   { name: 'category',      label: 'Category',      placeholder: 'e.g. roofers' },
@@ -49,12 +58,42 @@ export function leadFormFields(lead = {}) {
       <label for="f-notes">Notes</label>
       <textarea id="f-notes" name="notes" rows="4">${lead.notes ?? ''}</textarea>
     </div>
+    <div class="field">
+      <label for="f-entity_type">Legal form <span class="opt">(decides whether you may cold-email them)</span></label>
+      <select id="f-entity_type" name="entity_type">
+        <option value="unknown"    ${(lead.entity_type ?? 'unknown') === 'unknown'    ? 'selected' : ''}>Not checked yet — cannot email</option>
+        <option value="corporate"  ${lead.entity_type === 'corporate'  ? 'selected' : ''}>Limited company, LLP, PLC or CIC — may email</option>
+        <option value="individual" ${lead.entity_type === 'individual' ? 'selected' : ''}>Sole trader or ordinary partnership — cannot email</option>
+      </select>
+      <p class="hint">
+        Under PECR regulation 22 only corporate subscribers may be sent unsolicited marketing
+        email. Sole traders and ordinary partnerships are individual subscribers and need prior
+        consent. If you are not sure, search the name on the
+        <a href="https://find-and-update.company-information.service.gov.uk/" target="_blank"
+           rel="noopener">Companies House register</a>.
+        ${lead.business_name && lead.looks_corporate ? ' The name suggests a company.' : ''}
+      </p>
+    </div>
+    <div class="grid2">
+      <div class="field">
+        <label for="f-company_number">Company number <span class="opt">(your evidence)</span></label>
+        <input id="f-company_number" name="company_number" type="text" class="mono"
+               value="${lead.company_number ?? ''}" placeholder="01234567" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="f-entity_note">How you checked</label>
+        <input id="f-entity_note" name="entity_note" type="text"
+               value="${lead.entity_note ?? ''}" placeholder="e.g. Companies House, 6 Sept" autocomplete="off">
+      </div>
+    </div>
+
     <div class="check">
       <input id="f-opted_out" name="opted_out" type="checkbox" ${lead.opted_out ? 'checked' : ''}>
       <label for="f-opted_out">
         Opted out — never email this business again
         <span class="hint" style="font-weight:400">
-          Hard-excluded from every send, including bulk sends. Required by PECR once someone asks to stop.
+          Hard-excluded from every send. The address also goes on your suppression list, so it
+          stays blocked even if this lead is deleted and later re-imported.
         </span>
       </label>
     </div>`;
@@ -72,6 +111,9 @@ export function leadFormToBody(data) {
     status: data.status,
     google_place_id: data.google_place_id,
     notes: data.notes,
+    entity_type: data.entity_type,
+    company_number: data.company_number,
+    entity_note: data.entity_note,
     opted_out: data.opted_out === 'on',
   };
 }
@@ -121,7 +163,7 @@ export default async function leadsView(root, params, { refresh }) {
       <div class="stat" data-tone="sent"><span class="n num">${stats.awaiting_reply}</span><span class="k">Awaiting reply</span></div>
       <div class="stat" data-tone="replied"><span class="n num">${stats.replied}</span><span class="k">Replied</span></div>
       <div class="stat" data-tone="won"><span class="n num">${stats.won}</span><span class="k">Won</span></div>
-      <div class="stat" data-tone="muted"><span class="n num">${stats.emailable}</span><span class="k">Emailable</span></div>
+      <div class="stat" data-tone="muted"><span class="n num">${stats.emailable}</span><span class="k">Can email</span></div>
     </div>
 
     <div class="view-head">
@@ -150,9 +192,20 @@ export default async function leadsView(root, params, { refresh }) {
       </select>
     </div>
 
+    ${stats.unclassified > 0 ? html`
+      <div class="note note-warn" style="margin-bottom:14px">
+        <div>
+          <strong>${stats.unclassified} lead${stats.unclassified === 1 ? '' : 's'} cannot be emailed yet.</strong>
+          UK law only lets you cold-email limited companies, LLPs and similar — not sole traders.
+          Open a lead and set its legal form to unblock it.
+          <a href="#/compliance">What this means</a>
+        </div>
+      </div>` : ''}
+
     ${stats.opted_out > 0 && status === 'all' ? html`
       <div class="note note-info" style="margin-bottom:14px">
-        <div>${stats.opted_out} lead${stats.opted_out === 1 ? ' has' : 's have'} opted out.
+        <div>${stats.opted_out} lead${stats.opted_out === 1 ? ' has' : 's have'} opted out${
+          stats.suppressed ? `, and ${stats.suppressed} address(es) are on your suppression list` : ''}.
         They are hard-excluded from every send.</div>
       </div>` : ''}
 
@@ -180,7 +233,7 @@ export default async function leadsView(root, params, { refresh }) {
         <div class="table-scroll">
         <table class="ledger">
           <thead><tr>
-            <th style="width:32px"><input type="checkbox" id="pick-all"
+            <th class="pick-cell"><input type="checkbox" id="pick-all"
                   style="width:15px;height:15px;accent-color:var(--green)" aria-label="Select all"></th>
             <th>Business</th><th>Category</th><th>Location</th><th>Contact</th>
             <th>Status</th><th class="nowrap">Last contacted</th><th></th>
@@ -188,14 +241,18 @@ export default async function leadsView(root, params, { refresh }) {
           <tbody>
             ${leads.map((l) => html`
               <tr data-id="${l.id}">
-                <td><input type="checkbox" class="pick" value="${l.id}"
-                           data-emailable="${!l.opted_out && Boolean(l.email)}"
+                <td class="pick-cell"><input type="checkbox" class="pick" value="${l.id}"
+                           data-emailable="${l.can_email}"
                            style="width:15px;height:15px;accent-color:var(--green)"
                            aria-label="Select ${l.business_name}"></td>
-                <td>
+                <td class="biz-cell">
                   <span class="biz">${l.business_name}</span>
-                  <span class="sub">${fmtDate(l.created_at)}${l.source ? ` · ${l.source}` : ''}</span>
-                  ${l.opted_out ? html`<div style="margin-top:5px"><span class="tag">opted out</span></div>` : ''}
+                  <span class="sub" title="${l.source ?? ''}">${fmtDate(l.created_at)}</span>
+                  ${l.opted_out ? html`<div style="margin-top:5px"><span class="tag">opted out</span></div>`
+                    : !l.can_email && l.email ? html`
+                      <div style="margin-top:5px">
+                        <span class="tag" title="${l.block_reason}">${BLOCK_TAG[l.block_code] ?? 'cannot email'}</span>
+                      </div>` : ''}
                 </td>
                 <td class="sub">${l.category ?? '—'}</td>
                 <td class="sub">${l.location ?? '—'}</td>
@@ -208,10 +265,14 @@ export default async function leadsView(root, params, { refresh }) {
                   ${l.last_contacted_at ? html`${fmtDate(l.last_contacted_at)}<br>
                     <span style="opacity:.7">${relative(l.last_contacted_at)}</span>` : '—'}
                 </td>
-                <td>
+                <td class="act-cell">
                   <div class="rowactions">
-                    ${l.email && !l.opted_out ? html`
-                      <button class="tiny" data-act="compose" data-id="${l.id}" title="Write to this lead">Write</button>` : ''}
+                    ${l.can_email ? html`
+                      <button class="tiny" data-act="compose" data-id="${l.id}" title="Write to this lead">Write</button>`
+                      : l.block_code === 'UNCLASSIFIED' && l.looks_corporate ? html`
+                      <button class="tiny" data-act="mark-corporate" data-id="${l.id}"
+                              title="The name suggests a limited company — confirm on Companies House first">
+                        It's a company</button>` : ''}
                     <button class="tiny" data-act="edit" data-id="${l.id}">Edit</button>
                     <button class="tiny danger" data-act="delete" data-id="${l.id}"
                             data-name="${l.business_name}" title="Delete">✕</button>
@@ -270,6 +331,19 @@ export default async function leadsView(root, params, { refresh }) {
     location.hash = `/compose?lead=${el.dataset.id}`;
   });
 
+  on(root, 'click', '[data-act="mark-corporate"]', async (_e, el) => {
+    const ok = await confirmDialog({
+      title: 'Mark as a limited company',
+      message: 'Only do this if you have checked the Companies House register. ' +
+               'Getting it wrong means sending unlawful marketing email to a sole trader.',
+      confirmLabel: 'I have checked — mark as a company',
+    });
+    if (!ok) return;
+    await api.leads.update(el.dataset.id, { entity_type: 'corporate' });
+    toast('Marked as a limited company');
+    refresh();
+  });
+
   /* ---- multi-select ---- */
 
   const picked = () => $$('.pick:checked', root);
@@ -284,6 +358,7 @@ export default async function leadsView(root, params, { refresh }) {
       `${n} selected` + (canQueue ? ` · ${emailable} can be emailed` : '');
   };
 
+  syncBulk();
   on(root, 'change', '.pick', syncBulk);
   $('#pick-all', root)?.addEventListener('change', (ev) => {
     $$('.pick', root).forEach((c) => { c.checked = ev.target.checked; });

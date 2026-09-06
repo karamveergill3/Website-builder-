@@ -4,6 +4,8 @@ import { db, getSetting, setSetting } from '../db.js';
 import { wrap, badRequest, notFound, conflict, nowIso, str, int, bool, looksLikeEmail } from '../lib/http.js';
 import { composeFor } from './emails.js';
 import { buildFooter, optOutMailto } from '../lib/compliance.js';
+import { sendability } from '../lib/pecr.js';
+import { isSuppressed } from '../lib/suppression.js';
 import {
   authUrl, exchangeCode, redirectUri, buildRawMessage, sendRaw, revoke,
   isConnected, connectedEmail, clientConfigured, GmailError, SCOPES,
@@ -17,6 +19,17 @@ let activeSend = null;
 const pendingStates = new Map();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Short reasons for the skip list in the UI. */
+const REASONS = {
+  NO_LEAD: 'no such lead',
+  OPTED_OUT: 'opted out',
+  SUPPRESSED: 'on the suppression list',
+  NO_EMAIL: 'no email address',
+  FREE_MAIL: 'personal mailbox — PECR reg 22 applies',
+  INDIVIDUAL_SUBSCRIBER: 'sole trader — consent required',
+  UNCLASSIFIED: 'not checked as a company yet',
+};
 
 const settingInt = (key, fallback) => {
   const n = Number(getSetting(key, String(fallback)));
@@ -47,7 +60,8 @@ router.get('/status', wrap((_req, res) => {
     email: connectedEmail(),
     scopes: SCOPES,
     daily: capState(),
-    delay_seconds: settingInt('send_delay_seconds', 45),
+    delay_min_seconds: settingInt('send_delay_min_seconds', 120),
+    delay_max_seconds: settingInt('send_delay_max_seconds', 420),
     active_send: activeSend,
     pending: db.prepare("SELECT COUNT(*) n FROM send_queue WHERE status = 'pending'").get().n,
   });
@@ -128,8 +142,13 @@ router.post('/queue', wrap((req, res) => {
     for (const leadId of leadIds) {
       const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
       if (!lead) { skipped.push({ lead_id: leadId, reason: 'no such lead' }); continue; }
-      if (lead.opted_out === 1) {
-        skipped.push({ lead_id: leadId, name: lead.business_name, reason: 'opted out' }); continue;
+      const verdict = sendability(lead, { suppressed: isSuppressed(lead.email) });
+      if (!verdict.allowed) {
+        skipped.push({
+          lead_id: leadId, name: lead.business_name,
+          reason: REASONS[verdict.code] ?? verdict.code, detail: verdict.reason,
+        });
+        continue;
       }
       if (!looksLikeEmail(lead.email ?? '')) {
         skipped.push({ lead_id: leadId, name: lead.business_name, reason: 'no email address' }); continue;
@@ -165,7 +184,8 @@ router.get('/queue', wrap((_req, res) => {
     queue: rows,
     pending: rows.filter((r) => r.status === 'pending'),
     daily: capState(),
-    delay_seconds: settingInt('send_delay_seconds', 45),
+    delay_min_seconds: settingInt('send_delay_min_seconds', 120),
+    delay_max_seconds: settingInt('send_delay_max_seconds', 420),
     connected: isConnected(),
     email: connectedEmail(),
     active_send: activeSend,
@@ -190,7 +210,7 @@ router.post('/queue/clear', wrap((_req, res) => {
  * opt-out and the daily cap immediately before each send so that neither can
  * be bypassed by a stale review screen.
  */
-async function runSend(runId, queueIds, delaySeconds) {
+async function runSend(queueIds, delayMin, delayMax) {
   const settings = { footer: buildFooter(), optOut: optOutMailto() };
   const fromName = getSetting('biz_name') ?? getSetting('biz_contact_name');
   const replyTo = getSetting('biz_email');
@@ -208,19 +228,19 @@ async function runSend(runId, queueIds, delaySeconds) {
       activeSend.done++;
     };
 
-    // Re-check every guard at the last possible moment.
+    // Re-check every guard at the last possible moment, so an opt-out or a
+    // reclassification between review and send is honoured.
     if (!lead) { fail('lead was deleted'); continue; }
-    if (lead.opted_out === 1) { fail('lead opted out before this was sent'); continue; }
+    const verdict = sendability(lead, { suppressed: isSuppressed(item.to_email) });
+    if (!verdict.allowed) { fail(verdict.reason); continue; }
     if (!looksLikeEmail(item.to_email)) { fail('no usable email address'); continue; }
     if (!settings.footer.complete) { fail('business identity details are incomplete'); continue; }
 
     const { remaining } = capState();
     if (remaining <= 0) {
-      db.prepare("UPDATE send_queue SET status = 'skipped', error = ? WHERE id = ?")
-        .run('daily cap reached', queueId);
-      activeSend.skipped++;
-      activeSend.done++;
-      activeSend.stopped_reason = 'Daily cap reached — the rest stayed queued.';
+      // Stop without touching this item: it stays pending for tomorrow rather
+      // than being consumed as a skip.
+      activeSend.stopped_reason = 'Daily cap reached — everything left is still queued.';
       break;
     }
 
@@ -269,7 +289,12 @@ async function runSend(runId, queueIds, delaySeconds) {
       }
     }
 
-    if (delaySeconds > 0 && !activeSend?.cancelled) await sleep(delaySeconds * 1000);
+    // A randomised gap, never a fixed interval: an exact cadence is the
+    // clearest signal that a program rather than a person is sending.
+    if (delayMax > 0 && !activeSend?.cancelled) {
+      const wait = delayMin + Math.random() * (delayMax - delayMin);
+      await sleep(Math.round(wait * 1000));
+    }
   }
 
   if (activeSend) {
@@ -313,7 +338,8 @@ router.post('/send', wrap((req, res) => {
   }
 
   const toSend = ids.slice(0, remaining);
-  const delaySeconds = settingInt('send_delay_seconds', 45);
+  const delayMin = settingInt('send_delay_min_seconds', 120);
+  const delayMax = Math.max(settingInt('send_delay_max_seconds', 420), delayMin);
 
   activeSend = {
     id: randomUUID(),
@@ -321,14 +347,15 @@ router.post('/send', wrap((req, res) => {
     cancelled: false,
     total: toSend.length,
     done: 0, sent: 0, failed: 0, skipped: 0,
-    delay_seconds: delaySeconds,
+    delay_min_seconds: delayMin,
+    delay_max_seconds: delayMax,
     started_at: nowIso(),
     stopped_reason: toSend.length < ids.length
       ? `Only ${toSend.length} of ${ids.length} will go today — the daily cap allows ${remaining} more.`
       : null,
   };
 
-  runSend(activeSend.id, toSend, delaySeconds);
+  runSend(toSend, delayMin, delayMax);
 
   res.status(202).json({ run: activeSend, will_send: toSend.length, queued_total: ids.length });
 }));

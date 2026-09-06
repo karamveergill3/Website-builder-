@@ -3,8 +3,9 @@ import { db, getSetting } from '../db.js';
 import { wrap, badRequest, notFound, conflict, nowIso, str, int, bool } from '../lib/http.js';
 import {
   textSearch, placeDetails, normalise, parseAreas, buildQuery, estimateCost,
-  PlacesError, PRICING,
+  PlacesError, PRICING_DEFAULTS, PRICING_SOURCE,
 } from '../lib/places.js';
+import { looksCorporate } from '../lib/pecr.js';
 
 const router = Router();
 
@@ -15,7 +16,63 @@ const PAUSE_BETWEEN_CALLS_MS = 250;
 /** Only one sweep at a time — this is a single-user tool and spend is real. */
 let activeRun = null;
 
+/**
+ * Candidate names, addresses and phone numbers from a sweep, held in memory
+ * for the length of a review session and never written to the database.
+ * Google's terms permit caching the place ID but not the listing content, so
+ * this is the only place that content lives -- and it goes when the process
+ * does, or after CANDIDATE_TTL_MS, whichever is sooner.
+ */
+const CANDIDATE_TTL_MS = 60 * 60 * 1000;
+const runCandidates = new Map();   // run_id -> { expiresAt, byPlaceId: Map }
+
+/** Open a review session for a run, so an empty result set is still "live". */
+function openSession(runId) {
+  runCandidates.set(runId, {
+    expiresAt: Date.now() + CANDIDATE_TTL_MS,
+    byPlaceId: new Map(),
+  });
+}
+
+function rememberCandidate(runId, row, area) {
+  const entry = runCandidates.get(runId);
+  if (!entry) return;   // session already expired mid-sweep
+  entry.byPlaceId.set(row.place_id, { ...row, area });
+}
+
+function recallCandidates(runId) {
+  const entry = runCandidates.get(runId);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) { runCandidates.delete(runId); return null; }
+  return entry.byPlaceId;
+}
+
+/** Drop expired sessions; called whenever a sweep starts. */
+function sweepCandidateCache() {
+  for (const [id, entry] of runCandidates) {
+    if (Date.now() > entry.expiresAt) runCandidates.delete(id);
+  }
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Pricing the user can correct without touching code, because Google reprices
+ * Maps Platform periodically. `verified_on` stays null until they have opened
+ * Google's billing page and confirmed the figures.
+ */
+const rates = () => ({
+  text_search_per_1000: Number(
+    getSetting('places_text_search_per_1000', String(PRICING_DEFAULTS.text_search_per_1000))
+  ),
+  place_details_per_1000: Number(
+    getSetting('places_details_per_1000', String(PRICING_DEFAULTS.place_details_per_1000))
+  ),
+  free_calls_per_sku_per_month: Number(
+    getSetting('places_free_calls_per_month', String(PRICING_DEFAULTS.free_calls_per_sku_per_month))
+  ),
+  verified_on: getSetting('places_pricing_verified_on', null) || null,
+});
 
 /* ---------------------------------------------------------------- helpers */
 
@@ -25,37 +82,56 @@ const knownPlaceIds = () => new Set([
        .all().map((r) => r.google_place_id),
 ]);
 
+/**
+ * Persist only what the terms permit: the place ID, whether it had a website,
+ * and our own query text. Names, addresses and phone numbers stay in memory.
+ */
 const upsertPlace = db.transaction((row, runId, area, alreadyKnown) => {
   if (alreadyKnown) {
-    // Refresh the cached copy we just received for free in the page response.
     db.prepare(
-      `UPDATE place_cache SET display_name=@display_name, address=@address, phone=@phone,
-         website_uri=@website_uri, has_website=@has_website, refreshed_at=@now
-       WHERE place_id=@place_id`
-    ).run({ ...row, now: nowIso() });
+      'UPDATE place_cache SET has_website = @has_website, refreshed_at = @now WHERE place_id = @place_id'
+    ).run({ place_id: row.place_id, has_website: row.has_website, now: nowIso() });
   } else {
     db.prepare(
       `INSERT INTO place_cache
-         (place_id, display_name, address, phone, website_uri, has_website,
-          imported, first_seen_at, refreshed_at, query_text)
-       VALUES (@place_id, @display_name, @address, @phone, @website_uri, @has_website,
-               0, @now, @now, @query_text)`
-    ).run({ ...row, now: nowIso(), query_text: area });
+         (place_id, has_website, imported, first_seen_at, refreshed_at, query_text)
+       VALUES (@place_id, @has_website, 0, @now, @now, @query_text)`
+    ).run({ place_id: row.place_id, has_website: row.has_website, now: nowIso(), query_text: area });
   }
   db.prepare('INSERT OR IGNORE INTO run_places (run_id, place_id, area) VALUES (?, ?, ?)')
     .run(runId, row.place_id, area);
 });
 
-/** Candidates for review: found by this run, no website, not already a lead. */
+/**
+ * Candidates for review: found by this run, no website, not already a lead.
+ * The durable half (IDs, flags) comes from the database; the displayable half
+ * (name, address, phone) comes from the in-memory session and is absent once
+ * that has expired.
+ */
 function candidatesForRun(runId) {
-  return db.prepare(`
-    SELECT pc.*, rp.area,
+  const content = recallCandidates(runId);
+  const rows = db.prepare(`
+    SELECT pc.place_id, pc.imported, pc.first_seen_at, rp.area,
            EXISTS (SELECT 1 FROM leads l WHERE l.google_place_id = pc.place_id) AS is_lead
       FROM run_places rp
       JOIN place_cache pc ON pc.place_id = rp.place_id
      WHERE rp.run_id = ? AND pc.has_website = 0
-     ORDER BY rp.area, pc.display_name COLLATE NOCASE
-  `).all(runId).map((r) => ({ ...r, is_lead: r.is_lead === 1, imported: r.imported === 1 }));
+     ORDER BY rp.area
+  `).all(runId).map((r) => {
+    const c = content?.get(r.place_id);
+    return {
+      ...r,
+      is_lead: r.is_lead === 1,
+      imported: r.imported === 1,
+      display_name: c?.display_name ?? null,
+      address: c?.address ?? null,
+      phone: c?.phone ?? null,
+    };
+  });
+  rows.sort((a, b) =>
+    (a.area ?? '').localeCompare(b.area ?? '') ||
+    (a.display_name ?? '').localeCompare(b.display_name ?? ''));
+  return { rows, contentAvailable: Boolean(content) };
 }
 
 const updateRun = (id, patch) => db.prepare(
@@ -85,6 +161,7 @@ async function runSweep(runId, { category, areas, pagesPerArea, regionCode, veri
           const alreadyKnown = known.has(row.place_id);
           if (!alreadyKnown) { counters.places_new++; known.add(row.place_id); }
           upsertPlace(row, runId, area, alreadyKnown);
+          if (row.has_website === 0) rememberCandidate(runId, row, area);
           if (row.has_website === 0) counters.candidates_found++;
         }
 
@@ -134,10 +211,13 @@ router.get('/status', wrap((_req, res) => {
   res.json({
     configured: Boolean(process.env.GOOGLE_MAPS_API_KEY),
     active_run: activeRun,
-    pricing: PRICING,
+    pricing: { ...rates(), currency: PRICING_DEFAULTS.currency, source: PRICING_SOURCE },
     limits: { max_areas: MAX_AREAS, max_pages_per_area: MAX_PAGES_PER_AREA },
     cached_places: db.prepare('SELECT COUNT(*) n FROM place_cache').get().n,
     cached_without_website: db.prepare('SELECT COUNT(*) n FROM place_cache WHERE has_website = 0').get().n,
+    // Only place IDs and the has-a-website flag are stored; see migration 008.
+    stores_listing_content: false,
+    live_review_sessions: runCandidates.size,
     default_areas: getSetting('default_areas', ''),
     default_region_code: getSetting('default_region_code', 'GB'),
   });
@@ -147,6 +227,7 @@ router.get('/estimate', wrap((req, res) => {
   res.json(estimateCost({
     areas: parseAreas(req.query.areas).length,
     pagesPerArea: int(req.query.pages_per_area, 1),
+    rates: rates(),
   }));
 }));
 
@@ -176,6 +257,8 @@ router.post('/search', wrap((req, res) => {
   ).run(category, areas.join('\n'), nowIso());
 
   const runId = Number(info.lastInsertRowid);
+  sweepCandidateCache();
+  openSession(runId);
   activeRun = { id: runId, category, areas: areas.length };
 
   // Fire and forget: the client polls GET /runs/:id for progress.
@@ -183,7 +266,7 @@ router.post('/search', wrap((req, res) => {
 
   res.status(202).json({
     run: db.prepare('SELECT * FROM search_runs WHERE id = ?').get(runId),
-    estimate: estimateCost({ areas: areas.length, pagesPerArea }),
+    estimate: estimateCost({ areas: areas.length, pagesPerArea, rates: rates() }),
   });
 }));
 
@@ -197,12 +280,17 @@ router.get('/runs', wrap((_req, res) => {
 router.get('/runs/:id', wrap((req, res) => {
   const run = db.prepare('SELECT * FROM search_runs WHERE id = ?').get(req.params.id);
   if (!run) throw notFound('Search run not found');
-  const candidates = candidatesForRun(run.id);
+  const { rows: candidates, contentAvailable } = candidatesForRun(run.id);
   res.json({
     run,
     running: activeRun?.id === run.id,
     areas: run.areas.split('\n'),
     candidates,
+    // Listing details are held for the review session only, never stored.
+    // Once they have gone the run still knows WHICH places had no website,
+    // but re-running the search is the only way to see who they were.
+    content_available: contentAvailable,
+    content_ttl_minutes: CANDIDATE_TTL_MS / 60000,
     summary: {
       candidates: candidates.length,
       new_candidates: candidates.filter((c) => !c.is_lead && !c.imported).length,
@@ -225,6 +313,14 @@ router.post('/import', wrap((req, res) => {
   const imported = [];
   const skipped = [];
 
+  const content = runId ? recallCandidates(runId) : null;
+  if (runId && !content) {
+    throw conflict(
+      'Those search results have expired. Listing details are held only for the length of a ' +
+      'review session and are never stored, so run the search again to import from it.'
+    );
+  }
+
   const doImport = db.transaction(() => {
     for (const placeId of placeIds) {
       const place = db.prepare('SELECT * FROM place_cache WHERE place_id = ?').get(placeId);
@@ -234,26 +330,32 @@ router.post('/import', wrap((req, res) => {
       const existing = db.prepare('SELECT id FROM leads WHERE google_place_id = ?').get(placeId);
       if (existing) { skipped.push({ place_id: placeId, reason: 'already a lead' }); continue; }
 
-      const area = runId
-        ? db.prepare('SELECT area FROM run_places WHERE run_id = ? AND place_id = ?')
-            .get(runId, placeId)?.area
-        : null;
+      const details = content?.get(placeId);
+      if (!details) { skipped.push({ place_id: placeId, reason: 'details no longer in the review session' }); continue; }
+      const area = details.area ?? null;
 
+      // Imported leads always start unclassified. A name ending in "Ltd" is a
+      // hint, not proof of incorporation, so it never auto-unblocks sending --
+      // it only shows up in the UI as a suggestion to check Companies House.
       const info = db.prepare(
         `INSERT INTO leads
            (business_name, category, location, phone, google_place_id, status,
-            notes, source, opted_out, created_at)
-         VALUES (@name, @category, @location, @phone, @place_id, 'new', @notes, @source, 0, @now)`
+            notes, source, opted_out, entity_type, created_at)
+         VALUES (@name, @category, @location, @phone, @place_id, 'new', @notes, @source, 0,
+                 'unknown', @now)`
       ).run({
-        name: place.display_name ?? '(unnamed business)',
+        name: details.display_name ?? '(unnamed business)',
         category: run?.category ?? null,
         location: area ?? null,
-        phone: place.phone,
+        phone: details.phone,
         place_id: placeId,
-        notes: place.address ? `Address: ${place.address}` : null,
+        notes: details.address ? `Address: ${details.address}` : null,
         source: 'Google Places',
         now: nowIso(),
       });
+      db.prepare(
+        "UPDATE leads SET details_source = 'google_places', details_imported_at = ? WHERE id = ?"
+      ).run(nowIso(), info.lastInsertRowid);
 
       db.prepare('UPDATE place_cache SET imported = 1 WHERE place_id = ?').run(placeId);
       imported.push(Number(info.lastInsertRowid));
@@ -264,6 +366,11 @@ router.post('/import', wrap((req, res) => {
   res.status(201).json({
     imported: imported.length,
     skipped,
+    // How many of the new leads have a name that suggests a limited company,
+    // so the UI can say how much checking is left to do.
+    looks_corporate: imported.filter((id) =>
+      looksCorporate(db.prepare('SELECT business_name FROM leads WHERE id = ?').get(id)?.business_name)
+    ).length,
     leads: imported.length
       ? db.prepare(`SELECT * FROM leads WHERE id IN (${imported.map(() => '?').join(',')})`).all(...imported)
       : [],

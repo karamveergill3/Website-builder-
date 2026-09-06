@@ -7,6 +7,9 @@ import {
 
 const STATUSES = ['new', 'sent', 'replied', 'won', 'lost'];
 
+/** Caret position to restore after a search-triggered re-render. */
+let pendingFocus = null;
+
 /** Short labels for why a lead cannot be emailed; the full reason is the title. */
 const BLOCK_TAG = {
   UNCLASSIFIED: 'check legal form',
@@ -269,10 +272,12 @@ export default async function leadsView(root, params, { refresh }) {
                   <div class="rowactions">
                     ${l.can_email ? html`
                       <button class="tiny" data-act="compose" data-id="${l.id}" title="Write to this lead">Write</button>`
-                      : l.block_code === 'UNCLASSIFIED' && l.looks_corporate ? html`
-                      <button class="tiny" data-act="mark-corporate" data-id="${l.id}"
-                              title="The name suggests a limited company — confirm on Companies House first">
-                        It's a company</button>` : ''}
+                      : l.block_code === 'UNCLASSIFIED' ? html`
+                      <button class="tiny" data-act="classify" data-id="${l.id}"
+                              title="${l.looks_corporate
+                                ? 'The name suggests a limited company — look up its number on Companies House'
+                                : 'Check whether this is a limited company before emailing'}">
+                        Classify</button>` : ''}
                     <button class="tiny" data-act="edit" data-id="${l.id}">Edit</button>
                     <button class="tiny danger" data-act="delete" data-id="${l.id}"
                             data-name="${l.business_name}" title="Delete">✕</button>
@@ -290,19 +295,24 @@ export default async function leadsView(root, params, { refresh }) {
   on(root, 'click', '[data-filter]', (_e, el) => setParam('status', el.dataset.filter));
 
   const search = $('#q', root);
-  let timer;
-  search?.addEventListener('input', () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      const pos = search.selectionStart;
-      setParam('q', search.value.trim());
-      // Re-focus after the route re-render so typing is not interrupted.
-      setTimeout(() => {
-        const next = $('#q');
-        if (next) { next.focus(); next.setSelectionRange(pos, pos); }
-      }, 0);
-    }, 320);
-  });
+  if (search) {
+    // The route re-render replaces this element, so remember where the caret
+    // was and restore it into the NEW input once that render has finished.
+    if (pendingFocus !== null) {
+      search.focus();
+      const at = Math.min(pendingFocus, search.value.length);
+      search.setSelectionRange(at, at);
+      pendingFocus = null;
+    }
+    let timer;
+    search.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        pendingFocus = search.selectionStart ?? search.value.length;
+        setParam('q', search.value.trim());
+      }, 320);
+    });
+  }
   $('#sort', root)?.addEventListener('change', (ev) => setParam('sort', ev.target.value));
 
   on(root, 'click', '[data-act="add"]', async () => {
@@ -331,17 +341,13 @@ export default async function leadsView(root, params, { refresh }) {
     location.hash = `/compose?lead=${el.dataset.id}`;
   });
 
-  on(root, 'click', '[data-act="mark-corporate"]', async (_e, el) => {
-    const ok = await confirmDialog({
-      title: 'Mark as a limited company',
-      message: 'Only do this if you have checked the Companies House register. ' +
-               'Getting it wrong means sending unlawful marketing email to a sole trader.',
-      confirmLabel: 'I have checked — mark as a company',
-    });
-    if (!ok) return;
-    await api.leads.update(el.dataset.id, { entity_type: 'corporate' });
-    toast('Marked as a limited company');
-    refresh();
+  // Classifying needs a company number, so this opens the edit form rather
+  // than trying to set entity_type on its own (which the server refuses).
+  on(root, 'click', '[data-act="classify"]', async (_e, el) => {
+    const { lead } = await api.leads.get(el.dataset.id);
+    window.open('https://find-and-update.company-information.service.gov.uk/search?q=' +
+      encodeURIComponent(lead.business_name), '_blank', 'noopener');
+    if (await openLeadForm(lead)) refresh();
   });
 
   /* ---- multi-select ---- */

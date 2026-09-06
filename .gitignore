@@ -5,3 +5,4 @@ data/
 .DS_Store
 shot.cjs
 e2e.cjs
+e2e2.cjs

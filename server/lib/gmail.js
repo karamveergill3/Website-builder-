@@ -188,6 +188,21 @@ function encodeHeader(value) {
 const headerSafe = (v) => String(v ?? '').replace(/[\r\n]+/g, ' ').trim();
 
 /**
+ * A display name containing an RFC 5322 special -- a comma most often, as in
+ * "Smith, Jones & Co" -- must be a quoted-string, or the comma reads as an
+ * address separator and the header is malformed.
+ */
+function displayName(name) {
+  const safe = headerSafe(name);
+  if (!safe) return '';
+  const encoded = encodeHeader(safe);
+  // An RFC 2047 encoded-word is already a valid atom sequence.
+  if (encoded !== safe) return encoded;
+  if (!/[()<>@,;:\\".[\]]/.test(safe)) return safe;
+  return `"${safe.replace(/([\\"])/g, '\\$1')}"`;
+}
+
+/**
  * Build an RFC 5322 message, base64url encoded for the Gmail API.
  * `listUnsubscribe` should be a bare email address; it becomes a
  * List-Unsubscribe mailto, which is what mail clients surface as an
@@ -196,7 +211,9 @@ const headerSafe = (v) => String(v ?? '').replace(/[\r\n]+/g, ' ').trim();
 export function buildRawMessage({ to, from, fromName, subject, body, listUnsubscribe, replyTo }) {
   const headers = [
     `To: ${headerSafe(to)}`,
-    ...(from ? [`From: ${fromName ? `${encodeHeader(headerSafe(fromName))} <${headerSafe(from)}>` : headerSafe(from)}`] : []),
+    ...(from
+      ? [`From: ${displayName(fromName) ? `${displayName(fromName)} <${headerSafe(from)}>` : headerSafe(from)}`]
+      : []),
     ...(replyTo ? [`Reply-To: ${headerSafe(replyTo)}`] : []),
     `Subject: ${encodeHeader(headerSafe(subject))}`,
     ...(listUnsubscribe
@@ -228,16 +245,35 @@ export async function sendRaw(raw) {
   if (res.ok) return { id: body?.id ?? null, threadId: body?.threadId ?? null };
 
   const message = body?.error?.message ?? `HTTP ${res.status}`;
-  if (res.status === 429 || /rateLimitExceeded|userRateLimitExceeded/i.test(message)) {
-    throw new GmailError(`Gmail rate limit hit: ${message}`, {
-      status: 429, code: 'RATE_LIMITED', retryable: true,
-    });
-  }
-  if (res.status === 403 && /Daily Limit|quota/i.test(message)) {
+  // Google's machine-readable reason lives in error.errors[].reason; the
+  // human message is localised and must not be pattern-matched.
+  const reasons = (body?.error?.errors ?? []).map((e) => e?.reason).filter(Boolean);
+  const has = (...names) => names.some((n) => reasons.includes(n));
+
+  if (has('dailyLimitExceeded')) {
     throw new GmailError(
       `Gmail daily sending limit reached: ${message}. Wait 24 hours before sending more.`,
       { status: 429, code: 'DAILY_LIMIT' }
     );
+  }
+  if (res.status === 429 || has('rateLimitExceeded', 'userRateLimitExceeded', 'quotaExceeded')) {
+    throw new GmailError(`Gmail rate limit hit: ${message}`, {
+      status: 429, code: 'RATE_LIMITED', retryable: true,
+    });
+  }
+  // Fall back to the message only when Google sent no reason at all.
+  if (res.status === 403 && reasons.length === 0) {
+    if (/daily limit/i.test(message)) {
+      throw new GmailError(
+        `Gmail daily sending limit reached: ${message}. Wait 24 hours before sending more.`,
+        { status: 429, code: 'DAILY_LIMIT' }
+      );
+    }
+    if (/rate|quota/i.test(message)) {
+      throw new GmailError(`Gmail rate limit hit: ${message}`, {
+        status: 429, code: 'RATE_LIMITED', retryable: true,
+      });
+    }
   }
   if (res.status === 401) {
     throw new GmailError('Gmail rejected the access token — reconnect your account.', {

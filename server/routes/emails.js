@@ -159,7 +159,10 @@ router.get('/log', wrap((req, res) => {
       `SELECT * FROM email_log ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY sent_at DESC, id DESC LIMIT @limit OFFSET @offset`
     ).all(params),
-    total: db.prepare('SELECT COUNT(*) n FROM email_log').get().n,
+    // Count under the same filter, or "1 of 200" is nonsense on a lead page.
+    total: db.prepare(
+      `SELECT COUNT(*) n FROM email_log ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`
+    ).get(params).n,
   });
 }));
 

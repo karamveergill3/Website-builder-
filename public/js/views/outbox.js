@@ -1,13 +1,11 @@
 /* Outbox — connect Gmail, review every queued email in full, then one explicit
    confirmation sends them, spaced out and under a daily cap. */
 import { api } from '../api.js';
-import { html, mount, on, modal, confirmDialog, toast, fmtDateTime } from '../dom.js';
+import {
+  html, mount, on, modal, confirmDialog, toast, fmtDateTime, registerInterval,
+} from '../dom.js';
 
-let poller = null;
-
-export default async function outboxView(root, _params, { refresh, navigate }) {
-  clearInterval(poller);
-
+export default async function outboxView(root, _params, { refresh }) {
   const status = await api.get('/api/gmail/status').catch(() => null);
   if (!status) {
     mount(root, html`
@@ -86,14 +84,133 @@ export default async function outboxView(root, _params, { refresh, navigate }) {
     return;
   }
 
+  // Live state for the handlers below, refreshed by every draw(). Handlers are
+  // bound once: re-binding them per draw made one click send or discard twice.
+  let data = null;
+  let pending = [];
+  let remaining = 0;
+
+  on(root, 'click', '[data-act="expand"]', (_e, el) => {
+    const q = pending.find((x) => String(x.id) === el.dataset.id);
+    if (!q) return;
+    modal({
+      title: `To ${q.business_name ?? q.to_email}`,
+      wide: true,
+      body: html`<div class="preview">
+        <div class="preview-head"><dl>
+          <dt>To</dt><dd class="mono">${q.to_email}</dd>
+          <dt>Subject</dt><dd class="subject">${q.subject}</dd>
+        </dl></div>
+        <div class="preview-body" style="max-height:none">${q.body}</div>
+      </div>`,
+      footer: html`<button type="button" data-close>Close</button>`,
+    });
+  });
+
+  on(root, 'click', '[data-act="drop"]', async (_e, el) => {
+    await api.del(`/api/gmail/queue/${el.dataset.id}`);
+    toast('Removed from the queue');
+    await draw();
+  });
+
+  on(root, 'click', '[data-act="clear"]', async () => {
+    const ok = await confirmDialog({
+      title: 'Discard queued emails',
+      message: `Remove all ${pending.length} queued email(s)? Nothing has been sent, so nothing is lost.`,
+      confirmLabel: 'Discard', danger: true,
+    });
+    if (!ok) return;
+    await api.post('/api/gmail/queue/clear');
+    await draw();
+  });
+
+  on(root, 'click', '[data-act="cancel"]', async () => {
+    await api.post('/api/gmail/send/cancel');
+    toast('Stopping after the current email');
+  });
+
+  on(root, 'click', '[data-act="disconnect"]', async () => {
+    const ok = await confirmDialog({
+      title: 'Disconnect Gmail',
+      message: 'Prospect Book will no longer be able to send. Your sent log is kept.',
+      confirmLabel: 'Disconnect', danger: true,
+    });
+    if (!ok) return;
+    await api.post('/api/gmail/disconnect');
+    refresh();
+  });
+
+  /* ---- the single explicit confirmation ---- */
+  on(root, 'click', '[data-act="send"]', async () => {
+    const willSend = pending.slice(0, remaining);
+    if (!willSend.length) return;
+    const confirmed = await modal({
+      title: `Send ${willSend.length} email${willSend.length === 1 ? '' : 's'}?`,
+      wide: true,
+      body: html`
+        <div class="note note-warn" style="margin-bottom:14px"><div>
+          This sends real email from <strong>${data.email}</strong>, spaced
+          ${data.delay_min_seconds}–${data.delay_max_seconds} seconds apart.
+          It cannot be undone once a message has left.
+        </div></div>
+        <p style="margin-top:0">Going to:</p>
+        <div class="table-scroll" style="max-height:280px;overflow-y:auto">
+          <table class="ledger">
+            <thead><tr><th>Business</th><th>Address</th><th>Subject</th></tr></thead>
+            <tbody>
+              ${willSend.map((q) => html`
+                <tr>
+                  <td><span class="biz" style="font-size:.92rem">${q.business_name ?? '—'}</span></td>
+                  <td class="sub mono">${q.to_email}</td>
+                  <td class="sub">${q.subject}</td>
+                </tr>`)}
+            </tbody>
+          </table>
+        </div>
+        ${pending.length > remaining ? html`
+          <p class="hint" style="margin-top:12px">
+            ${pending.length - remaining} more stay queued — today's cap allows ${remaining} more.
+          </p>` : ''}
+        <div class="check" style="margin-top:16px">
+          <input type="checkbox" id="ack" name="ack" required>
+          <label for="ack">
+            I have read these and I want them sent.
+            Each carries my business details and an opt-out line.
+          </label>
+        </div>`,
+      footer: html`
+        <button type="button" data-close>Cancel</button>
+        <button type="submit" class="primary">Send ${willSend.length} now</button>`,
+      onSubmit: (fields) => {
+        if (fields.ack !== 'on') throw new Error('Tick the box to confirm.');
+        return true;
+      },
+    });
+    if (confirmed !== true) return;
+
+    try {
+      await api.post('/api/gmail/send', {
+        confirm: true,
+        queue_ids: willSend.map((q) => q.id),
+        expected_count: willSend.length,
+      });
+      toast('Sending started');
+      await draw();
+    } catch (err) {
+      toast(err.message, { error: true, ms: 8000 });
+      await draw();
+    }
+  });
+
   await draw();
 
   async function draw() {
-    const data = await api.get('/api/gmail/queue');
-    const pending = data.pending;
+    data = await api.get('/api/gmail/queue');
+    pending = data.pending;
     const done = data.queue.filter((q) => q.status !== 'pending');
     const run = data.active_send;
-    const { cap, used, remaining } = data.daily;
+    const { cap, used } = data.daily;
+    remaining = data.daily.remaining;
 
     mount(root, html`
       <div class="view-head">
@@ -194,121 +311,12 @@ export default async function outboxView(root, _params, { refresh, navigate }) {
         </div>` : ''}
     `);
 
-    on(root, 'click', '[data-act="expand"]', (_e, el) => {
-      const q = pending.find((x) => String(x.id) === el.dataset.id);
-      modal({
-        title: `To ${q.business_name ?? q.to_email}`,
-        wide: true,
-        body: html`<div class="preview">
-          <div class="preview-head"><dl>
-            <dt>To</dt><dd class="mono">${q.to_email}</dd>
-            <dt>Subject</dt><dd class="subject">${q.subject}</dd>
-          </dl></div>
-          <div class="preview-body" style="max-height:none">${q.body}</div>
-        </div>`,
-        footer: html`<button type="button" data-close>Close</button>`,
-      });
-    });
-
-    on(root, 'click', '[data-act="drop"]', async (_e, el) => {
-      await api.del(`/api/gmail/queue/${el.dataset.id}`);
-      toast('Removed from the queue');
-      await draw();
-    });
-
-    on(root, 'click', '[data-act="clear"]', async () => {
-      const ok = await confirmDialog({
-        title: 'Discard queued emails',
-        message: `Remove all ${pending.length} queued email(s)? Nothing has been sent, so nothing is lost.`,
-        confirmLabel: 'Discard', danger: true,
-      });
-      if (!ok) return;
-      await api.post('/api/gmail/queue/clear');
-      await draw();
-    });
-
-    on(root, 'click', '[data-act="cancel"]', async () => {
-      await api.post('/api/gmail/send/cancel');
-      toast('Stopping after the current email');
-    });
-
-    on(root, 'click', '[data-act="disconnect"]', async () => {
-      const ok = await confirmDialog({
-        title: 'Disconnect Gmail',
-        message: 'Prospect Book will no longer be able to send. Your sent log is kept.',
-        confirmLabel: 'Disconnect', danger: true,
-      });
-      if (!ok) return;
-      await api.post('/api/gmail/disconnect');
-      refresh();
-    });
-
-    /* ---- the single explicit confirmation ---- */
-    on(root, 'click', '[data-act="send"]', async () => {
-      const willSend = pending.slice(0, remaining);
-      const confirmed = await modal({
-        title: `Send ${willSend.length} email${willSend.length === 1 ? '' : 's'}?`,
-        wide: true,
-        body: html`
-          <div class="note note-warn" style="margin-bottom:14px"><div>
-            This sends real email from <strong>${data.email}</strong>, spaced
-            ${data.delay_min_seconds}–${data.delay_max_seconds} seconds apart.
-            It cannot be undone once a message has left.
-          </div></div>
-          <p style="margin-top:0">Going to:</p>
-          <div class="table-scroll" style="max-height:280px;overflow-y:auto">
-            <table class="ledger">
-              <thead><tr><th>Business</th><th>Address</th><th>Subject</th></tr></thead>
-              <tbody>
-                ${willSend.map((q) => html`
-                  <tr>
-                    <td><span class="biz" style="font-size:.92rem">${q.business_name ?? '—'}</span></td>
-                    <td class="sub mono">${q.to_email}</td>
-                    <td class="sub">${q.subject}</td>
-                  </tr>`)}
-              </tbody>
-            </table>
-          </div>
-          ${pending.length > remaining ? html`
-            <p class="hint" style="margin-top:12px">
-              ${pending.length - remaining} more stay queued — today's cap allows ${remaining} more.
-            </p>` : ''}
-          <div class="check" style="margin-top:16px">
-            <input type="checkbox" id="ack" name="ack" required>
-            <label for="ack">
-              I have read these and I want them sent.
-              Each carries my business details and an opt-out line.
-            </label>
-          </div>`,
-        footer: html`
-          <button type="button" data-close>Cancel</button>
-          <button type="submit" class="primary">Send ${willSend.length} now</button>`,
-        onSubmit: (fields) => {
-          if (fields.ack !== 'on') throw new Error('Tick the box to confirm.');
-          return true;
-        },
-      });
-      if (confirmed !== true) return;
-
-      try {
-        await api.post('/api/gmail/send', {
-          confirm: true,
-          queue_ids: willSend.map((q) => q.id),
-          expected_count: willSend.length,
-        });
-        toast('Sending started');
-        await draw();
-      } catch (err) {
-        toast(err.message, { error: true, ms: 8000 });
-        await draw();
-      }
-    });
-
     if (run?.running) {
-      clearInterval(poller);
-      poller = setInterval(async () => {
+      // Registered so the router kills it on navigation -- otherwise it kept
+      // redrawing the Outbox over whatever screen you had moved to.
+      const poller = registerInterval(setInterval(async () => {
         const next = await api.get('/api/gmail/send/status');
-        if (!next.active_send?.running) { clearInterval(poller); poller = null; await draw(); }
+        if (!next.active_send?.running) { clearInterval(poller); await draw(); }
         else {
           const note = root.querySelector('.note-info div');
           const r = next.active_send;
@@ -316,7 +324,7 @@ export default async function outboxView(root, _params, { refresh, navigate }) {
             `<span class="spinner"></span> &nbsp;<strong>Sending ${r.done} of ${r.total}</strong> — ` +
             `${r.sent} sent, ${r.failed} failed, ${r.skipped} skipped.`;
         }
-      }, 2000);
+      }, 2000));
     }
   }
 }

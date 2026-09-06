@@ -4,9 +4,16 @@ import { get, post, patch, put, del, IDENTITY, teardown } from './helpers.js';
 
 test.after(teardown);
 
+let seedN = 0;
+
+/**
+ * A distinct address per lead. Suppression is keyed on the address and
+ * outlives the lead, so a shared fixture address would let one opted-out
+ * lead block every test that ran after it.
+ */
 const newLead = (over = {}) => ({
   business_name: 'Hillside Roofing', category: 'roofers', location: 'Otley',
-  email: 'hello@hillside.example', ...over,
+  email: `lead${++seedN}@hillside.example`, ...over,
 });
 
 /**
@@ -172,7 +179,7 @@ test('sending logs a snapshot, advances the lead, and survives later edits', asy
   const sent = await post('/api/emails/log', { lead_id: lead.id, template_id: tpl.id, channel: 'mailto' });
   assert.equal(sent.status, 201);
   assert.equal(sent.body.entry.subject_snapshot, 'Hi Snapshot Co Ltd');
-  assert.equal(sent.body.entry.to_email, 'hello@hillside.example');
+  assert.equal(sent.body.entry.to_email, lead.email);
   assert.match(sent.body.entry.body_snapshot, /Original wording/);
   assert.equal(sent.body.lead.status, 'sent', 'a "new" lead advances to "sent"');
   assert.ok(sent.body.lead.last_contacted_at);
@@ -187,7 +194,7 @@ test('sending logs a snapshot, advances the lead, and survives later edits', asy
   const after = (await get(`/api/emails/log/${sent.body.entry.id}`)).body.entry;
   assert.equal(after.lead_id, null);
   assert.equal(after.lead_name, 'Snapshot Co Ltd');
-  assert.equal(after.to_email, 'hello@hillside.example');
+  assert.equal(after.to_email, lead.email);
 
   await del(`/api/templates/${tpl.id}`);
 });

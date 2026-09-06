@@ -50,8 +50,13 @@ const decode = (raw) => Buffer.from(raw.replace(/-/g, '+').replace(/_/g, '/'), '
  * because an unclassified lead is blocked by the PECR gate by design; tests
  * that care about the gate override it.
  */
-async function seed({ name, email = 'a@b.example', opted_out = false,
+let seedN = 0;
+
+async function seed({ name, email, opted_out = false,
                       entity_type = 'corporate' } = {}) {
+  // A distinct address per lead: suppression is keyed on the address, so a
+  // shared one would let an opted-out fixture block every other test.
+  email = email ?? `lead${++seedN}@example.co.uk`;
   const lead = (await post('/api/leads', {
     business_name: name, email, opted_out, entity_type,
     company_number: entity_type === 'corporate' ? '01234567' : null,
@@ -336,4 +341,69 @@ test('buildRawMessage: the body survives a round trip with UTF-8 intact', () => 
 test('buildRawMessage: no List-Unsubscribe header when no opt-out address exists', () => {
   const msg = decode(buildRawMessage({ to: 'a@b.example', subject: 's', body: 'x' }));
   assert.doesNotMatch(msg, /List-Unsubscribe/);
+});
+
+test('the OAuth callback escapes everything it echoes back', async () => {
+  const { base } = await import('./helpers.js');
+  const payload = '<script>alert(1)</script>';
+  const res = await fetch(
+    `${base}/api/gmail/callback?error=${encodeURIComponent(payload)}`,
+    { redirect: 'manual' }
+  );
+  const html = await res.text();
+
+  assert.equal(res.status, 400);
+  assert.equal(html.includes('<script>alert(1)</script>'), false,
+    'query-string content must never be reflected as live markup');
+  assert.ok(html.includes('&lt;script&gt;'), 'it should appear escaped');
+});
+
+test('a callback without a matching state is refused', async () => {
+  const { base } = await import('./helpers.js');
+  const res = await fetch(`${base}/api/gmail/callback?code=abc&state=not-one-we-issued`,
+    { redirect: 'manual' });
+  assert.equal(res.status, 400);
+  assert.match(await res.text(), /not one this app started/i);
+});
+
+test('a From display name containing a comma is quoted, not left to split the header', async () => {
+  const msg = decode(buildRawMessage({
+    to: 'a@b.example',
+    from: 'me@gmail.example',
+    fromName: 'Smith, Jones & Co',
+    subject: 's',
+    body: 'x',
+  }));
+  const from = msg.split('\r\n').find((l) => l.startsWith('From:'));
+  assert.equal(from, 'From: "Smith, Jones & Co" <me@gmail.example>');
+});
+
+test('a plain From display name is left unquoted', () => {
+  const msg = decode(buildRawMessage({
+    to: 'a@b.example', from: 'me@gmail.example', fromName: 'Gill Web Studio',
+    subject: 's', body: 'x',
+  }));
+  assert.match(msg, /^From: Gill Web Studio <me@gmail\.example>$/m);
+});
+
+test('the daily cap default agrees between the settings API and the send path', async () => {
+  // A blank value clears the override, so both sides fall back to the default.
+  await put('/api/settings', { daily_cap: '' });
+  const settings = (await get('/api/settings')).body.settings;
+  const gmail = (await get('/api/gmail/status')).body;
+  assert.equal(gmail.daily.cap, Number(settings.daily_cap),
+    'the send path and the settings screen must report the same cap');
+  await put('/api/settings', { daily_cap: '500' });
+});
+
+test('a blank numeric setting clears the override instead of storing zero', async () => {
+  await put('/api/settings', { send_delay_min_seconds: '90' });
+  assert.equal((await get('/api/gmail/status')).body.delay_min_seconds, 90);
+
+  await put('/api/settings', { send_delay_min_seconds: '' });
+  const after = (await get('/api/gmail/status')).body.delay_min_seconds;
+  assert.notEqual(after, 0, 'blank must not read as "no delay at all"');
+  assert.equal(after, 120, 'it falls back to the default');
+
+  await put('/api/settings', { send_delay_min_seconds: '0', send_delay_max_seconds: '0' });
 });

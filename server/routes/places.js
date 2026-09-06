@@ -36,7 +36,10 @@ function openSession(runId) {
 
 function rememberCandidate(runId, row, area) {
   const entry = runCandidates.get(runId);
-  if (!entry) return;   // session already expired mid-sweep
+  if (!entry) return;
+  // A long sweep must not outlive its own session and start dropping results,
+  // so every candidate pushes the expiry back.
+  entry.expiresAt = Date.now() + CANDIDATE_TTL_MS;
   entry.byPlaceId.set(row.place_id, { ...row, area });
 }
 
@@ -86,18 +89,19 @@ const knownPlaceIds = () => new Set([
  * Persist only what the terms permit: the place ID, whether it had a website,
  * and our own query text. Names, addresses and phone numbers stay in memory.
  */
-const upsertPlace = db.transaction((row, runId, area, alreadyKnown) => {
-  if (alreadyKnown) {
-    db.prepare(
-      'UPDATE place_cache SET has_website = @has_website, refreshed_at = @now WHERE place_id = @place_id'
-    ).run({ place_id: row.place_id, has_website: row.has_website, now: nowIso() });
-  } else {
-    db.prepare(
-      `INSERT INTO place_cache
-         (place_id, has_website, imported, first_seen_at, refreshed_at, query_text)
-       VALUES (@place_id, @has_website, 0, @now, @now, @query_text)`
-    ).run({ place_id: row.place_id, has_website: row.has_website, now: nowIso(), query_text: area });
-  }
+const upsertPlace = db.transaction((row, runId, area) => {
+  // An upsert, not a branch on "have we seen this before": a place ID can be
+  // known from a hand-entered lead while having no place_cache row at all, and
+  // the run_places insert below has a foreign key onto that row.
+  db.prepare(
+    `INSERT INTO place_cache
+       (place_id, has_website, imported, first_seen_at, refreshed_at, query_text)
+     VALUES (@place_id, @has_website, 0, @now, @now, @query_text)
+     ON CONFLICT(place_id) DO UPDATE SET
+       has_website  = excluded.has_website,
+       refreshed_at = excluded.refreshed_at`
+  ).run({ place_id: row.place_id, has_website: row.has_website, now: nowIso(), query_text: area });
+
   db.prepare('INSERT OR IGNORE INTO run_places (run_id, place_id, area) VALUES (?, ?, ?)')
     .run(runId, row.place_id, area);
 });
@@ -160,7 +164,7 @@ async function runSweep(runId, { category, areas, pagesPerArea, regionCode, veri
           const row = normalise(place);
           const alreadyKnown = known.has(row.place_id);
           if (!alreadyKnown) { counters.places_new++; known.add(row.place_id); }
-          upsertPlace(row, runId, area, alreadyKnown);
+          upsertPlace(row, runId, area);
           if (row.has_website === 0) rememberCandidate(runId, row, area);
           if (row.has_website === 0) counters.candidates_found++;
         }
@@ -185,10 +189,10 @@ async function runSweep(runId, { category, areas, pagesPerArea, regionCode, veri
       for (const { place_id } of toCheck) {
         const detail = await placeDetails(place_id);
         const row = normalise({ ...detail, id: place_id });
+        // Only the derived flag is storable -- website_uri is Maps Content.
         db.prepare(
-          `UPDATE place_cache SET website_uri=@website_uri, has_website=@has_website,
-             refreshed_at=@now WHERE place_id=@place_id`
-        ).run({ ...row, now: nowIso() });
+          'UPDATE place_cache SET has_website = @has_website, refreshed_at = @now WHERE place_id = @place_id'
+        ).run({ place_id, has_website: row.has_website, now: nowIso() });
         await sleep(PAUSE_BETWEEN_CALLS_MS);
       }
     }

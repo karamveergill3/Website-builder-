@@ -106,7 +106,11 @@ export function modal({ title, body, footer, wide = false, onMount, onSubmit }) 
     document.addEventListener('keydown', onKey);
 
     backdrop.addEventListener('mousedown', (ev) => { if (ev.target === backdrop) close(null); });
-    root.querySelector('[data-close]').addEventListener('click', () => close(null));
+    // Every [data-close] closes -- the header ✕ AND the footer Cancel, which
+    // sits inside the form and would otherwise do nothing at all.
+    for (const el of root.querySelectorAll('[data-close]')) {
+      el.addEventListener('click', (ev) => { ev.preventDefault(); close(null); });
+    }
 
     form.addEventListener('submit', async (ev) => {
       ev.preventDefault();
@@ -136,6 +140,24 @@ export function confirmDialog({ title, message, confirmLabel = 'Confirm', danger
       <button type="submit" class="${danger ? 'danger' : 'primary'}">${confirmLabel}</button>`,
     onSubmit: () => true,
   }).then((v) => v === true);
+}
+
+/* ---------------- Timers ---------------- */
+
+/**
+ * Intervals started by a view. The router clears them on navigation, so a
+ * poller cannot outlive its screen and redraw itself over another one.
+ */
+const timers = new Set();
+
+export function registerInterval(id) {
+  timers.add(id);
+  return id;
+}
+
+export function clearViewTimers() {
+  for (const id of timers) clearInterval(id);
+  timers.clear();
 }
 
 /* ---------------- Formatting ---------------- */

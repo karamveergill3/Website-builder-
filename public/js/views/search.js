@@ -2,13 +2,9 @@
    Nothing is ever imported automatically: results land in a review list with
    checkboxes and an explicit "Add to tracker". */
 import { api } from '../api.js';
-import { html, mount, on, $, $$, toast, fmtDateTime } from '../dom.js';
-
-let poller = null;
+import { html, mount, on, $, $$, toast, fmtDateTime, registerInterval } from '../dom.js';
 
 export default async function searchView(root, params, { navigate }) {
-  clearInterval(poller);
-
   const status = await api.get('/api/places/status').catch(() => null);
 
   if (!status) {
@@ -184,9 +180,40 @@ export default async function searchView(root, params, { navigate }) {
 /* ------------------------------------------------------- review one run */
 
 async function renderRun(root, runId, navigate) {
+  // Bound once against root; draw() only refreshes the state they read.
+  let candidates = [];
+
+  const picks = () => $$('.pick', root).filter((el) => el.checked).map((el) => el.value);
+  const sync = () => {
+    const btn = $('[data-act="import"]', root);
+    if (!btn) return;
+    const n = picks().length;
+    btn.disabled = n === 0;
+    btn.textContent = `Add ${n} to tracker`;
+  };
+
+  on(root, 'change', '.pick', sync);
+  on(root, 'click', '[data-act="all"]', () => { $$('.pick', root).forEach((c) => { c.checked = true; }); sync(); });
+  on(root, 'click', '[data-act="none"]', () => { $$('.pick', root).forEach((c) => { c.checked = false; }); sync(); });
+  on(root, 'click', '[data-act="back"]', () => navigate('/search'));
+
+  on(root, 'click', '[data-act="import"]', async (_e, btn) => {
+    btn.disabled = true;
+    try {
+      const res = await api.post('/api/places/import', { run_id: runId, place_ids: picks() });
+      toast(`Added ${res.imported} lead${res.imported === 1 ? '' : 's'}` +
+            (res.skipped.length ? ` · ${res.skipped.length} skipped` : ''));
+      await draw();
+    } catch (err) {
+      toast(err.message, { error: true, ms: 7000 });
+      btn.disabled = false;
+    }
+  });
+
   const draw = async () => {
     const data = await api.get(`/api/places/runs/${runId}`);
-    const { run, candidates, summary, running } = data;
+    const { run, summary, running } = data;
+    candidates = data.candidates;
     const fresh = candidates.filter((c) => !c.is_lead);
     const expired = data.content_available === false;
 
@@ -279,45 +306,20 @@ async function renderRun(root, runId, navigate) {
         </p>`}
     `);
 
-    const picks = () => $$('.pick:checked', root).map((el) => el.value);
-    const sync = () => {
-      const btn = $('[data-act="import"]', root);
-      if (!btn) return;
-      const n = picks().length;
-      btn.disabled = n === 0;
-      btn.textContent = `Add ${n} to tracker`;
-    };
-
-    on(root, 'change', '.pick', sync);
-    on(root, 'click', '[data-act="all"]', () => { $$('.pick', root).forEach((c) => { c.checked = true; }); sync(); });
-    on(root, 'click', '[data-act="none"]', () => { $$('.pick', root).forEach((c) => { c.checked = false; }); sync(); });
-    on(root, 'click', '[data-act="back"]', () => navigate('/search'));
-
-    on(root, 'click', '[data-act="import"]', async (_e, btn) => {
-      btn.disabled = true;
-      try {
-        const res = await api.post('/api/places/import', { run_id: runId, place_ids: picks() });
-        toast(`Added ${res.imported} lead${res.imported === 1 ? '' : 's'}` +
-              (res.skipped.length ? ` · ${res.skipped.length} skipped` : ''));
-        await draw();
-      } catch (err) {
-        toast(err.message, { error: true });
-        btn.disabled = false;
-      }
-    });
+    sync();
 
     if (running) {
-      clearInterval(poller);
-      poller = setInterval(async () => {
+      // Registered so navigating away actually stops it.
+      const poller = registerInterval(setInterval(async () => {
         const next = await api.get(`/api/places/runs/${runId}`);
-        if (!next.running) { clearInterval(poller); poller = null; await draw(); }
+        if (!next.running) { clearInterval(poller); await draw(); }
         else {
           const note = root.querySelector('.note-info div');
           if (note) note.innerHTML =
             `<span class="spinner"></span> &nbsp;Searching — ${next.run.text_search_calls} request(s), ` +
             `${next.summary.candidates} candidate(s) so far.`;
         }
-      }, 1500);
+      }, 1500));
     }
   };
 

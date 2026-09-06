@@ -10,6 +10,7 @@ export const STATUSES = ['new', 'sent', 'replied', 'won', 'lost'];
 
 const router = Router();
 
+/** Looked up with Object.hasOwn, so a key like "constructor" cannot reach the SQL. */
 const SORTS = {
   created:  'created_at DESC, id DESC',
   oldest:   'created_at ASC, id ASC',
@@ -127,7 +128,7 @@ router.get('/', wrap((req, res) => {
 
   const sql = `SELECT * FROM leads
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-    ORDER BY ${SORTS[req.query.sort] ?? SORTS.created}
+    ORDER BY ${Object.hasOwn(SORTS, req.query.sort ?? '') ? SORTS[req.query.sort] : SORTS.created}
     LIMIT @limit OFFSET @offset`;
 
   params.limit = Math.min(int(req.query.limit, 500), 2000);
@@ -191,6 +192,11 @@ router.post('/', wrap((req, res) => {
       .prepare(`INSERT INTO leads (${cols.join(', ')})
                 VALUES (${cols.map((c) => `@${c}`).join(', ')})`)
       .run(lead);
+    // A lead created already opted out must go on the suppression list too --
+    // otherwise the opt-out is lost the moment the lead is deleted.
+    if (lead.opted_out === 1) {
+      suppress(lead.email, { businessName: lead.business_name, reason: 'created as opted out' });
+    }
     res.status(201).json({
       lead: toApi(db.prepare('SELECT * FROM leads WHERE id = ?').get(info.lastInsertRowid)),
     });

@@ -189,6 +189,12 @@ const MIGRATIONS = [
       -- So place_cache keeps IDs and the derived has-a-website flag, and
       -- nothing that came out of the listing. Candidate names, addresses and
       -- phone numbers live in memory for the length of a review session only.
+      -- run_places references place_cache ON DELETE CASCADE, so dropping the
+      -- old place_cache would take every run_places row with it. Rebuild the
+      -- child out of the way first, then the parent, then restore.
+      CREATE TABLE run_places_backup AS SELECT * FROM run_places;
+      DROP TABLE run_places;
+
       CREATE TABLE place_cache_new (
         place_id      TEXT PRIMARY KEY,
         has_website   INTEGER NOT NULL CHECK (has_website IN (0,1)),
@@ -202,6 +208,17 @@ const MIGRATIONS = [
       DROP TABLE place_cache;
       ALTER TABLE place_cache_new RENAME TO place_cache;
       CREATE INDEX idx_place_cache_seen ON place_cache(first_seen_at DESC);
+
+      CREATE TABLE run_places (
+        run_id   INTEGER NOT NULL REFERENCES search_runs(id) ON DELETE CASCADE,
+        place_id TEXT    NOT NULL REFERENCES place_cache(place_id) ON DELETE CASCADE,
+        area     TEXT,
+        PRIMARY KEY (run_id, place_id)
+      );
+      INSERT INTO run_places (run_id, place_id, area)
+        SELECT run_id, place_id, area FROM run_places_backup
+         WHERE place_id IN (SELECT place_id FROM place_cache);
+      DROP TABLE run_places_backup;
 
       -- Track which lead fields came from a Places listing, so the retention
       -- panel can say exactly what is affected and purge only that.

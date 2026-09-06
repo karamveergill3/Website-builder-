@@ -1,5 +1,5 @@
 /* Hash router + app shell. */
-import { $, $$, mount, html, toast } from './dom.js';
+import { $, $$, mount, html, toast, clearViewTimers } from './dom.js';
 
 import leadsView     from './views/leads.js';
 import templatesView from './views/templates.js';
@@ -21,8 +21,6 @@ const ROUTES = {
   '/compliance': complianceView,
 };
 
-const view = () => $('#view');
-
 function parseHash() {
   const raw = location.hash.replace(/^#/, '') || '/leads';
   const [path, query = ''] = raw.split('?');
@@ -39,21 +37,39 @@ export function navigate(to) {
   location.hash = to;
 }
 
+/**
+ * Swap in a brand-new <main> before rendering. Views attach delegated handlers
+ * to this element; replacing it means those handlers cannot accumulate across
+ * navigations or fire on a screen they were never meant for.
+ */
+function freshView() {
+  const old = $('#view');
+  const next = document.createElement('main');
+  next.id = 'view';
+  old.replaceWith(next);
+  return next;
+}
+
 async function route() {
   const { path, params } = parseHash();
-  const render = ROUTES[path] ?? ROUTES['/leads'];
+  // Object.hasOwn, so a hash like "#constructor" cannot resolve to a
+  // prototype member and leave the app on a spinner forever.
+  const render = Object.hasOwn(ROUTES, path) ? ROUTES[path] : ROUTES['/leads'];
+
+  clearViewTimers();
 
   for (const a of $$('#nav a')) {
     a.toggleAttribute('aria-current', a.getAttribute('href') === `#${path}`);
     if (a.getAttribute('href') === `#${path}`) a.setAttribute('aria-current', 'page');
   }
 
-  mount(view(), html`<div class="loading"><span class="spinner"></span></div>`);
+  const el = freshView();
+  mount(el, html`<div class="loading"><span class="spinner"></span></div>`);
   try {
-    await render(view(), params, { refresh, navigate });
+    await render(el, params, { refresh, navigate });
   } catch (err) {
     console.error(err);
-    mount(view(), html`
+    mount($('#view'), html`
       <div class="card"><div class="card-body">
         <div class="note note-danger">
           <div><strong>Could not load this screen.</strong><br>${err.message}</div>

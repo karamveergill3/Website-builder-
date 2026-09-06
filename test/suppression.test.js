@@ -67,3 +67,32 @@ test('stats count what is lawfully emailable, not merely what has an address', a
 
   for (const l of made) await del(`/api/leads/${l.id}`);
 });
+
+test('a lead created already opted out is suppressed at creation, not only on edit', async () => {
+  const lead = (await post('/api/leads', corp({
+    business_name: 'Born Opted Out Ltd', email: 'born@optedout.co.uk', opted_out: true,
+  }))).body.lead;
+
+  assert.equal(lead.opted_out, true);
+  assert.equal(lead.suppressed, true, 'the address must be suppressed at creation');
+
+  // Deleting the lead must not lose the opt-out.
+  await del(`/api/leads/${lead.id}`);
+  const again = (await post('/api/leads', corp({
+    business_name: 'Born Opted Out Ltd', email: 'born@optedout.co.uk',
+  }))).body.lead;
+  assert.equal(again.can_email, false);
+  assert.equal(again.block_code, 'SUPPRESSED');
+
+  await del(`/api/leads/${again.id}`);
+});
+
+test('an unknown sort key cannot reach the SQL', async () => {
+  // "constructor" and "toString" resolve on Object.prototype, so a naive
+  // lookup would interpolate a function into the ORDER BY clause.
+  for (const sort of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'nonsense']) {
+    const r = await get(`/api/leads?sort=${encodeURIComponent(sort)}`);
+    assert.equal(r.status, 200, `sort=${sort} should fall back, not 500`);
+    assert.ok(Array.isArray(r.body.leads));
+  }
+});

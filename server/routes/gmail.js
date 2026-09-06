@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { db, getSetting } from '../db.js';
 import { wrap, badRequest, notFound, conflict, nowIso, str, int, bool, looksLikeEmail } from '../lib/http.js';
+import { DEFAULTS } from './settings.js';
 import { composeFor } from './emails.js';
 import { buildFooter, optOutMailto } from '../lib/compliance.js';
 import { sendability } from '../lib/pecr.js';
@@ -31,7 +32,8 @@ const REASONS = {
   UNCLASSIFIED: 'not checked as a company yet',
 };
 
-const settingInt = (key, fallback) => {
+/** Read a numeric setting, falling back to the shared default for that key. */
+const settingInt = (key, fallback = Number(DEFAULTS[key])) => {
   const n = Number(getSetting(key, String(fallback)));
   return Number.isFinite(n) ? n : fallback;
 };
@@ -46,7 +48,7 @@ function sentToday() {
 }
 
 function capState() {
-  const cap = settingInt('daily_cap', 20);
+  const cap = settingInt('daily_cap');
   const used = sentToday();
   return { cap, used, remaining: Math.max(cap - used, 0) };
 }
@@ -60,8 +62,8 @@ router.get('/status', wrap((_req, res) => {
     email: connectedEmail(),
     scopes: SCOPES,
     daily: capState(),
-    delay_min_seconds: settingInt('send_delay_min_seconds', 120),
-    delay_max_seconds: settingInt('send_delay_max_seconds', 420),
+    delay_min_seconds: settingInt('send_delay_min_seconds'),
+    delay_max_seconds: settingInt('send_delay_max_seconds'),
     active_send: activeSend,
     pending: db.prepare("SELECT COUNT(*) n FROM send_queue WHERE status = 'pending'").get().n,
   });
@@ -75,19 +77,23 @@ router.get('/connect', wrap((req, res) => {
   res.json({ url: authUrl(redirectUri(req), state) });
 }));
 
+const HTML_ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+/** Anything from the query string is attacker-controlled — escape it. */
+const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => HTML_ESC[c]);
+
 router.get('/callback', wrap(async (req, res) => {
-  const page = (title, message, ok) => res.status(ok ? 200 : 400).send(
-    `<!doctype html><meta charset="utf-8"><title>${title}</title>
+  const page = (title, messageHtml, ok) => res.status(ok ? 200 : 400).send(
+    `<!doctype html><meta charset="utf-8"><title>${escHtml(title)}</title>
      <body style="font-family:system-ui;max-width:34rem;margin:14vh auto;padding:0 1.5rem;
                   color:#1b2b21;background:#f4f2e9;line-height:1.6">
-       <h1 style="font-family:Georgia,serif">${title}</h1>
-       <p>${message}</p>
+       <h1 style="font-family:Georgia,serif">${escHtml(title)}</h1>
+       <p>${messageHtml}</p>
        <p><a href="/#/outbox" style="color:#2f6b4f">Back to Prospect Book</a></p>
      </body>`
   );
 
   if (req.query.error) {
-    return page('Not connected', `Google returned: ${str(req.query.error)}`, false);
+    return page('Not connected', `Google returned: ${escHtml(str(req.query.error))}`, false);
   }
   const state = str(req.query.state);
   if (!state || !pendingStates.has(state)) {
@@ -100,9 +106,10 @@ router.get('/callback', wrap(async (req, res) => {
 
   try {
     const { email } = await exchangeCode(code, redirectUri(req));
-    return page('Gmail connected', `Prospect Book can now send as <strong>${email ?? 'your account'}</strong>.`, true);
+    return page('Gmail connected',
+      `Prospect Book can now send as <strong>${escHtml(email ?? 'your account')}</strong>.`, true);
   } catch (err) {
-    return page('Not connected', err.message, false);
+    return page('Not connected', escHtml(err.message), false);
   }
 }));
 
@@ -184,8 +191,8 @@ router.get('/queue', wrap((_req, res) => {
     queue: rows,
     pending: rows.filter((r) => r.status === 'pending'),
     daily: capState(),
-    delay_min_seconds: settingInt('send_delay_min_seconds', 120),
-    delay_max_seconds: settingInt('send_delay_max_seconds', 420),
+    delay_min_seconds: settingInt('send_delay_min_seconds'),
+    delay_max_seconds: settingInt('send_delay_max_seconds'),
     connected: isConnected(),
     email: connectedEmail(),
     active_send: activeSend,
@@ -244,6 +251,7 @@ async function runSend(queueIds, delayMin, delayMax) {
       break;
     }
 
+    let sent = null;
     try {
       const raw = buildRawMessage({
         to: item.to_email,
@@ -254,9 +262,28 @@ async function runSend(queueIds, delayMin, delayMax) {
         body: item.body,
         listUnsubscribe: settings.optOut,
       });
-      const sent = await sendRaw(raw);
-      const at = nowIso();
+      sent = await sendRaw(raw);
+    } catch (err) {
+      db.prepare("UPDATE send_queue SET status = 'failed', error = ? WHERE id = ?")
+        .run(err.message, queueId);
+      activeSend.failed++;
+      activeSend.done++;
+      // A rejected token or an exhausted daily allowance will not fix itself.
+      if (err instanceof GmailError && ['REAUTH_NEEDED', 'DAILY_LIMIT', 'NOT_CONNECTED'].includes(err.code)) {
+        activeSend.stopped_reason = err.message;
+        break;
+      }
+      if (delayMax > 0 && !activeSend?.cancelled) {
+        const wait = delayMin + Math.random() * (delayMax - delayMin);
+        await sleep(Math.round(wait * 1000));
+      }
+      continue;
+    }
 
+    // The message has left. Bookkeeping must not be able to turn a delivered
+    // email into a "failed" one, so it is outside the send's catch.
+    try {
+      const at = nowIso();
       db.transaction(() => {
         db.prepare(
           `UPDATE send_queue SET status = 'sent', sent_at = ?, error = NULL WHERE id = ?`
@@ -278,15 +305,13 @@ async function runSend(queueIds, delayMin, delayMax) {
       activeSend.sent++;
       activeSend.done++;
     } catch (err) {
-      db.prepare("UPDATE send_queue SET status = 'failed', error = ? WHERE id = ?")
-        .run(err.message, queueId);
-      activeSend.failed++;
+      // Record it as sent regardless -- it was -- and surface the bookkeeping
+      // failure rather than losing the fact of the send.
+      console.error('[gmail] send succeeded but logging failed:', err);
+      db.prepare("UPDATE send_queue SET status = 'sent', sent_at = ?, error = ? WHERE id = ?")
+        .run(nowIso(), `sent, but logging failed: ${err.message}`, queueId);
+      activeSend.sent++;
       activeSend.done++;
-      // A rejected token or an exhausted daily allowance will not fix itself.
-      if (err instanceof GmailError && ['REAUTH_NEEDED', 'DAILY_LIMIT', 'NOT_CONNECTED'].includes(err.code)) {
-        activeSend.stopped_reason = err.message;
-        break;
-      }
     }
 
     // A randomised gap, never a fixed interval: an exact cadence is the
@@ -338,8 +363,8 @@ router.post('/send', wrap((req, res) => {
   }
 
   const toSend = ids.slice(0, remaining);
-  const delayMin = settingInt('send_delay_min_seconds', 120);
-  const delayMax = Math.max(settingInt('send_delay_max_seconds', 420), delayMin);
+  const delayMin = settingInt('send_delay_min_seconds');
+  const delayMax = Math.max(settingInt('send_delay_max_seconds'), delayMin);
 
   activeSend = {
     id: randomUUID(),

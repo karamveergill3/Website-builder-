@@ -152,6 +152,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** POST/GET with one retry-with-backoff for transient failures. */
 async function call(url, { method = 'POST', mask, body, signal }) {
+  // Resolve the key up front: a missing one is a configuration error, not
+  // something worth three network retries.
+  const key = apiKey();
   let lastErr;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt) await sleep(500 * 2 ** attempt);
@@ -161,7 +164,7 @@ async function call(url, { method = 'POST', mask, body, signal }) {
         method,
         signal,
         headers: {
-          'X-Goog-Api-Key': apiKey(),
+          'X-Goog-Api-Key': key,
           'X-Goog-FieldMask': mask,
           ...(body ? { 'Content-Type': 'application/json' } : {}),
         },

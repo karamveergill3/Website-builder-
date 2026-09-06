@@ -414,3 +414,66 @@ test('imported leads are never auto-classified, whatever the name says', async (
   assert.equal(withEvidence.status, 200);
   assert.equal(withEvidence.body.lead.can_email, true);
 });
+
+test('a place ID known only from a hand-entered lead does not abort the sweep', async () => {
+  // The lead supplies a place ID that place_cache has never seen. Treating it
+  // as "already known" and going straight to UPDATE used to leave run_places
+  // with a dangling foreign key, which killed the whole run.
+  const lead = (await post('/api/leads', {
+    business_name: 'Hand Entered Ltd', google_place_id: 'hand-entered-1',
+  })).body.lead;
+
+  stubPlaces();
+  nextResponses = [{
+    status: 200,
+    body: {
+      places: [
+        place('hand-entered-1', 'Hand Entered Ltd', {}),
+        place('fresh-after-1', 'Should Still Be Found', {}),
+      ],
+    },
+  }];
+  const start = await post('/api/places/search', { category: 'roofers', areas: 'Leeds' });
+  const data = await waitForRun(start.body.run.id);
+
+  assert.equal(data.run.error, null, 'the sweep must not die on a lead-only place ID');
+  assert.equal(data.candidates.length, 2);
+  assert.ok(data.candidates.some((c) => c.place_id === 'fresh-after-1'),
+    'places after the lead-only one are still recorded');
+
+  await patch(`/api/leads/${lead.id}`, {});
+});
+
+test('the optional Place Details verification pass completes', async () => {
+  stubPlaces();
+  nextResponses = [
+    { status: 200, body: { places: [place('verify-1', 'Verify Me', {})] } },
+    // The Place Details response for the candidate: still no website.
+    { status: 200, body: { id: 'verify-1', displayName: { text: 'Verify Me' } } },
+  ];
+  const start = await post('/api/places/search', {
+    category: 'roofers', areas: 'Otley', verify_with_details: true,
+  });
+  const data = await waitForRun(start.body.run.id);
+
+  assert.equal(data.run.error, null, 'the verification pass must not crash the run');
+  assert.equal(calls.length, 2, 'one Text Search plus one Place Details');
+  assert.match(calls[1].url, /places\/verify-1/);
+  assert.doesNotMatch(calls[1].mask, /^places\./, 'Place Details masks take no "places." prefix');
+  assert.equal(data.candidates.length, 1);
+});
+
+test('a Place Details verification that finds a website drops the candidate', async () => {
+  stubPlaces();
+  nextResponses = [
+    { status: 200, body: { places: [place('verify-2', 'Actually Has One', {})] } },
+    { status: 200, body: { id: 'verify-2', websiteUri: 'https://found-later.example' } },
+  ];
+  const start = await post('/api/places/search', {
+    category: 'tilers', areas: 'Ilkley', verify_with_details: true,
+  });
+  const data = await waitForRun(start.body.run.id);
+
+  assert.equal(data.run.error, null);
+  assert.equal(data.candidates.length, 0, 'the verification pass corrects the flag');
+});

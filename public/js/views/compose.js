@@ -100,14 +100,48 @@ export default async function composeView(root, params, { navigate }) {
   $('#c-lead', root).addEventListener('change', (e) => setParam('lead', e.target.value));
   $('#c-template', root).addEventListener('change', (e) => setParam('template', e.target.value));
 
+  // Handlers are bound ONCE against the container. Re-registering them on
+  // every preview render made a single "Copy" write several sent-log rows.
+  const box = $('#pv', root);
+  let data = null;
+
+  const logIt = async (channel) => {
+    if (!data) return;
+    await api.emails.log({
+      lead_id: Number(leadId), template_id: Number(templateId),
+      channel, subject: data.subject, body: data.body, to_email: data.lead.email ?? '',
+    });
+    toast(`Logged as sent to ${data.lead.business_name}`);
+    await renderPreview();
+  };
+
+  on(box, 'click', '[data-act="copy"]', async () => {
+    if (!data) return;
+    const ok = await copyToClipboard(`Subject: ${data.subject}\n\n${data.body}`);
+    toast(ok ? 'Copied to clipboard' : 'Could not copy — select the text instead', { error: !ok });
+    if (ok) await logIt('copy');
+  });
+
+  // Let the browser open the draft, then log it.
+  on(box, 'click', '[data-act="mailto"]', () => setTimeout(() => logIt('mailto'), 400));
+
+  on(box, 'click', '[data-act="mark-sent"]', () => logIt('copy'));
+
+  on(box, 'click', '[data-act="queue"]', async () => {
+    await api.post('/api/gmail/queue', {
+      lead_ids: [Number(leadId)], template_id: Number(templateId),
+    });
+    toast('Queued — review and confirm in the Outbox');
+    navigate('/outbox');
+  });
+
   await renderPreview();
 
   async function renderPreview() {
-    const box = $('#pv', root);
-    let data;
     try {
       data = await api.emails.preview(leadId, templateId);
     } catch (err) {
+      data = null;
       mount(box, html`<div class="note note-danger"><div>${err.message}</div></div>`);
       return;
     }
@@ -162,34 +196,5 @@ export default async function composeView(root, params, { navigate }) {
         </div>
       </div>`);
 
-    const logIt = async (channel) => {
-      await api.emails.log({
-        lead_id: Number(leadId), template_id: Number(templateId),
-        channel, subject: data.subject, body: data.body, to_email: data.lead.email ?? '',
-      });
-      toast(`Logged as sent to ${data.lead.business_name}`);
-      await renderPreview();
-    };
-
-    on(box, 'click', '[data-act="copy"]', async () => {
-      const ok = await copyToClipboard(`Subject: ${data.subject}\n\n${data.body}`);
-      toast(ok ? 'Copied to clipboard' : 'Could not copy — select the text instead', { error: !ok });
-      if (ok) await logIt('copy');
-    });
-
-    on(box, 'click', '[data-act="mailto"]', () => {
-      // Let the browser open the draft, then log it.
-      setTimeout(() => logIt('mailto'), 400);
-    });
-
-    on(box, 'click', '[data-act="mark-sent"]', () => logIt('copy'));
-
-    on(box, 'click', '[data-act="queue"]', async () => {
-      await api.post('/api/gmail/queue', {
-        lead_ids: [Number(leadId)], template_id: Number(templateId),
-      });
-      toast('Queued — review and confirm in the Outbox');
-      navigate('/outbox');
-    });
   }
 }

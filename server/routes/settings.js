@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getSettings, setSetting } from '../db.js';
+import { db, getSettings, setSetting } from '../db.js';
 import { wrap, badRequest, looksLikeEmail } from '../lib/http.js';
 import {
   buildFooter, missingIdentityFields, REQUIRED_IDENTITY_FIELDS,
@@ -82,14 +82,23 @@ router.put('/', wrap((req, res) => {
   if (body.optout_email && !looksLikeEmail(body.optout_email)) {
     throw badRequest('Opt-out email address does not look valid');
   }
+  // A blank value here used to slip past the range check and be stored as '',
+  // which Number() reads as 0 -- a daily cap of zero, or no delay at all.
   for (const [key, min, max] of [
     ['daily_cap', 1, 500],
     ['send_delay_seconds', 0, 3600],
     ['send_delay_min_seconds', 0, 3600],
     ['send_delay_max_seconds', 0, 3600],
   ]) {
-    if (body[key] === undefined || body[key] === '') continue;
-    const n = Number(body[key]);
+    if (body[key] === undefined) continue;
+    const raw = String(body[key]).trim();
+    if (raw === '') {
+      // Blank means "back to the default", so drop the override entirely.
+      delete body[key];
+      db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+      continue;
+    }
+    const n = Number(raw);
     if (!Number.isFinite(n) || n < min || n > max) {
       throw badRequest(`${key} must be a number between ${min} and ${max}`);
     }

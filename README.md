@@ -39,6 +39,8 @@ Sending is deliberately blocked until you do — see [Compliance](#compliance--r
 | **Find companies** | One-off register search by trade and town | A Companies House key |
 | **Website check** | Which of them have no website | A Google Cloud API key |
 | **Outbox** | Review-then-send through your own Gmail | A Google OAuth client |
+| **Reach**  | WhatsApp / SMS / call any lead — one tap per send  | A UK phone number |
+| **Contact finder** | Scrapes the lead's website + public directories | Nothing (free)  |
 
 The tracker works on its own with no keys at all.
 

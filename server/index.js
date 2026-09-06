@@ -9,6 +9,7 @@ import templates from './routes/templates.js';
 import emails from './routes/emails.js';
 import settings from './routes/settings.js';
 import suppression from './routes/suppression.js';
+import outreach from './routes/outreach.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, '..', 'public');
@@ -38,6 +39,10 @@ app.use('/api/templates', templates);
 app.use('/api/emails', emails);
 app.use('/api/settings', settings);
 app.use('/api/suppression', suppression);
+// The outreach module registers /api/leads/:id/... paths too, so it must be
+// mounted AT /api and after the leads router — Express matches most-specific
+// first only within one Router.
+app.use('/api', outreach);
 
 // Phase 2 and 3 routers are mounted lazily so the tracker keeps working even
 // if their integrations are unconfigured or their modules fail to load.

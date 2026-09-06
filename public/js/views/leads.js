@@ -227,12 +227,11 @@ export default async function leadsView(root, params, { refresh }) {
                 </td>
                 <td class="meta nw">${l.last_contacted_at ? relative(l.last_contacted_at) : '—'}</td>
                 <td class="c-act">
-                  ${l.can_email ? html`<button class="mini" data-act="write" data-id="${l.id}">Write</button>`
-                    : l.block_code === 'UNCLASSIFIED' ? html`
-                      <button class="mini" data-act="classify" data-id="${l.id}">Check</button>`
-                    : l.block_code === 'NO_EMAIL' ? html`
-                      <button class="mini" data-act="findmail" data-id="${l.id}"
-                              data-name="${l.business_name}" data-town="${l.location ?? ''}">Find email</button>` : ''}
+                  ${l.can_email ? html`<button class="mini" data-act="write" data-id="${l.id}">Write</button>` : ''}
+                  <button class="mini" data-act="reach" data-id="${l.id}"
+                          title="WhatsApp, SMS, call — or find contact details">Reach</button>
+                  ${l.block_code === 'UNCLASSIFIED' ? html`
+                      <button class="mini" data-act="classify" data-id="${l.id}">Check</button>` : ''}
                   <button class="mini" data-act="edit" data-id="${l.id}">Edit</button>
                   <button class="mini danger" data-act="del" data-id="${l.id}"
                           data-name="${l.business_name}" aria-label="Delete">✕</button>
@@ -286,9 +285,10 @@ export default async function leadsView(root, params, { refresh }) {
     if (await openRegisterDialog(el.dataset.id)) refresh();
   });
 
-  on(root, 'click', '[data-act="findmail"]', (_e, el) => {
-    const q = encodeURIComponent(`"${el.dataset.name}" ${el.dataset.town} email contact`);
-    window.open(`https://duckduckgo.com/?q=${q}`, '_blank', 'noopener');
+  on(root, 'click', '[data-act="reach"]', async (_e, el) => {
+    const { openReachDialog } = await import('./reach.js');
+    await openReachDialog(el.dataset.id);
+    refresh();
   });
 
   on(root, 'click', '[data-act="del"]', async (_e, el) => {

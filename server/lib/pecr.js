@@ -64,9 +64,24 @@ export const looksCorporate = (businessName) => CORPORATE_NAME.test(String(busin
 /**
  * The single gate every send path calls.
  * Returns { allowed, code, reason } — never throws.
+ *
+ * Channel matters. The regulation covers different acts:
+ *
+ *   email    — PECR reg 22, corporate-only, applies to unsolicited marketing
+ *   sms      — PECR reg 22, same test as email (electronic mail includes SMS)
+ *   whatsapp — PECR reg 22, treated the same as SMS for marketing purposes
+ *   call     — PECR reg 21, and TPS/CTPS registration takes precedence
+ *
+ * The corporate-vs-individual gate is the same across all four. The email-
+ * specific "must have an email" / "free-mail" tests only run for the email
+ * channel; the others need a phone number instead. TPS/CTPS lookups are
+ * NOT automated here — there is no free bulk-check API — but the response
+ * carries a reminder for the caller to check before making calls at scale.
  */
-export function sendability(lead, { suppressed = false } = {}) {
-  const no = (code, reason) => ({ allowed: false, code, reason });
+export function sendability(lead, arg = {}) {
+  const opts = typeof arg === 'string' ? { channel: arg } : arg;
+  const { channel = 'email', suppressed = false } = opts;
+  const no = (code, reason) => ({ allowed: false, code, reason, channel });
 
   if (!lead) return no('NO_LEAD', 'That lead no longer exists.');
 
@@ -74,30 +89,46 @@ export function sendability(lead, { suppressed = false } = {}) {
     return no('OPTED_OUT',
       `${lead.business_name} has opted out. Opted-out leads are excluded from every send.`);
   }
-  if (suppressed) {
-    return no('SUPPRESSED',
-      `${lead.email} is on your suppression list from a previous opt-out and cannot be emailed.`);
+
+  if (channel === 'email') {
+    if (suppressed) {
+      return no('SUPPRESSED',
+        `${lead.email} is on your suppression list from a previous opt-out and cannot be emailed.`);
+    }
+    if (!lead.email) {
+      return no('NO_EMAIL', `${lead.business_name} has no email address.`);
+    }
+    if (isFreeMail(lead.email)) {
+      return no('FREE_MAIL',
+        `${lead.email} is a personal mailbox (${emailDomain(lead.email)}). The subscriber is the ` +
+        'individual, not the business, so PECR regulation 22 applies and cold email is not permitted ' +
+        'without consent. Phone them instead, or find a company address.');
+    }
+  } else if (channel === 'sms' || channel === 'whatsapp' || channel === 'call') {
+    if (!lead.phone) {
+      return no('NO_PHONE', `${lead.business_name} has no phone number.`);
+    }
+  } else {
+    return no('BAD_CHANNEL', `Unknown channel: ${channel}`);
   }
-  if (!lead.email) {
-    return no('NO_EMAIL', `${lead.business_name} has no email address.`);
-  }
-  if (isFreeMail(lead.email)) {
-    return no('FREE_MAIL',
-      `${lead.email} is a personal mailbox (${emailDomain(lead.email)}). The subscriber is the ` +
-      'individual, not the business, so PECR regulation 22 applies and cold email is not permitted ' +
-      'without consent. Phone them instead, or find a company address.');
-  }
+
   if (lead.entity_type === 'individual') {
+    const noun = channel === 'call' ? 'unsolicited marketing call'
+      : channel === 'email' ? 'unsolicited marketing email'
+      : 'unsolicited marketing message';
     return no('INDIVIDUAL_SUBSCRIBER',
       `${lead.business_name} is marked as a sole trader or ordinary partnership. Under PECR ` +
-      'regulation 22 these are individual subscribers, so unsolicited marketing email needs ' +
-      'their prior consent. Ring them or write to them instead.');
+      `regulation 22 these are individual subscribers, so ${noun} needs their prior consent.`);
   }
   if (lead.entity_type !== 'corporate') {
     return no('UNCLASSIFIED',
       `${lead.business_name} has not been checked yet. Confirm whether it is a limited company ` +
-      'or LLP (which may be cold-emailed) or a sole trader (which may not) before sending. ' +
+      'or LLP (which may be contacted) or a sole trader (which may not) before sending. ' +
       'Search the name on the Companies House register if you are unsure.');
   }
-  return { allowed: true, code: 'OK', reason: null };
+  const advice = channel === 'call'
+    ? 'Corporate subscribers are exempt from TPS but not from CTPS: check the number on ' +
+      'ctpsonline.org.uk before calling.'
+    : null;
+  return { allowed: true, code: 'OK', reason: null, channel, advice };
 }

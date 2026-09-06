@@ -292,6 +292,67 @@ const MIGRATIONS = [
       ALTER TABLE leads ADD COLUMN website_evidence TEXT;
     `,
   },
+  {
+    name: '012_multichannel_outreach',
+    up: `
+      -- Every discovered fragment of contact info: an email, a phone, a
+      -- Facebook page, a WhatsApp number. One row per unique (lead, kind,
+      -- value). Source and confidence are kept so the UI can show provenance
+      -- and the user can decide what to trust.
+      CREATE TABLE contact_signals (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        lead_id         INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+        kind            TEXT    NOT NULL
+                                CHECK (kind IN ('email','phone','whatsapp','website','facebook','other')),
+        value           TEXT    NOT NULL,
+        source          TEXT    NOT NULL,
+        confidence      INTEGER NOT NULL DEFAULT 50 CHECK (confidence BETWEEN 0 AND 100),
+        note            TEXT,
+        first_seen_at   TEXT    NOT NULL,
+        last_seen_at    TEXT    NOT NULL,
+        promoted_at     TEXT,
+        UNIQUE (lead_id, kind, value)
+      );
+      CREATE INDEX idx_signals_lead ON contact_signals(lead_id);
+      CREATE INDEX idx_signals_kind ON contact_signals(kind);
+
+      -- One row per discovery pass, so we know when a lead was last hunted
+      -- and can rate-limit the outbound scraping without hammering sites.
+      CREATE TABLE contact_finds (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        lead_id      INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+        started_at   TEXT    NOT NULL,
+        finished_at  TEXT,
+        signals      INTEGER NOT NULL DEFAULT 0,
+        error        TEXT,
+        sources      TEXT
+      );
+      CREATE INDEX idx_finds_lead ON contact_finds(lead_id, started_at DESC);
+
+      -- Every WhatsApp / SMS / call handoff we prepared. The user still taps
+      -- send on their own phone, so \"prepared_at\" is what the tool did and
+      -- \"confirmed_sent_at\" is what the user later marks as actually sent.
+      CREATE TABLE outreach_events (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        lead_id           INTEGER REFERENCES leads(id)     ON DELETE SET NULL,
+        template_id       INTEGER REFERENCES templates(id) ON DELETE SET NULL,
+        lead_name         TEXT    NOT NULL,
+        channel           TEXT    NOT NULL
+                                  CHECK (channel IN ('whatsapp','sms','call')),
+        recipient         TEXT    NOT NULL,
+        body_snapshot     TEXT,
+        prepared_at       TEXT    NOT NULL,
+        confirmed_sent_at TEXT
+      );
+      CREATE INDEX idx_outreach_lead ON outreach_events(lead_id);
+      CREATE INDEX idx_outreach_prep ON outreach_events(prepared_at DESC);
+
+      -- Templates get a channel. Existing rows keep the default 'email'
+      -- so nothing already saved has to change.
+      ALTER TABLE templates ADD COLUMN channel TEXT NOT NULL DEFAULT 'email'
+        CHECK (channel IN ('email','whatsapp','sms'));
+    `,
+  },
 ];
 
 function migrate() {

@@ -60,9 +60,11 @@ test('no source file reaches a model provider', () => {
   assert.deepEqual(hits, [], `model-provider call introduced:\n${hits.join('\n')}`);
 });
 
-test('every outbound host is one of the four services this tool uses', () => {
-  // Companies House, Google Places, Gmail/OAuth, and the webfont CDN. Anything
-  // else is a new external dependency and should be a deliberate choice.
+test('every outbound host is one of the services this tool uses', () => {
+  // Companies House, Google Places, Gmail/OAuth, the webfont CDN, DuckDuckGo
+  // (for free contact discovery), plus the deep-link handoff domains for
+  // WhatsApp. Anything else is a new external dependency and should be a
+  // deliberate choice.
   const ALLOWED = new Set([
     'api.company-information.service.gov.uk',
     'find-and-update.company-information.service.gov.uk',
@@ -77,6 +79,15 @@ test('every outbound host is one of the four services this tool uses', () => {
     'fonts.googleapis.com',
     'fonts.gstatic.com',
     'duckduckgo.com',
+    // Free contact-discovery: DuckDuckGo HTML search. No key, no cost.
+    'html.duckduckgo.com',
+    // Contact-finder result targets: public pages we may fetch and parse
+    // when the search returns them; and the WhatsApp deep-link domain we
+    // build wa.me/{E164} links against. wa.me links open on the user's
+    // phone, they are not called by the server.
+    'wa.me',
+    'facebook.com',
+    'faq.whatsapp.com',
   ]);
 
   const found = new Set();

@@ -61,4 +61,15 @@ export const api = {
     get:  ()     => request('GET', '/api/settings'),
     save: (body) => request('PUT', '/api/settings', body),
   },
+  contacts: {
+    signals: (leadId)       => request('GET',  `/api/leads/${leadId}/signals`),
+    find:    (leadId, opts) => request('POST', `/api/leads/${leadId}/find-contacts`, opts ?? {}),
+    promote: (leadId, sid)  => request('POST', `/api/leads/${leadId}/signals/${sid}/promote`, {}),
+    remove:  (leadId, sid)  => request('DELETE',`/api/leads/${leadId}/signals/${sid}`),
+  },
+  outreach: {
+    prepare: (body)    => request('POST', '/api/outreach/prepare', body),
+    sent:    (eventId) => request('POST', `/api/outreach/${eventId}/sent`, {}),
+    list:    (params)  => request('GET',  '/api/outreach' + qs(params)),
+  },
 };

@@ -93,3 +93,59 @@ test('dots are significant on hosts that treat them that way', () => {
 test('domainOf reads the normalised domain', () => {
   assert.equal(domainOf('  Dave+x@Acme.CO.UK '), 'acme.co.uk');
 });
+
+/* -------------------------- per-channel sendability ---------------------- */
+
+test('sendability(whatsapp) allows a corporate lead with a phone', () => {
+  const v = sendability(lead({ phone: '07123456789' }), { channel: 'whatsapp' });
+  assert.equal(v.allowed, true);
+  assert.equal(v.channel, 'whatsapp');
+});
+
+test('sendability(whatsapp) refuses without a phone', () => {
+  const v = sendability(lead(), { channel: 'whatsapp' });
+  assert.equal(v.allowed, false);
+  assert.equal(v.code, 'NO_PHONE');
+});
+
+test('sendability(sms) refuses a sole trader — same reg 22 rule', () => {
+  const v = sendability(
+    lead({ entity_type: 'individual', phone: '07123456789' }),
+    { channel: 'sms' }
+  );
+  assert.equal(v.allowed, false);
+  assert.equal(v.code, 'INDIVIDUAL_SUBSCRIBER');
+  assert.match(v.reason, /message/);
+});
+
+test('sendability(call) allows a corporate but carries CTPS advice', () => {
+  const v = sendability(lead({ phone: '01132002000' }), { channel: 'call' });
+  assert.equal(v.allowed, true);
+  assert.match(v.advice, /CTPS/);
+});
+
+test('sendability defaults to email when no channel is given (back-compat)', () => {
+  const v = sendability(lead());
+  assert.equal(v.allowed, true);
+  assert.equal(v.channel, 'email');
+});
+
+test('sendability(email) still checks email-specific rules', () => {
+  const v = sendability(lead({ email: null, phone: '07123456789' }), { channel: 'email' });
+  assert.equal(v.allowed, false);
+  assert.equal(v.code, 'NO_EMAIL');
+});
+
+test('sendability rejects unknown channels', () => {
+  const v = sendability(lead(), { channel: 'fax' });
+  assert.equal(v.allowed, false);
+  assert.equal(v.code, 'BAD_CHANNEL');
+});
+
+test('opt-out still beats every channel', () => {
+  for (const channel of ['email', 'whatsapp', 'sms', 'call']) {
+    const v = sendability(lead({ opted_out: 1, phone: '07123456789' }), { channel });
+    assert.equal(v.allowed, false, channel);
+    assert.equal(v.code, 'OPTED_OUT', channel);
+  }
+});

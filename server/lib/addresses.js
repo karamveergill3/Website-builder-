@@ -46,6 +46,31 @@ export const domainOf = (email) =>
 /** Cache MX answers for the life of the process; DNS is slow and repetitive. */
 const mxCache = new Map();
 
+/**
+ * A null MX (RFC 7505) is a domain saying, explicitly, that it accepts no mail
+ * at all: a single record with preference 0 and a zero-length label. c-ares
+ * surfaces that label as an EMPTY STRING rather than ".", so checking for "."
+ * alone never fires. example.com and a good many defensive registrations of
+ * mistyped domains publish one, and mail to them bounces every time.
+ */
+const isNullExchange = (x) => {
+  const v = String(x ?? '').trim();
+  return v === '' || v === '.';
+};
+
+/**
+ * RFC 5321 §5.1: with no MX record, the A record is treated as an implicit
+ * mail exchanger. So "no MX" is not the same as "no mail".
+ */
+async function implicitMx(domain) {
+  try {
+    await dns.resolve(domain);
+    return { ok: true, hosts: [], note: 'no MX record — mail would fall back to the A record' };
+  } catch {
+    return { ok: false, reason: 'the domain does not accept mail' };
+  }
+}
+
 export async function hasMx(domain, { timeoutMs = 4000 } = {}) {
   const d = String(domain ?? '').toLowerCase();
   if (!d) return { ok: false, reason: 'no domain' };
@@ -53,19 +78,24 @@ export async function hasMx(domain, { timeoutMs = 4000 } = {}) {
 
   const answer = await Promise.race([
     dns.resolveMx(d).then(
-      (records) => (records?.length
-        ? { ok: true, hosts: records.map((r) => r.exchange) }
-        : { ok: false, reason: 'the domain publishes no mail server' }),
+      async (records) => {
+        const list = records ?? [];
+        if (list.length === 1 && isNullExchange(list[0].exchange)) {
+          return { ok: false, reason: 'the domain publishes a null MX — it accepts no mail at all' };
+        }
+        const usable = list.filter((r) => !isNullExchange(r.exchange));
+        if (usable.length) return { ok: true, hosts: usable.map((r) => r.exchange) };
+        // Resolved, but nothing usable in it: fall back the same way an empty
+        // answer would.
+        return implicitMx(d);
+      },
       async (err) => {
-        // A domain with an A record but no MX can still legally receive mail,
-        // so fall back rather than calling it dead.
         if (err.code === 'ENODATA' || err.code === 'ENOTFOUND') {
-          try {
-            await dns.resolve(d);
-            return { ok: true, hosts: [], note: 'no MX record — mail would fall back to the A record' };
-          } catch {
-            return { ok: false, reason: err.code === 'ENOTFOUND' ? 'the domain does not resolve' : 'the domain publishes no mail server' };
+          const fallback = await implicitMx(d);
+          if (!fallback.ok && err.code === 'ENOTFOUND') {
+            return { ok: false, reason: 'the domain does not resolve' };
           }
+          return fallback;
         }
         return { ok: null, reason: `DNS lookup failed (${err.code ?? 'unknown'})` };
       }

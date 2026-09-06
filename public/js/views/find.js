@@ -85,9 +85,11 @@ export default async function findView(root, params, { navigate }) {
                 <p class="tip" id="sic"></p>
               </div>
               <div class="f">
-                <label for="location">Town or postcode <span class="opt">optional</span></label>
+                <label for="location">Town <span class="opt">optional</span></label>
                 <input id="location" name="location" type="text" placeholder="Otley"
                        autocomplete="off" value="${params.location ?? ''}">
+                <p class="tip">Matches whole words in the registered office, so a town or a
+                  full postcode — not a partial one like LS21.</p>
               </div>
             </div>
             <div class="bar" style="margin:0">

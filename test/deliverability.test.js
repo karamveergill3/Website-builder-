@@ -143,3 +143,20 @@ test('a domain that does not resolve is rejected', async (t) => {
   assert.equal(r.level, 'bad');
   assert.match(r.reason, /does not resolve|no mail server/i);
 });
+
+test('a domain publishing a null MX is rejected — it accepts no mail at all', async (t) => {
+  // RFC 7505: a single MX with preference 0 and a zero-length label means the
+  // domain refuses all mail. c-ares surfaces that label as an empty string,
+  // not ".", so a naive length check passes it and every send hard-bounces.
+  const r = await checkAddress('someone@example.com');
+  if (r.level === 'warn') return t.skip('no DNS available in this environment');
+  assert.equal(r.level, 'bad');
+  assert.match(r.reason, /null MX|accepts no mail/i);
+});
+
+test('a real business domain with proper MX records passes', async (t) => {
+  const r = await checkAddress('info@bbc.co.uk');
+  if (r.level === 'warn') return t.skip('no DNS available in this environment');
+  assert.equal(r.level, 'ok');
+  assert.ok(r.mx.length > 0);
+});

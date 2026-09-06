@@ -84,6 +84,8 @@ async function call(path, params = {}) {
       'Companies House rejected the API key. Check it is a LIVE key, not a sandbox one.',
       { status: 503, code: 'KEY_REJECTED' });
   }
+  // Advanced search answers a zero-result query with 404 and an EMPTY body,
+  // not hits:0 — so null here means "nothing found", not "no such thing".
   if (res.status === 404) return null;
   if (res.status === 416) {
     throw new CompaniesHouseError('Paged past the end of the results.', { status: 400, code: 'PAGE_TOO_DEEP' });
@@ -173,9 +175,12 @@ export async function searchByName(name, { limit = 20 } = {}) {
 export async function advancedSearch({
   sicCodes, location, nameIncludes, companyType, size = 100, startIndex = 0,
 } = {}) {
+  // Our own guard, not the register's: an unfiltered advanced search is
+  // accepted but returns the whole register a page at a time, which is never
+  // what anyone meant to ask for.
   if (!sicCodes && !location && !nameIncludes) {
     throw new CompaniesHouseError(
-      'Give at least a trade or a town — Companies House will not run an unfiltered search.',
+      'Give at least a trade or a town — an unfiltered search returns the entire register.',
       { status: 400, code: 'NEEDS_FILTER' });
   }
   const data = await call('/advanced-search/companies', {

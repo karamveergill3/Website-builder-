@@ -7,6 +7,9 @@ import { composeFor } from './emails.js';
 import { buildFooter, optOutMailto } from '../lib/compliance.js';
 import { sendability } from '../lib/pecr.js';
 import { isSuppressed } from '../lib/suppression.js';
+import { scoreDraft } from '../lib/deliverability.js';
+import { checkAddress } from '../lib/addresses.js';
+import { capState, windowState, domainCooldown, policyState } from '../lib/sending-policy.js';
 import {
   authUrl, exchangeCode, redirectUri, buildRawMessage, sendRaw, revoke,
   isConnected, connectedEmail, clientConfigured, GmailError, SCOPES,
@@ -38,21 +41,6 @@ const settingInt = (key, fallback = Number(DEFAULTS[key])) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
-/** Gmail sends counted since local midnight — what the daily cap measures. */
-function sentToday() {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  return db.prepare(
-    `SELECT COUNT(*) n FROM email_log WHERE channel = 'gmail' AND sent_at >= ?`
-  ).get(start.toISOString()).n;
-}
-
-function capState() {
-  const cap = settingInt('daily_cap');
-  const used = sentToday();
-  return { cap, used, remaining: Math.max(cap - used, 0) };
-}
-
 /* ------------------------------------------------------------ connection */
 
 router.get('/status', wrap((_req, res) => {
@@ -61,6 +49,7 @@ router.get('/status', wrap((_req, res) => {
     connected: isConnected(),
     email: connectedEmail(),
     scopes: SCOPES,
+    policy: policyState(),
     daily: capState(),
     delay_min_seconds: settingInt('send_delay_min_seconds'),
     delay_max_seconds: settingInt('send_delay_max_seconds'),
@@ -125,7 +114,7 @@ router.post('/disconnect', wrap(async (_req, res) => {
  * Opted-out leads, leads with no usable address, and any lead whose email
  * would not carry a compliance footer are refused here, and again at send.
  */
-router.post('/queue', wrap((req, res) => {
+router.post('/queue', wrap(async (req, res) => {
   const templateId = int(req.body.template_id);
   if (!templateId) throw badRequest('template_id is required');
   const leadIds = Array.isArray(req.body.lead_ids)
@@ -172,12 +161,39 @@ router.post('/queue', wrap((req, res) => {
         `INSERT INTO send_queue (lead_id, template_id, to_email, subject, body, status, created_at)
          VALUES (?, ?, ?, ?, ?, 'pending', ?)`
       ).run(leadId, templateId, lead.email, c.subject, c.body, nowIso());
-      queued.push(Number(info.lastInsertRowid));
+      queued.push({ id: Number(info.lastInsertRowid), lead, subject: c.subject, body: c.body });
     }
   });
   stage();
 
-  res.status(201).json({ queued: queued.length, skipped, daily: capState() });
+  // Deliverability checks run after staging so the queue reflects what was
+  // asked for, and the Outbox can show exactly what is wrong with each one.
+  const checked = await Promise.all(queued.map(async (q) => {
+    const spam = getSetting('spam_check_enabled', '1') === '1'
+      ? scoreDraft({ subject: q.subject, body: q.body }) : null;
+    const address = getSetting('verify_addresses', '1') === '1'
+      ? await checkAddress(q.lead.email) : null;
+    const cooldown = domainCooldown(q.lead.email);
+
+    const problems = [
+      ...(spam?.blocked ? ['content'] : []),
+      ...(address?.level === 'bad' ? ['address'] : []),
+      ...(cooldown.ok ? [] : ['recent contact']),
+    ];
+    if (problems.length) {
+      db.prepare('UPDATE send_queue SET error = ? WHERE id = ?')
+        .run(`Held: ${problems.join(', ')}`, q.id);
+    }
+    return { id: q.id, spam, address, cooldown };
+  }));
+
+  res.status(201).json({
+    queued: queued.length,
+    skipped,
+    checks: checked,
+    held: checked.filter((c) => c.spam?.blocked || c.address?.level === 'bad' || !c.cooldown.ok).length,
+    daily: capState(),
+  });
 }));
 
 router.get('/queue', wrap((_req, res) => {
@@ -190,6 +206,7 @@ router.get('/queue', wrap((_req, res) => {
   res.json({
     queue: rows,
     pending: rows.filter((r) => r.status === 'pending'),
+    policy: policyState(),
     daily: capState(),
     delay_min_seconds: settingInt('send_delay_min_seconds'),
     delay_max_seconds: settingInt('send_delay_max_seconds'),
@@ -260,7 +277,11 @@ async function runSend(queueIds, delayMin, delayMax) {
         replyTo,
         subject: item.subject,
         body: item.body,
-        listUnsubscribe: settings.optOut,
+        // Off below bulk volumes: the header makes Gmail draw an
+        // "Unsubscribe" chip, which files the message as a campaign. The
+        // opt-out line in the body does the same job and earns a reply.
+        listUnsubscribe: getSetting('list_unsubscribe_enabled', '0') === '1'
+          ? settings.optOut : null,
       });
       sent = await sendRaw(raw);
     } catch (err) {
@@ -357,9 +378,22 @@ router.post('/send', wrap((req, res) => {
     );
   }
 
-  const { cap, used, remaining } = capState();
+  const win = windowState();
+  if (!win.open) {
+    throw badRequest(
+      `${win.reason} Mail arriving outside working hours reads as automated. ` +
+      'Change the window under Settings if you mean to send now.'
+    );
+  }
+
+  const { cap, used, remaining, limited_by_warmup, warmup } = capState();
   if (remaining <= 0) {
-    throw badRequest(`Daily cap of ${cap} reached (${used} sent today). Try again tomorrow, or raise the cap in Settings.`);
+    throw badRequest(
+      limited_by_warmup
+        ? `Warm-up limit of ${cap} reached for today (day ${warmup.day} of sending). ` +
+          'It rises each week. Raising it now is the fastest way to get an account flagged.'
+        : `Daily cap of ${cap} reached (${used} sent today). Try again tomorrow, or raise the cap in Settings.`
+    );
   }
 
   const toSend = ids.slice(0, remaining);

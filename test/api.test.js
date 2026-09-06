@@ -152,7 +152,7 @@ test('compliance: an email cannot be produced until identity details are set', a
   assert.ok(ok.body.mailto);
   assert.match(ok.body.body, /Test Web Studio/, 'identity block is appended');
   assert.match(ok.body.body, /1 Test Street, Leeds LS1 1AA/, 'postal address is appended');
-  assert.match(ok.body.body, /reply with "STOP"/, 'opt-out line is appended');
+  assert.match(ok.body.body, /reply and say so/, 'opt-out line is appended');
 
   await del(`/api/leads/${lead.id}`);
   await del(`/api/templates/${tpl.id}`);

@@ -33,9 +33,13 @@ export const OPTIONAL_IDENTITY_FIELDS = [
   { key: 'biz_vat_number',            label: 'VAT number' },
 ];
 
+/**
+ * A reply-based opt-out rather than an unsubscribe link: it satisfies PECR
+ * reg. 23(b)'s "valid address to send a request that communications cease",
+ * and a reply is the strongest positive signal a mail filter reads.
+ */
 export const DEFAULT_OPTOUT_LINE =
-  'If you would rather not hear from me again, just reply with "STOP" and I will add you to my '
-  + 'do-not-contact list and not write again.';
+  "If this isn't relevant, reply and say so — I won't write again.";
 
 /**
  * PECR reg 23(c) pulls in reg 7 of the E-Commerce Regulations 2002: a

@@ -77,15 +77,15 @@ export function modal({ title, body, footer, wide = false, onMount, onSubmit }) 
   return new Promise((resolve) => {
     const root = document.getElementById('modal-root');
     root.innerHTML = render(html`
-      <div class="modal-backdrop" data-backdrop>
-        <div class="modal${wide ? ' wide' : ''}" role="dialog" aria-modal="true" aria-label="${title}">
-          <div class="modal-head">
+      <div class="veil" data-backdrop>
+        <div class="dlg${wide ? ' wide' : ''}" role="dialog" aria-modal="true" aria-label="${title}">
+          <div class="dlg-hd">
             <h2>${title}</h2>
             <button class="ghost" data-close aria-label="Close">✕</button>
           </div>
           <form data-form>
-            <div class="modal-body">${body}</div>
-            <div class="modal-foot">${footer}</div>
+            <div class="dlg-bd">${body}</div>
+            <div class="dlg-ft">${footer}</div>
           </form>
         </div>
       </div>
@@ -160,6 +160,23 @@ export function clearViewTimers() {
   timers.clear();
 }
 
+/**
+ * Bind a document-level key handler for the lifetime of one view. It detaches
+ * itself as soon as that view's root leaves the document, so shortcuts never
+ * fire on a screen that did not define them.
+ */
+export function viewKeys(root, handler) {
+  const onKey = (ev) => {
+    if (!root.isConnected) return document.removeEventListener('keydown', onKey);
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const t = ev.target;
+    if (t instanceof HTMLElement && t.closest('input, textarea, select, [contenteditable]')) return;
+    if (document.querySelector('.veil')) return;   // a dialog is open
+    handler(ev);
+  };
+  document.addEventListener('keydown', onKey);
+}
+
 /* ---------------- Formatting ---------------- */
 
 export function fmtDate(iso) {
@@ -194,3 +211,7 @@ export function relative(iso) {
 }
 
 export const statusPill = (s) => html`<span class="status" data-s="${s}">${s}</span>`;
+
+/** A short flag chip: neutral by default, green when `ok`. */
+export const flag = (text, ok = false) =>
+  html`<span class="flag" ${ok ? raw('data-ok') : ''}>${text}</span>`;

@@ -68,7 +68,13 @@ async function seed({ name, email, opted_out = false,
 let templateId;
 test('setup: identity and a template', async () => {
   stubGoogle();
-  await put('/api/settings', { ...IDENTITY, send_delay_min_seconds: '0', send_delay_max_seconds: '0', daily_cap: '50' });
+  await put('/api/settings', {
+    ...IDENTITY,
+    send_delay_min_seconds: '0', send_delay_max_seconds: '0', daily_cap: '50',
+    // Pin the policy so tests do not depend on the wall clock or on how much
+    // the suite has already sent; each is covered by its own test below.
+    window_enabled: '0', warmup_enabled: '0', domain_cooldown_days: '0',
+  });
   const t = await post('/api/templates', { name: 'Cold', subject: 'A website for {{business}}?', body: 'Hi there.' });
   templateId = t.body.template.id;
 });
@@ -115,7 +121,7 @@ test('every queued email carries the identity block and opt-out line', async () 
 
   assert.match(q.body, /Test Web Studio/);
   assert.match(q.body, /1 Test Street, Leeds LS1 1AA/);
-  assert.match(q.body, /reply with "STOP"/);
+  assert.match(q.body, /reply and say so/);
   assert.equal(q.subject, 'A website for Footer Check?');
 
   await post('/api/gmail/queue/clear');
@@ -176,20 +182,20 @@ test('a confirmed send reaches Gmail, is logged, and advances the lead', async (
   const msg = decode(sends[0].raw);
   assert.match(msg, /^To: sendme@example\.co\.uk$/m);
   assert.match(msg, /^Subject: A website for Send Me Ltd\?$/m);
-  assert.match(msg, /^List-Unsubscribe: <mailto:sender@test\.example\?subject=unsubscribe>$/m,
-    'a one-click unsubscribe header is what mail clients surface');
+  assert.doesNotMatch(msg, /^List-Unsubscribe:/m,
+    'below bulk volumes the header only marks the message as a campaign');
   assert.match(msg, /^From: .*<me@gmail\.example>$/m);
 
   const body = Buffer.from(msg.split('\r\n\r\n')[1].replace(/\r\n/g, ''), 'base64').toString('utf8');
   assert.match(body, /Test Web Studio/, 'identity block travels in the real message');
-  assert.match(body, /reply with "STOP"/, 'opt-out line travels in the real message');
+  assert.match(body, /reply and say so/, 'opt-out line travels in the real message');
 
   // Logged as proof.
   const entry = (await get(`/api/emails/log?lead_id=${lead.id}`)).body.entries[0];
   assert.equal(entry.channel, 'gmail');
   assert.equal(entry.provider_message_id, 'msg-1');
   assert.equal(entry.to_email, 'sendme@example.co.uk');
-  assert.match(entry.body_snapshot, /reply with "STOP"/);
+  assert.match(entry.body_snapshot, /reply and say so/);
 
   const after = (await get(`/api/leads/${lead.id}`)).body.lead;
   assert.equal(after.status, 'sent');
@@ -228,7 +234,10 @@ test('the daily cap stops sending and leaves the rest queued', async () => {
   connectGmail();
   // Earlier tests have already sent today, so set the cap relative to that.
   const usedSoFar = (await get('/api/gmail/status')).body.daily.used;
-  await put('/api/settings', { daily_cap: String(usedSoFar + 2), send_delay_min_seconds: '0', send_delay_max_seconds: '0' });
+  await put('/api/settings', {
+    daily_cap: String(usedSoFar + 2), send_delay_min_seconds: '0', send_delay_max_seconds: '0',
+    window_enabled: '0', warmup_enabled: '0',
+  });
 
   const leads = [];
   for (const n of ['Cap One', 'Cap Two', 'Cap Three', 'Cap Four']) {
@@ -388,7 +397,7 @@ test('a plain From display name is left unquoted', () => {
 
 test('the daily cap default agrees between the settings API and the send path', async () => {
   // A blank value clears the override, so both sides fall back to the default.
-  await put('/api/settings', { daily_cap: '' });
+  await put('/api/settings', { daily_cap: '', warmup_enabled: '0' });
   const settings = (await get('/api/settings')).body.settings;
   const gmail = (await get('/api/gmail/status')).body;
   assert.equal(gmail.daily.cap, Number(settings.daily_cap),

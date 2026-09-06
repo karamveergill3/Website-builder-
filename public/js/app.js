@@ -64,17 +64,15 @@ async function route() {
   }
 
   const el = freshView();
-  mount(el, html`<div class="loading"><span class="spinner"></span></div>`);
+  mount(el, html`<div class="loading"><span class="spin"></span></div>`);
   try {
     await render(el, params, { refresh, navigate });
   } catch (err) {
     console.error(err);
     mount($('#view'), html`
-      <div class="card"><div class="card-body">
-        <div class="note note-danger">
-          <div><strong>Could not load this screen.</strong><br>${err.message}</div>
-        </div>
-        <p style="margin-top:14px"><button onclick="location.reload()">Reload</button></p>
+      <div class="panel"><div class="panel-bd">
+        <div class="msg msg-bad"><div class="grow">${err.message}</div></div>
+        <p style="margin-top:12px"><button onclick="location.reload()">Reload</button></p>
       </div></div>`);
     toast(err.message, { error: true });
   }

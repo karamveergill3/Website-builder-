@@ -1,5 +1,4 @@
-/* Outbox — connect Gmail, review every queued email in full, then one explicit
-   confirmation sends them, spaced out and under a daily cap. */
+/* Outbox: read every queued email, confirm once, then it sends. */
 import { api } from '../api.js';
 import {
   html, mount, on, modal, confirmDialog, toast, fmtDateTime, registerInterval,
@@ -7,76 +6,38 @@ import {
 
 export default async function outboxView(root, _params, { refresh }) {
   const status = await api.get('/api/gmail/status').catch(() => null);
-  if (!status) {
-    mount(root, html`
-      <div class="view-head"><div><h2>Outbox</h2></div></div>
-      <div class="card"><div class="empty">
-        <h3>Gmail sending is unavailable</h3>
-        <p>The Gmail routes failed to load. Check the server log.</p>
-      </div></div>`);
-    return;
-  }
 
-  if (!status.client_configured) {
+  if (!status?.client_configured) {
     mount(root, html`
-      <div class="view-head"><div>
-        <h2>Outbox</h2>
-        <p class="lede">Send reviewed emails through your own Gmail account.</p>
-      </div></div>
-      <div class="card"><div class="card-body">
-        <div class="note note-warn"><div>
-          <strong>Not set up yet.</strong> Add <code class="mono">GMAIL_CLIENT_ID</code> and
-          <code class="mono">GMAIL_CLIENT_SECRET</code> to your <code class="mono">.env</code>,
-          then restart the server.
+      <div class="bar"><h2>Outbox</h2></div>
+      <div class="panel"><div class="panel-bd">
+        <div class="msg msg-warn"><div class="grow">
+          Set <code class="mono">GMAIL_CLIENT_ID</code> and <code class="mono">GMAIL_CLIENT_SECRET</code>
+          in <code class="mono">.env</code> and restart — see <code class="mono">docs/PHASE3-GMAIL.md</code>.
+          Compose still gives you copy-and-paste and mail-app drafts.
         </div></div>
-        <p style="margin-top:16px">
-          You need an OAuth 2.0 client in the same Google Cloud project, with the Gmail API
-          enabled. The walkthrough is in <code class="mono">docs/PHASE3-GMAIL.md</code>.
-        </p>
-        <p class="hint">Until then, Compose still gives you copy-and-paste and mail-app drafts.</p>
       </div></div>`);
     return;
   }
 
   if (!status.connected) {
     mount(root, html`
-      <div class="view-head"><div>
-        <h2>Outbox</h2>
-        <p class="lede">Send reviewed emails through your own Gmail account.</p>
-      </div></div>
-      <div class="card">
-        <div class="card-body">
-          <div class="note note-danger" style="margin-bottom:18px"><div>
-            <strong>Read this before you connect.</strong>
-            Gmail's own programme policies say not to use Gmail to send unsolicited commercial
-            mail, and there is no volume below which that stops applying. Google's stated
-            sanction for a policy breach includes disabling the Google Account — on a personal
-            @gmail.com that means losing the mailbox itself, along with Drive and Photos.
-            <ul>
-              <li>Do not connect your main personal account. Use a separate one.</li>
-              <li>Keep volumes low and the mail genuinely relevant.</li>
-              <li>At any real volume, a proper email service on your own domain is the right
-                  tool — and it still does not exempt you from
-                  <a href="#/compliance">UK PECR</a>.</li>
-            </ul>
-            The full reasoning is in <code class="mono">docs/PHASE3-GMAIL.md</code>.
+      <div class="bar"><h2>Outbox</h2></div>
+      <div class="panel">
+        <div class="panel-bd">
+          <div class="msg msg-bad"><div class="grow">
+            <b>Don't connect your main account.</b>
+            Gmail's policies prohibit unsolicited commercial mail at any volume, and the stated
+            sanction includes disabling the Google Account — on a personal address that means
+            losing the mailbox itself. Use a separate account.
+            <a href="#/deliverability">How to keep mail out of junk</a>
           </div></div>
-
-          <div style="text-align:center;padding:10px 0 20px">
-            <h3 style="margin-bottom:8px">Connect your Gmail</h3>
-            <p class="hint" style="max-width:48ch;margin:0 auto 18px">
-              You will be sent to Google to authorise this app. It asks only for permission to
-              <strong>send</strong> mail — it cannot read your inbox, and it never sends
-              anything you have not confirmed on this screen.
-            </p>
+          <div class="bar" style="margin:14px 0 0">
             <button class="primary" data-act="connect">Connect Gmail</button>
-            <p class="hint" style="margin-top:14px">
-              Scopes requested: <code class="mono">${status.scopes.join(' ')}</code>
-            </p>
+            <span class="meta">Asks only for permission to send — it cannot read your inbox.</span>
           </div>
         </div>
       </div>`);
-
     on(root, 'click', '[data-act="connect"]', async () => {
       const { url } = await api.get('/api/gmail/connect');
       window.location.href = url;
@@ -84,24 +45,22 @@ export default async function outboxView(root, _params, { refresh }) {
     return;
   }
 
-  // Live state for the handlers below, refreshed by every draw(). Handlers are
-  // bound once: re-binding them per draw made one click send or discard twice.
   let data = null;
   let pending = [];
   let remaining = 0;
 
-  on(root, 'click', '[data-act="expand"]', (_e, el) => {
+  on(root, 'click', '[data-act="open"]', (_e, el) => {
     const q = pending.find((x) => String(x.id) === el.dataset.id);
     if (!q) return;
     modal({
-      title: `To ${q.business_name ?? q.to_email}`,
+      title: q.business_name ?? q.to_email,
       wide: true,
-      body: html`<div class="preview">
-        <div class="preview-head"><dl>
+      body: html`<div class="mail">
+        <div class="mail-hd"><dl>
           <dt>To</dt><dd class="mono">${q.to_email}</dd>
-          <dt>Subject</dt><dd class="subject">${q.subject}</dd>
+          <dt>Subject</dt><dd class="subj">${q.subject}</dd>
         </dl></div>
-        <div class="preview-body" style="max-height:none">${q.body}</div>
+        <div class="mail-bd" style="max-height:none">${q.body}</div>
       </div>`,
       footer: html`<button type="button" data-close>Close</button>`,
     });
@@ -109,97 +68,80 @@ export default async function outboxView(root, _params, { refresh }) {
 
   on(root, 'click', '[data-act="drop"]', async (_e, el) => {
     await api.del(`/api/gmail/queue/${el.dataset.id}`);
-    toast('Removed from the queue');
     await draw();
   });
 
   on(root, 'click', '[data-act="clear"]', async () => {
-    const ok = await confirmDialog({
-      title: 'Discard queued emails',
-      message: `Remove all ${pending.length} queued email(s)? Nothing has been sent, so nothing is lost.`,
+    if (!await confirmDialog({
+      title: 'Discard queue',
+      message: `Remove all ${pending.length}? Nothing has been sent.`,
       confirmLabel: 'Discard', danger: true,
-    });
-    if (!ok) return;
+    })) return;
     await api.post('/api/gmail/queue/clear');
     await draw();
   });
 
-  on(root, 'click', '[data-act="cancel"]', async () => {
+  on(root, 'click', '[data-act="stop"]', async () => {
     await api.post('/api/gmail/send/cancel');
     toast('Stopping after the current email');
   });
 
   on(root, 'click', '[data-act="disconnect"]', async () => {
-    const ok = await confirmDialog({
+    if (!await confirmDialog({
       title: 'Disconnect Gmail',
-      message: 'Prospect Book will no longer be able to send. Your sent log is kept.',
+      message: 'Sending stops. Your sent log is kept.',
       confirmLabel: 'Disconnect', danger: true,
-    });
-    if (!ok) return;
+    })) return;
     await api.post('/api/gmail/disconnect');
     refresh();
   });
 
-  /* ---- the single explicit confirmation ---- */
   on(root, 'click', '[data-act="send"]', async () => {
-    const willSend = pending.slice(0, remaining);
-    if (!willSend.length) return;
-    const confirmed = await modal({
-      title: `Send ${willSend.length} email${willSend.length === 1 ? '' : 's'}?`,
+    const batch = pending.slice(0, remaining);
+    if (!batch.length) return;
+    const ok = await modal({
+      title: `Send ${batch.length}?`,
       wide: true,
       body: html`
-        <div class="note note-warn" style="margin-bottom:14px"><div>
-          This sends real email from <strong>${data.email}</strong>, spaced
-          ${data.delay_min_seconds}–${data.delay_max_seconds} seconds apart.
-          It cannot be undone once a message has left.
+        <div class="msg msg-warn" style="margin-bottom:12px"><div class="grow">
+          Real email from <b>${data.email}</b>, ${data.delay_min_seconds}–${data.delay_max_seconds}s apart.
+          It cannot be undone.
         </div></div>
-        <p style="margin-top:0">Going to:</p>
-        <div class="table-scroll" style="max-height:280px;overflow-y:auto">
-          <table class="ledger">
-            <thead><tr><th>Business</th><th>Address</th><th>Subject</th></tr></thead>
-            <tbody>
-              ${willSend.map((q) => html`
-                <tr>
-                  <td><span class="biz" style="font-size:.92rem">${q.business_name ?? '—'}</span></td>
-                  <td class="sub mono">${q.to_email}</td>
-                  <td class="sub">${q.subject}</td>
-                </tr>`)}
+        <div class="scroll-x" style="max-height:260px;overflow-y:auto">
+          <table class="rows">
+            <thead><tr><th>Business</th><th>To</th><th>Subject</th></tr></thead>
+            <tbody>${batch.map((q) => html`
+              <tr><td class="c-name"><span class="name" style="font-size:.88rem">${q.business_name ?? '—'}</span></td>
+                  <td class="meta mono">${q.to_email}</td>
+                  <td class="meta">${q.subject}</td></tr>`)}
             </tbody>
           </table>
         </div>
         ${pending.length > remaining ? html`
-          <p class="hint" style="margin-top:12px">
-            ${pending.length - remaining} more stay queued — today's cap allows ${remaining} more.
-          </p>` : ''}
-        <div class="check" style="margin-top:16px">
+          <p class="tip">${pending.length - remaining} stay queued — today's cap allows ${remaining} more.</p>` : ''}
+        <div class="check" style="margin-top:14px">
           <input type="checkbox" id="ack" name="ack" required>
-          <label for="ack">
-            I have read these and I want them sent.
-            Each carries my business details and an opt-out line.
-          </label>
+          <label for="ack">I've read these and want them sent.</label>
         </div>`,
       footer: html`
         <button type="button" data-close>Cancel</button>
-        <button type="submit" class="primary">Send ${willSend.length} now</button>`,
-      onSubmit: (fields) => {
-        if (fields.ack !== 'on') throw new Error('Tick the box to confirm.');
+        <button type="submit" class="primary">Send ${batch.length}</button>`,
+      onSubmit: (f) => {
+        if (f.ack !== 'on') throw new Error('Tick the box to confirm.');
         return true;
       },
     });
-    if (confirmed !== true) return;
+    if (ok !== true) return;
 
     try {
       await api.post('/api/gmail/send', {
-        confirm: true,
-        queue_ids: willSend.map((q) => q.id),
-        expected_count: willSend.length,
+        confirm: true, queue_ids: batch.map((q) => q.id), expected_count: batch.length,
       });
-      toast('Sending started');
-      await draw();
+      toast('Sending');
     } catch (err) {
       toast(err.message, { error: true, ms: 8000 });
-      await draw();
     }
+    await draw();
   });
 
   await draw();
@@ -207,123 +149,90 @@ export default async function outboxView(root, _params, { refresh }) {
   async function draw() {
     data = await api.get('/api/gmail/queue');
     pending = data.pending;
+    remaining = data.daily.remaining;
     const done = data.queue.filter((q) => q.status !== 'pending');
     const run = data.active_send;
     const { cap, used } = data.daily;
-    remaining = data.daily.remaining;
 
     mount(root, html`
-      <div class="view-head">
-        <div>
-          <h2>Outbox</h2>
-          <p class="lede">
-            Sending as <strong>${data.email ?? 'your Gmail account'}</strong> ·
-            ${used} of ${cap} sent today · one email every
-            ${data.delay_min_seconds}–${data.delay_max_seconds}s, at random.
-          </p>
-        </div>
-        <div class="spacer"></div>
-        <button class="tiny" data-act="disconnect">Disconnect</button>
+      <div class="bar">
+        <h2>Outbox</h2>
+        <span class="meta"><span class="mono">${data.email ?? ''}</span> ·
+          ${used}/${cap} today · ${data.delay_min_seconds}–${data.delay_max_seconds}s apart</span>
+        <div class="grow"></div>
+        ${pending.length ? html`
+          <button class="mini" data-act="clear">Discard all</button>
+          <button class="primary" data-act="send" ${run?.running || remaining === 0 ? 'disabled' : ''}>
+            Review and send ${Math.min(pending.length, remaining)}</button>` : ''}
+        <button class="mini ghost" data-act="disconnect">Disconnect</button>
       </div>
 
       ${run?.running ? html`
-        <div class="note note-info" style="margin-bottom:14px">
-          <div style="flex:1">
-            <span class="spinner"></span>
-            &nbsp;<strong>Sending ${run.done} of ${run.total}</strong> —
-            ${run.sent} sent, ${run.failed} failed, ${run.skipped} skipped.
-            Next in up to ${run.delay_max_seconds}s.
-          </div>
-          <button class="tiny danger" data-act="cancel">Stop</button>
-        </div>` : run?.finished_at ? html`
-        <div class="note ${run.failed ? 'note-warn' : 'note-info'}" style="margin-bottom:14px">
-          <div><strong>Finished.</strong> ${run.sent} sent, ${run.failed} failed, ${run.skipped} skipped.
-          ${run.stopped_reason ? html`<br>${run.stopped_reason}` : ''}</div>
-        </div>` : ''}
+        <div class="msg msg-info" style="margin-bottom:10px">
+          <div class="grow" id="prog"><span class="spin"></span>
+            Sending ${run.done}/${run.total} — ${run.sent} sent, ${run.failed} failed, ${run.skipped} skipped</div>
+          <button class="mini danger" data-act="stop">Stop</button>
+        </div>`
+      : run?.finished_at ? html`
+        <div class="msg ${run.failed ? 'msg-warn' : 'msg-info'}" style="margin-bottom:10px"><div class="grow">
+          Finished — ${run.sent} sent, ${run.failed} failed, ${run.skipped} skipped.
+          ${run.stopped_reason ?? ''}</div></div>` : ''}
 
-      ${remaining === 0 ? html`
-        <div class="note note-warn" style="margin-bottom:14px">
-          <div><strong>Daily cap reached.</strong> ${used} sent today, cap is ${cap}.
-          Raise it under <a href="#/settings">Settings</a> if you mean to — but a personal
-          Gmail account that suddenly sends a lot of cold email is exactly what gets
-          rate-limited or suspended.</div>
-        </div>` : ''}
+      ${remaining === 0 && pending.length ? html`
+        <div class="msg msg-warn" style="margin-bottom:10px"><div class="grow">
+          Daily cap reached (${used}/${cap}). <a href="#/settings">Raise it</a> if you mean to.
+        </div></div>` : ''}
 
-      <div class="card">
-        <div class="card-head">
-          <h3 style="flex:1">Awaiting your confirmation
-            ${pending.length ? html`<span class="sub">— ${pending.length} email(s)</span>` : ''}</h3>
-          ${pending.length ? html`
-            <button class="tiny" data-act="clear">Discard all</button>
-            <button class="primary" data-act="send" ${run?.running || remaining === 0 ? 'disabled' : ''}>
-              Review and send ${Math.min(pending.length, remaining)}
-            </button>` : ''}
-        </div>
-        ${pending.length === 0 ? html`
-          <div class="empty">
-            <h3>Nothing queued</h3>
-            <p>Queue emails from <a href="#/compose">Compose</a>, or straight from the
-               <a href="#/leads">lead list</a>.</p>
-          </div>` : html`
-          <div class="card-body" style="display:grid;gap:12px">
-            ${pending.map((q) => html`
-              <div class="preview">
-                <div class="preview-head" style="display:flex;gap:12px;align-items:flex-start">
-                  <dl style="flex:1">
-                    <dt>To</dt><dd class="mono">${q.to_email}</dd>
-                    <dt>Subject</dt><dd class="subject">${q.subject}</dd>
-                  </dl>
-                  <div style="display:flex;gap:6px;align-items:center">
-                    <span class="sub">${q.business_name ?? 'deleted lead'}</span>
-                    <button class="tiny" data-act="expand" data-id="${q.id}">Full text</button>
-                    <button class="tiny danger" data-act="drop" data-id="${q.id}">Remove</button>
-                  </div>
-                </div>
-                <div class="preview-body" style="max-height:260px">${q.body}</div>
-                <div style="padding:8px 16px;border-top:1px solid var(--rule-soft);
-                            background:var(--green-tint);font-size:.76rem;color:var(--green-deep)">
-                  Includes your business details and the opt-out line — scroll the text above to read them.
-                </div>
-              </div>`)}
-          </div>`}
-      </div>
+      ${pending.length === 0 ? html`
+        <div class="panel"><div class="blank">
+          <strong>Nothing queued</strong>
+          Queue from <a href="#/compose">Compose</a> or the <a href="#/leads">lead list</a>.
+        </div></div>` : html`
+        <div class="panel">
+          <div class="panel-hd"><h3 class="grow">Awaiting confirmation — ${pending.length}</h3></div>
+          <div class="scroll-x"><table class="rows">
+            <thead><tr><th>Business</th><th>To</th><th>Subject</th><th></th></tr></thead>
+            <tbody>${pending.map((q) => html`
+              <tr>
+                <td class="c-name"><span class="name">${q.business_name ?? '—'}</span></td>
+                <td class="meta mono">${q.to_email}</td>
+                <td class="meta">${q.subject}</td>
+                <td class="c-act">
+                  <button class="mini" data-act="open" data-id="${q.id}">Read</button>
+                  <button class="mini danger" data-act="drop" data-id="${q.id}">✕</button>
+                </td>
+              </tr>`)}
+            </tbody>
+          </table></div>
+        </div>`}
 
       ${done.length ? html`
-        <div class="card">
-          <div class="card-head"><h3 style="flex:1">Recent attempts</h3>
-            <span class="sub">Every successful send is also in the <a href="#/log">sent log</a>.</span></div>
-          <div class="table-scroll"><table class="ledger">
-            <thead><tr><th>Business</th><th>To</th><th>Result</th><th>When</th></tr></thead>
-            <tbody>
-              ${done.slice(0, 40).map((q) => html`
-                <tr>
-                  <td><span class="biz">${q.business_name ?? '—'}</span></td>
-                  <td class="sub mono">${q.to_email}</td>
-                  <td>
-                    <span class="status" data-s="${q.status === 'sent' ? 'won' : q.status === 'failed' ? 'lost' : 'new'}">
-                      ${q.status}</span>
-                    ${q.error ? html`<span class="sub" style="display:block">${q.error}</span>` : ''}
-                  </td>
-                  <td class="sub nowrap">${q.sent_at ? fmtDateTime(q.sent_at) : '—'}</td>
-                </tr>`)}
+        <div class="panel">
+          <div class="panel-hd"><h3 class="grow">Recent attempts</h3>
+            <a class="meta" href="#/log">Sent log</a></div>
+          <div class="scroll-x"><table class="rows">
+            <thead><tr><th>Business</th><th>To</th><th>Result</th><th class="nw">When</th></tr></thead>
+            <tbody>${done.slice(0, 40).map((q) => html`
+              <tr>
+                <td class="c-name"><span class="name" style="font-size:.9rem">${q.business_name ?? '—'}</span></td>
+                <td class="meta mono">${q.to_email}</td>
+                <td><span class="status" data-s="${q.status === 'sent' ? 'won' : q.status === 'failed' ? 'lost' : 'new'}">${q.status}</span>
+                    ${q.error ? html`<span class="meta" style="display:block">${q.error}</span>` : ''}</td>
+                <td class="meta nw">${q.sent_at ? fmtDateTime(q.sent_at) : '—'}</td>
+              </tr>`)}
             </tbody>
           </table></div>
         </div>` : ''}
     `);
 
     if (run?.running) {
-      // Registered so the router kills it on navigation -- otherwise it kept
-      // redrawing the Outbox over whatever screen you had moved to.
       const poller = registerInterval(setInterval(async () => {
         const next = await api.get('/api/gmail/send/status');
-        if (!next.active_send?.running) { clearInterval(poller); await draw(); }
-        else {
-          const note = root.querySelector('.note-info div');
-          const r = next.active_send;
-          if (note) note.innerHTML =
-            `<span class="spinner"></span> &nbsp;<strong>Sending ${r.done} of ${r.total}</strong> — ` +
-            `${r.sent} sent, ${r.failed} failed, ${r.skipped} skipped.`;
-        }
+        if (!next.active_send?.running) { clearInterval(poller); await draw(); return; }
+        const el = root.querySelector('#prog');
+        const r = next.active_send;
+        if (el) el.innerHTML = `<span class="spin"></span> Sending ${r.done}/${r.total} — ` +
+          `${r.sent} sent, ${r.failed} failed, ${r.skipped} skipped`;
       }, 2000));
     }
   }

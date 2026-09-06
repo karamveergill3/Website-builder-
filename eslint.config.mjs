@@ -10,7 +10,7 @@ export default [
         clearInterval: 'readonly', Response: 'readonly', URLSearchParams: 'readonly',
         document: 'readonly', window: 'readonly', location: 'readonly',
         navigator: 'readonly', FormData: 'readonly', localStorage: 'readonly',
-        HTMLElement: 'readonly', Element: 'readonly',
+        HTMLElement: 'readonly', Element: 'readonly', URL: 'readonly',
       },
     },
     rules: {

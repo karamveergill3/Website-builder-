@@ -18,6 +18,9 @@ export const ALLOWED_KEYS = new Set([
   'biz_place_of_registration',
   // Sending guard-rails (Phase 3)
   'daily_cap', 'send_delay_seconds', 'send_delay_min_seconds', 'send_delay_max_seconds',
+  'warmup_enabled', 'window_enabled', 'window_start_hour', 'window_end_hour',
+  'window_weekdays_only', 'domain_cooldown_days', 'list_unsubscribe_enabled',
+  'verify_addresses', 'spam_check_enabled',
   // Lead search defaults (Phase 2)
   'default_areas', 'default_region_code',
   // Places pricing, so Google's repricing does not need a code change
@@ -32,6 +35,20 @@ export const DEFAULTS = {
   daily_cap: '25',
   send_delay_min_seconds: '120',
   send_delay_max_seconds: '420',
+  warmup_enabled: '1',
+  window_enabled: '1',
+  window_start_hour: '9',
+  window_end_hour: '17',
+  window_weekdays_only: '1',
+  domain_cooldown_days: '14',
+  // Google scopes the one-click unsubscribe requirement to senders of 5,000+
+  // a day. Below that the header buys nothing and costs something: Gmail
+  // draws an "Unsubscribe" chip beside the sender, which files the message
+  // as bulk in the reader's mind. The opt-out line in the body does the same
+  // job and produces a reply, which is the strongest positive signal there is.
+  list_unsubscribe_enabled: '0',
+  verify_addresses: '1',
+  spam_check_enabled: '1',
   default_region_code: 'GB',
   optout_line: DEFAULT_OPTOUT_LINE,
   marketing_line: DEFAULT_MARKETING_LINE,
@@ -89,6 +106,9 @@ router.put('/', wrap((req, res) => {
     ['send_delay_seconds', 0, 3600],
     ['send_delay_min_seconds', 0, 3600],
     ['send_delay_max_seconds', 0, 3600],
+    ['window_start_hour', 0, 23],
+    ['window_end_hour', 1, 24],
+    ['domain_cooldown_days', 0, 365],
   ]) {
     if (body[key] === undefined) continue;
     const raw = String(body[key]).trim();

@@ -228,6 +228,30 @@ const MIGRATIONS = [
         WHERE source = 'Google Places';
     `,
   },
+  {
+    name: '009_companies_house',
+    up: `
+      -- Companies House data is Open Government Licence: unlike Places
+      -- content, it may be stored indefinitely. So the durable half of a
+      -- lead record comes from here.
+      ALTER TABLE leads ADD COLUMN registered_name    TEXT;
+      ALTER TABLE leads ADD COLUMN registered_address TEXT;
+      ALTER TABLE leads ADD COLUMN company_status     TEXT;
+      ALTER TABLE leads ADD COLUMN company_type       TEXT;
+      ALTER TABLE leads ADD COLUMN incorporated_on    TEXT;
+      ALTER TABLE leads ADD COLUMN sic_codes          TEXT;
+      ALTER TABLE leads ADD COLUMN checked_at         TEXT;
+    `,
+  },
+  {
+    name: '010_website_check',
+    up: `
+      -- Whether a lead has a website, established by a single Places lookup.
+      -- Only the derived answer is stored, never the listing content.
+      ALTER TABLE leads ADD COLUMN has_website        INTEGER;
+      ALTER TABLE leads ADD COLUMN website_checked_at TEXT;
+    `,
+  },
 ];
 
 function migrate() {

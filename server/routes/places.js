@@ -383,4 +383,55 @@ router.post('/import', wrap((req, res) => {
   });
 }));
 
+/**
+ * POST /api/places/check-website — for leads that came from Companies House,
+ * ask Google once each whether they have a website. One billed Text Search
+ * per lead, and only the yes/no answer is kept.
+ */
+router.post('/check-website', wrap(async (req, res) => {
+  if (!process.env.GOOGLE_MAPS_API_KEY) {
+    throw new PlacesError('GOOGLE_MAPS_API_KEY is not set.', { status: 503, code: 'NO_API_KEY' });
+  }
+  const ids = Array.isArray(req.body.lead_ids) ? req.body.lead_ids.map(Number).filter(Number.isFinite) : [];
+  if (!ids.length) throw badRequest('Pick at least one lead.');
+  if (ids.length > 60) throw badRequest('At most 60 at a time — each one is a billed request.');
+
+  const rows = db.prepare(
+    `SELECT id, business_name, registered_name, location FROM leads
+      WHERE id IN (${ids.map(() => '?').join(',')})`
+  ).all(...ids);
+
+  const results = [];
+  for (const lead of rows) {
+    const name = lead.business_name ?? lead.registered_name;
+    const query = [name, lead.location].filter(Boolean).join(' ');
+    try {
+      const { places } = await textSearch(query, { regionCode: getSetting('default_region_code', 'GB'), pageSize: 1 });
+      const top = places[0];
+      if (!top) {
+        results.push({ lead_id: lead.id, name, found: false });
+      } else {
+        const row = normalise(top);
+        db.prepare('UPDATE leads SET has_website = ?, website_checked_at = ? WHERE id = ?')
+          .run(row.has_website, nowIso(), lead.id);
+        results.push({
+          lead_id: lead.id, name, found: true,
+          has_website: row.has_website === 1,
+          matched_name: row.display_name,
+          phone: row.phone,
+        });
+      }
+    } catch (err) {
+      results.push({ lead_id: lead.id, name, error: err.message });
+    }
+    await sleep(PAUSE_BETWEEN_CALLS_MS);
+  }
+
+  res.json({
+    checked: results.length,
+    without_website: results.filter((r) => r.has_website === false).length,
+    results,
+  });
+}));
+
 export default router;

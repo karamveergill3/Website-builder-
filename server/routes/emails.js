@@ -4,6 +4,7 @@ import { wrap, badRequest, notFound, nowIso, int, str, looksLikeEmail } from '..
 import { renderTemplate, unknownPlaceholders, emptyPlaceholders } from '../lib/template.js';
 import { withFooter, buildFooter } from '../lib/compliance.js';
 import { sendability } from '../lib/pecr.js';
+import { scoreDraft } from '../lib/deliverability.js';
 import { isSuppressed } from '../lib/suppression.js';
 
 const router = Router();
@@ -176,6 +177,11 @@ router.get('/log/:id', wrap((req, res) => {
   const entry = db.prepare('SELECT * FROM email_log WHERE id = ?').get(req.params.id);
   if (!entry) throw notFound('Log entry not found');
   res.json({ entry });
+}));
+
+/** POST /api/emails/score — run the deliverability checks over any draft. */
+router.post('/score', wrap((req, res) => {
+  res.json(scoreDraft({ subject: req.body.subject, body: req.body.body }));
 }));
 
 export default router;

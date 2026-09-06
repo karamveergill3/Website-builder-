@@ -256,4 +256,59 @@ router.post('/bulk-status', wrap((req, res) => {
   res.json({ updated: ids.length, status });
 }));
 
+/**
+ * POST /api/leads/import-emails — paste addresses in against business names.
+ *
+ * Neither Google nor Companies House holds an email address, so this is the
+ * step that is always manual. Making it bulk at least keeps it quick.
+ * Accepts "Business name, email" per line, in either order, comma or tab
+ * separated.
+ */
+router.post('/import-emails', wrap((req, res) => {
+  const text = String(req.body.text ?? '');
+  if (!text.trim()) throw badRequest('Nothing pasted.');
+
+  const leads = db.prepare('SELECT id, business_name, email FROM leads').all();
+  const norm = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const byName = new Map(leads.map((l) => [norm(l.business_name), l]));
+
+  const matched = [];
+  const unmatched = [];
+  const invalid = [];
+
+  const apply = db.transaction((rows) => {
+    for (const row of rows) {
+      db.prepare('UPDATE leads SET email = ? WHERE id = ?').run(row.email, row.id);
+    }
+  });
+
+  const staged = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const parts = line.split(/[\t,;]/).map((p) => p.trim()).filter(Boolean);
+    if (parts.length < 2) { unmatched.push({ line, reason: 'needs a name and an address' }); continue; }
+
+    const email = parts.find((p) => looksLikeEmail(p));
+    const name = parts.filter((p) => p !== email).join(' ').trim();
+    if (!email) { invalid.push({ line, reason: 'no valid email address on that line' }); continue; }
+    if (!name) { unmatched.push({ line, reason: 'no business name' }); continue; }
+
+    // Exact normalised match first, then a unique prefix match.
+    let lead = byName.get(norm(name));
+    if (!lead) {
+      const hits = leads.filter((l) => norm(l.business_name).startsWith(norm(name))
+                                    || norm(name).startsWith(norm(l.business_name)));
+      if (hits.length === 1) [lead] = hits;
+    }
+    if (!lead) { unmatched.push({ line, name, email, reason: 'no lead with that name' }); continue; }
+
+    staged.push({ id: lead.id, email, name: lead.business_name, replaced: Boolean(lead.email) });
+  }
+
+  apply(staged);
+  matched.push(...staged);
+
+  res.json({ matched: matched.length, updated: matched, unmatched, invalid });
+}));
+
 export default router;

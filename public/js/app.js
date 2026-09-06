@@ -7,11 +7,15 @@ import composeView   from './views/compose.js';
 import logView       from './views/log.js';
 import settingsView  from './views/settings.js';
 import searchView    from './views/search.js';
+import findView      from './views/find.js';
+import deliverView   from './views/deliverability.js';
 import outboxView    from './views/outbox.js';
 import complianceView from './views/compliance.js';
 
 const ROUTES = {
   '/leads':     leadsView,
+  '/find':      findView,
+  '/places':    searchView,
   '/search':    searchView,
   '/compose':   composeView,
   '/templates': templatesView,
@@ -19,6 +23,7 @@ const ROUTES = {
   '/log':       logView,
   '/settings':  settingsView,
   '/compliance': complianceView,
+  '/deliverability': deliverView,
 };
 
 function parseHash() {

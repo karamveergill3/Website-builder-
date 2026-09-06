@@ -2,7 +2,7 @@
 import { api } from '../api.js';
 import {
   html, mount, on, $, $$, modal, confirmDialog, toast,
-  statusPill, relative, viewKeys,
+  statusPill, relative, viewKeys, registerInterval,
 } from '../dom.js';
 
 const STATUSES = ['new', 'sent', 'replied', 'won', 'lost'];
@@ -106,16 +106,32 @@ export default async function leadsView(root, params, { refresh }) {
   const q = params.q ?? '';
   const sort = params.sort ?? 'created';
 
-  const [{ leads }, stats, gmail] = await Promise.all([
-    api.leads.list({ status, q, sort }),
+  const view = params.view ?? '';
+  const [{ leads: allLeads }, stats, gmail, ch] = await Promise.all([
+    api.leads.list({ status, q, sort, limit: 1000 }),
     api.leads.stats(),
     api.get('/api/gmail/status').catch(() => null),
+    api.get('/api/companies/status').catch(() => null),
   ]);
   const canQueue = gmail?.connected === true;
+  const canCheck = ch?.configured === true;
+
+  // Working views: what needs doing, rather than what state it is in.
+  const VIEWS = {
+    unchecked: (l) => l.block_code === 'UNCLASSIFIED',
+    noemail:   (l) => l.can_email === false && l.block_code === 'NO_EMAIL',
+    nosite:    (l) => l.has_website === 0,
+    ready:     (l) => l.can_email === true,
+  };
+  const leads = view && VIEWS[view] ? allLeads.filter(VIEWS[view]) : allLeads;
+  const counts = Object.fromEntries(
+    Object.entries(VIEWS).map(([k, f]) => [k, allLeads.filter(f).length])
+  );
 
   const go = (key, value) => {
-    const next = new URLSearchParams({ status, q, sort });
+    const next = new URLSearchParams({ status, q, sort, view });
     if (!value || value === 'all') next.delete(key); else next.set(key, value);
+    for (const [k, v] of [...next]) if (!v) next.delete(k);
     const s = next.toString();
     location.hash = `/leads${s ? `?${s}` : ''}`;
   };
@@ -136,6 +152,15 @@ export default async function leadsView(root, params, { refresh }) {
         <button class="pill" data-filter="all" aria-pressed="${status === 'all'}">All <b>${stats.total}</b></button>
         ${STATUSES.map((s) => html`
           <button class="pill" data-filter="${s}" aria-pressed="${status === s}">${s} <b>${stats.by_status[s] ?? 0}</b></button>`)}
+        ${(counts.unchecked || counts.noemail || counts.nosite || view) ? html`<span class="sep"></span>` : ''}
+        ${counts.ready ? html`
+          <button class="pill" data-view="ready" aria-pressed="${view === 'ready'}">ready <b>${counts.ready}</b></button>` : ''}
+        ${counts.unchecked ? html`
+          <button class="pill" data-view="unchecked" aria-pressed="${view === 'unchecked'}">unchecked <b>${counts.unchecked}</b></button>` : ''}
+        ${counts.noemail ? html`
+          <button class="pill" data-view="noemail" aria-pressed="${view === 'noemail'}">no email <b>${counts.noemail}</b></button>` : ''}
+        ${counts.nosite ? html`
+          <button class="pill" data-view="nosite" aria-pressed="${view === 'nosite'}">no website <b>${counts.nosite}</b></button>` : ''}
       </div>
       <div class="grow"></div>
       <input type="search" id="q" placeholder="Search  /" value="${q}" style="max-width:200px" autocomplete="off">
@@ -156,6 +181,9 @@ export default async function leadsView(root, params, { refresh }) {
         <option value="">Set status…</option>
         ${STATUSES.map((s) => html`<option value="${s}">${s}</option>`)}
       </select>
+      ${canCheck ? html`<button data-act="bulk-check">Check register</button>` : ''}
+      <button data-act="paste-emails">Paste emails</button>
+      <button data-act="bulk-site">Check websites</button>
       ${canQueue ? html`<button class="primary" data-act="bulk-queue">Queue emails</button>` : ''}
       <button class="mini ghost" data-act="bulk-clear">Clear</button>
     </div>
@@ -188,7 +216,9 @@ export default async function leadsView(root, params, { refresh }) {
                   ${l.email ? html`<a href="mailto:${l.email}">${l.email}</a>` : html`<span class="meta">no email</span>`}
                   ${l.phone ? html`<span class="meta mono" style="display:block">${l.phone}</span>` : ''}
                 </td>
-                <td class="meta">${l.category ?? '—'}</td>
+                <td class="meta">${l.category ?? '—'}
+                  ${l.has_website === 0 ? html`<span class="flag" data-ok
+                        title="Google returned no website">no site</span>` : ''}</td>
                 <td>
                   ${statusPill(l.status)}
                   ${!l.can_email && l.block_code !== 'NO_EMAIL'
@@ -198,7 +228,10 @@ export default async function leadsView(root, params, { refresh }) {
                 <td class="c-act">
                   ${l.can_email ? html`<button class="mini" data-act="write" data-id="${l.id}">Write</button>`
                     : l.block_code === 'UNCLASSIFIED' ? html`
-                      <button class="mini" data-act="classify" data-id="${l.id}">Check</button>` : ''}
+                      <button class="mini" data-act="classify" data-id="${l.id}">Check</button>`
+                    : l.block_code === 'NO_EMAIL' ? html`
+                      <button class="mini" data-act="findmail" data-id="${l.id}"
+                              data-name="${l.business_name}" data-town="${l.location ?? ''}">Find email</button>` : ''}
                   <button class="mini" data-act="edit" data-id="${l.id}">Edit</button>
                   <button class="mini danger" data-act="del" data-id="${l.id}"
                           data-name="${l.business_name}" aria-label="Delete">✕</button>
@@ -213,6 +246,7 @@ export default async function leadsView(root, params, { refresh }) {
   /* ---- controls ---- */
 
   on(root, 'click', '[data-filter]', (_e, el) => go('status', el.dataset.filter));
+  on(root, 'click', '[data-view]', (_e, el) => go('view', view === el.dataset.view ? '' : el.dataset.view));
   $('#sort', root)?.addEventListener('change', (e) => go('sort', e.target.value));
 
   const search = $('#q', root);
@@ -241,10 +275,19 @@ export default async function leadsView(root, params, { refresh }) {
   });
 
   on(root, 'click', '[data-act="classify"]', async (_e, el) => {
-    const { lead } = await api.leads.get(el.dataset.id);
-    window.open('https://find-and-update.company-information.service.gov.uk/search?q=' +
-      encodeURIComponent(lead.business_name), '_blank', 'noopener');
-    if (await openLeadForm(lead)) refresh();
+    if (!canCheck) {
+      const { lead } = await api.leads.get(el.dataset.id);
+      window.open('https://find-and-update.company-information.service.gov.uk/search?q=' +
+        encodeURIComponent(lead.business_name), '_blank', 'noopener');
+      if (await openLeadForm(lead)) refresh();
+      return;
+    }
+    if (await openRegisterDialog(el.dataset.id)) refresh();
+  });
+
+  on(root, 'click', '[data-act="findmail"]', (_e, el) => {
+    const q = encodeURIComponent(`"${el.dataset.name}" ${el.dataset.town} email contact`);
+    window.open(`https://duckduckgo.com/?q=${q}`, '_blank', 'noopener');
   });
 
   on(root, 'click', '[data-act="del"]', async (_e, el) => {
@@ -295,6 +338,77 @@ export default async function leadsView(root, params, { refresh }) {
     refresh();
   });
 
+  on(root, 'click', '[data-act="paste-emails"]', async () => {
+    const done = await modal({
+      title: 'Paste in email addresses',
+      wide: true,
+      body: html`
+        <div class="f">
+          <label for="paste">One per line: business name, then the address</label>
+          <textarea id="paste" name="text" class="code" rows="10" required
+            placeholder="Crown Joinery, info@crownjoinery.co.uk&#10;Calder Groundworks  hello@caldergroundworks.co.uk"></textarea>
+          <p class="tip">Comma, semicolon or tab separated, either order. Names are matched loosely.</p>
+        </div>`,
+      footer: html`
+        <button type="button" data-close>Cancel</button>
+        <button type="submit" class="primary">Match and save</button>`,
+      onSubmit: async (d) => {
+        const res = await api.post('/api/leads/import-emails', { text: d.text });
+        if (!res.matched && (res.unmatched.length || res.invalid.length)) {
+          throw new Error(`Nothing matched. First problem: ${(res.unmatched[0] ?? res.invalid[0]).reason}`);
+        }
+        toast(`Updated ${res.matched}` +
+          (res.unmatched.length + res.invalid.length
+            ? ` · ${res.unmatched.length + res.invalid.length} not matched` : ''),
+          { ms: 6000 });
+        return true;
+      },
+    });
+    if (done) refresh();
+  });
+
+  on(root, 'click', '[data-act="bulk-check"]', async () => {
+    if (!await confirmDialog({
+      title: 'Check the register',
+      message: `Look up every unchecked lead on Companies House (${counts.unchecked || stats.unclassified}). ` +
+               'Clear matches are applied; anything doubtful is left for you.',
+      confirmLabel: 'Check them',
+    })) return;
+    try {
+      await api.post('/api/companies/qualify-all');
+    } catch (err) { return toast(err.message, { error: true, ms: 7000 }); }
+
+    const poller = registerInterval(setInterval(async () => {
+      const { run } = await api.get('/api/companies/qualify-all/status');
+      if (!run) { clearInterval(poller); return; }
+      toast(`Checked ${run.done}/${run.total} — ${run.matched} matched`, { ms: 1400 });
+      if (!run.running) {
+        clearInterval(poller);
+        toast(`Done: ${run.matched} companies, ${run.ambiguous} need a look`, { ms: 6000 });
+        refresh();
+      }
+    }, 1500));
+  });
+
+  on(root, 'click', '[data-act="bulk-site"]', async (_e, btn) => {
+    const ids = picked().map((c) => Number(c.value));
+    if (!ids.length) return toast('Select some leads first', { error: true });
+    if (!await confirmDialog({
+      title: 'Check for websites',
+      message: `One billed Google lookup each for ${ids.length} lead(s). Only the yes/no answer is kept.`,
+      confirmLabel: 'Check',
+    })) return;
+    btn.disabled = true;
+    try {
+      const res = await api.post('/api/places/check-website', { lead_ids: ids });
+      toast(`${res.without_website} of ${res.checked} have no website`, { ms: 6000 });
+      refresh();
+    } catch (err) {
+      toast(err.message, { error: true, ms: 7000 });
+      btn.disabled = false;
+    }
+  });
+
   on(root, 'click', '[data-act="bulk-queue"]', async () => {
     const ready = picked().filter((c) => c.dataset.ok === 'true').map((c) => Number(c.value));
     if (!ready.length) return toast('None of those are ready to email', { error: true });
@@ -334,3 +448,79 @@ export default async function leadsView(root, params, { refresh }) {
 
 /** Caret position to restore after a search-triggered re-render. */
 let pendingCaret = null;
+
+/**
+ * Pick the right register entry for a lead. Deliberately a human decision:
+ * a wrong match means sending unlawful marketing to a sole trader.
+ */
+export async function openRegisterDialog(leadId) {
+  let data;
+  try {
+    data = await api.get(`/api/companies/lookup/${leadId}`);
+  } catch (err) {
+    toast(err.message, { error: true, ms: 7000 });
+    return false;
+  }
+
+  const rows = data.candidates;
+  const search = `https://find-and-update.company-information.service.gov.uk/search?q=${
+    encodeURIComponent(data.lead.business_name)}`;
+
+  return modal({
+    title: data.lead.business_name,
+    wide: true,
+    body: rows.length === 0 ? html`
+      <div class="blank">
+        <strong>Nothing on the register matches that name</strong>
+        Most likely a sole trader, which cannot be cold-emailed.
+        <p style="margin-top:10px"><a href="${search}" target="_blank" rel="noopener">Search Companies House yourself ↗</a></p>
+      </div>` : html`
+      <div class="scroll-x" style="max-height:340px;overflow-y:auto">
+        <table class="rows">
+          <thead><tr><th class="c-pick"></th><th>Company</th><th>Registered office</th>
+            <th class="nw">No.</th><th>Type</th></tr></thead>
+          <tbody>
+            ${rows.map((c, i) => html`
+              <tr>
+                <td class="c-pick"><input type="radio" name="company_number" value="${c.company_number}"
+                       ${i === 0 && c.sendable ? 'checked' : ''} ${c.sendable ? '' : 'disabled'}
+                       style="accent-color:var(--green)"></td>
+                <td class="c-name"><span class="name" style="font-size:.9rem">${c.company_name}</span>
+                  <span class="meta">${Math.round(c.score * 100)}% name match${
+                    c.company_number === data.auto ? ' · clear match' : ''}</span></td>
+                <td class="meta">${c.address_snippet ?? '—'}</td>
+                <td class="meta mono nw">${c.company_number}</td>
+                <td>${c.sendable
+                  ? html`<span class="flag" data-ok>${c.company_type}</span>`
+                  : html`<span class="flag" title="${c.trading ? 'Not a body corporate' : c.company_status}">${
+                      c.trading ? c.company_type : c.company_status}</span>`}</td>
+              </tr>`)}
+          </tbody>
+        </table>
+      </div>
+      <p class="tip">
+        Only bodies corporate can be cold-emailed. Nothing here?
+        <a href="${search}" target="_blank" rel="noopener">Search Companies House ↗</a>
+      </p>`,
+    footer: html`
+      <button type="button" data-close>Cancel</button>
+      <button type="button" class="danger" data-sole>No match — sole trader</button>
+      <div class="grow"></div>
+      ${rows.some((c) => c.sendable) ? html`<button type="submit" class="primary">Attach</button>` : ''}`,
+    onMount: (dlg, close) => {
+      dlg.querySelector('[data-sole]')?.addEventListener('click', async () => {
+        await api.post('/api/companies/mark-sole-trader', { lead_id: leadId });
+        toast('Marked as a sole trader — cannot be emailed');
+        close(true);
+      });
+    },
+    onSubmit: async (d) => {
+      if (!d.company_number) throw new Error('Pick a company, or mark it a sole trader.');
+      const res = await api.post('/api/companies/attach', {
+        lead_id: leadId, company_number: d.company_number,
+      });
+      toast(res.sendable ? 'Matched — you can email this one' : 'Matched, but not a body corporate');
+      return true;
+    },
+  });
+}

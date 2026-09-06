@@ -7,7 +7,7 @@ export default async function searchView(root, params, { navigate }) {
 
   if (!status?.configured) {
     mount(root, html`
-      <div class="bar"><h2>Find leads</h2></div>
+      <div class="bar"><h2>Google Places</h2></div>
       <div class="panel"><div class="panel-bd">
         <div class="msg msg-warn"><div class="grow">
           Set <code class="mono">GOOGLE_MAPS_API_KEY</code> in <code class="mono">.env</code> and restart.
@@ -23,7 +23,7 @@ export default async function searchView(root, params, { navigate }) {
   const { runs } = await api.get('/api/places/runs');
 
   mount(root, html`
-    <div class="bar"><h2>Find leads</h2>
+    <div class="bar"><h2>Google Places</h2>
       <div class="grow"></div>
       <span class="meta">${status.cached_places} places seen · ${status.cached_without_website} with no website</span>
     </div>
@@ -105,14 +105,14 @@ export default async function searchView(root, params, { navigate }) {
     btn.disabled = true;
     try {
       const res = await api.post('/api/places/search', Object.fromEntries(new FormData(ev.target)));
-      navigate(`/search?run=${res.run.id}`);
+      navigate(`/places?run=${res.run.id}`);
     } catch (err) {
       toast(err.message, { error: true, ms: 7000 });
       btn.disabled = false;
     }
   });
 
-  on(root, 'click', '[data-act="open"]', (_e, el) => navigate(`/search?run=${el.dataset.id}`));
+  on(root, 'click', '[data-act="open"]', (_e, el) => navigate(`/places?run=${el.dataset.id}`));
 }
 
 /* ---------------------------------------------------------- review a run */
@@ -133,7 +133,7 @@ async function reviewRun(root, runId, navigate) {
     }
     sync();
   });
-  on(root, 'click', '[data-act="back"]', () => navigate('/search'));
+  on(root, 'click', '[data-act="back"]', () => navigate('/places'));
   on(root, 'click', '[data-act="import"]', async (_e, btn) => {
     btn.disabled = true;
     try {

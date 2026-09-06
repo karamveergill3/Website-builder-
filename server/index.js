@@ -44,6 +44,7 @@ app.use('/api/suppression', suppression);
 const optional = [
   ['/api/places', './routes/places.js'],
   ['/api/gmail', './routes/gmail.js'],
+  ['/api/companies', './routes/companies.js'],
 ];
 for (const [mount, path] of optional) {
   try {

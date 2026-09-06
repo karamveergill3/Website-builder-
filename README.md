@@ -26,17 +26,45 @@ Sending is deliberately blocked until you do — see [Compliance](#compliance--r
 
 ## What's here
 
-| Phase | What it does | Needs |
+| | What it does | Needs |
 |---|---|---|
-| **1. Lead tracker** | Leads, templates, generate-email view, sent log | Nothing |
-| **2. Find leads** | Google Places search for businesses with no website | A Google Cloud API key |
-| **3. Gmail sending** | Review-then-send through your own Gmail | A Google OAuth client |
+| **Lead tracker** | Leads, templates, compose, sent log | Nothing |
+| **Find companies** | Search the companies register by trade and town | A free Companies House key |
+| **Website check** | Which of them have no website | A Google Cloud API key |
+| **Outbox** | Review-then-send through your own Gmail | A Google OAuth client |
 
-Each phase works on its own. Phase 1 is useful with no API keys at all.
+The tracker works on its own with no keys at all.
 
 ---
 
-## Phase 1 — the tracker
+## The working day
+
+The loop this is built around, aiming at ten or so a day:
+
+1. **Find** — a trade and a town. The companies register returns active limited
+   companies and LLPs, which are the only businesses UK law lets you cold-email.
+   Every result is qualified before it becomes a lead.
+2. **Check for websites** — one Google lookup each. The ones with none are your
+   prospects.
+3. **Find the addresses** — the one genuinely manual step; see below.
+4. **Queue and send** — the Outbox shows each email in full, one confirmation
+   sends them, spaced out and under a daily cap that ramps up over four weeks.
+
+You can also work the other way round — search Google Places for businesses
+with no website and check them against the register afterwards — but expect
+most of them to be sole traders you cannot lawfully email.
+
+### The bit no API solves
+
+**Neither Google nor Companies House holds an email address.** That is the real
+cap on volume, not the software. What the tool does about it: a **no email**
+view listing exactly who is missing one, a per-lead lookup button, and a
+**Paste emails** box that matches a pasted list against your leads by name. The
+phone number is always there for the ones that will never have an address.
+
+---
+
+## The tracker
 
 **Leads** — every business you're tracking. Filter by status with the pills,
 search across name, town and notes, and watch the stat tiles across the top:
@@ -69,24 +97,25 @@ rewrite history, and deleting a lead does not erase the proof.
 
 ---
 
-## Phase 2 — finding leads
+## Finding companies
 
-Search a category across as many towns as you paste in. There is no fixed
-location bias: the sweep goes wherever you point it.
+**Find** searches the Companies House register by trade and town. You type
+"roofers"; it resolves that to SIC 43910 and returns active companies, with
+their registered office and company number. Free, and every result is a body
+corporate — so it arrives qualified rather than needing checking.
+See [`docs/COMPANIES-HOUSE.md`](docs/COMPANIES-HOUSE.md).
 
-`websiteUri` is requested on the Text Search call itself, so **one billed
-request covers a page of up to 20 businesses** rather than one Place Details
-call each. A business becomes a candidate only when Google returns no website
-for it, candidates always land in a checkbox review list, and nothing is ever
-imported without you ticking it.
+**Google Places** is the other direction: search a trade across as many towns
+as you paste in and get back businesses Google holds no website for.
+`websiteUri` is requested on the Text Search call itself, so one billed request
+covers a page of up to 20 businesses rather than one Place Details call each.
+Candidates always land in a checkbox review list; nothing imports without you
+ticking it. Setup and costs: [`docs/PHASE2-PLACES.md`](docs/PHASE2-PLACES.md).
 
-Every place ID ever seen is remembered, so re-sweeping the same town costs
-almost nothing and never re-imports what you already have.
+**Check register** on the lead list looks up everything unclassified and
+applies only unambiguous matches, leaving anything doubtful for you.
 
-Setup, costs, storage rules and error handling:
-[`docs/PHASE2-PLACES.md`](docs/PHASE2-PLACES.md).
-
-## Phase 3 — sending
+## Sending
 
 Queue emails from Compose or straight from the lead list. The Outbox shows each
 one in full — real recipient, real subject, real body — and one explicit
@@ -97,8 +126,15 @@ classification and your footer, so anything that changed since you reviewed is
 still honoured. Successes are logged with their Gmail message ID; failures are
 recorded against the queue item and never appear as sent.
 
-Setup, send rates and the account risk:
-[`docs/PHASE3-GMAIL.md`](docs/PHASE3-GMAIL.md).
+Before each send it re-checks the address (syntax, typos, throwaway providers,
+a real MX lookup), scores the draft for the things that actually move inbox
+placement, and applies a warm-up ramp, a business-hours window and a per-domain
+cooldown. The **Inbox** screen shows every one of those guards and its state,
+and will score a draft you paste in.
+
+Setup and send rates: [`docs/PHASE3-GMAIL.md`](docs/PHASE3-GMAIL.md).
+What reaches an inbox and what does not:
+[`docs/DELIVERABILITY.md`](docs/DELIVERABILITY.md).
 
 ---
 
@@ -117,7 +153,9 @@ That is the filter working.
 
 So every lead starts blocked, and to unblock one you must record its **company
 number**. A trading name ending in "Ltd" is not evidence: Google shows trading
-names, which routinely differ from registered names.
+names, which routinely differ from registered names. The Companies House
+integration does this lookup for you — which is why starting from the register
+rather than from a map is the better funnel.
 
 Also enforced: no email is produced without your full identity block and an
 opt-out line; opted-out addresses go on a suppression list that outlives the
@@ -140,10 +178,14 @@ See [`docs/PHASE2-PLACES.md`](docs/PHASE2-PLACES.md).
 
 ### Sending from a personal Gmail is riskier than it looks
 
-Gmail's programme policies prohibit unsolicited commercial mail with no volume
-exemption, and the stated sanction includes disabling the Google Account.
-Don't use your main personal account.
-See [`docs/PHASE3-GMAIL.md`](docs/PHASE3-GMAIL.md).
+Gmail's programme policies prohibit unsolicited commercial mail with **no
+volume exemption**, and the stated sanction includes disabling the Google
+Account — on a personal address that means losing the mailbox itself. Use a
+separate account. And note that the send-only permission the tool asks for
+cannot read replies, so **checking the mailbox and marking people opted out is
+a manual step you have to actually do**.
+See [`docs/PHASE3-GMAIL.md`](docs/PHASE3-GMAIL.md) and
+[`docs/DELIVERABILITY.md`](docs/DELIVERABILITY.md).
 
 ---
 
@@ -205,9 +247,14 @@ sqlite3 data/prospect-book.db ".backup 'backup.db'"
 npm test
 ```
 
-72 tests covering placeholder rendering, lead and template CRUD with
-validation, stats, the PECR classification gate, suppression across lead
-deletion, log-snapshot immutability, the Places field mask and dedupe, Google's
-error-reason handling, the review-then-send confirmation, the daily cap, and
-header-injection resistance in message building. The Places and Gmail suites run
-against stubbed APIs, so they never spend money or need credentials.
+118 tests covering placeholder rendering, lead and template CRUD with
+validation, stats, the PECR classification gate, Companies House matching and
+entity classification, suppression across lead deletion, log-snapshot
+immutability, the Places field mask and dedupe, Google's error-reason handling,
+draft scoring, address validation, the review-then-send confirmation, the daily
+cap, and header-injection resistance in message building. Every external API is
+stubbed, so the suite never spends money or needs credentials.
+
+```bash
+npm run lint
+```

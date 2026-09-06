@@ -1,0 +1,64 @@
+/* Thin fetch wrapper: JSON in, JSON out, errors as exceptions. */
+
+async function request(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  if (res.status === 204) return null;
+
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON error page */ }
+
+  if (!res.ok) {
+    const err = new Error(data?.error ?? `Request failed (${res.status})`);
+    err.status = res.status;
+    err.details = data?.details;
+    throw err;
+  }
+  return data;
+}
+
+const qs = (params = {}) => {
+  const s = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '')
+  ).toString();
+  return s ? `?${s}` : '';
+};
+
+export const api = {
+  get:   (path, params) => request('GET', path + qs(params)),
+  post:  (path, body)   => request('POST', path, body ?? {}),
+  patch: (path, body)   => request('PATCH', path, body ?? {}),
+  put:   (path, body)   => request('PUT', path, body ?? {}),
+  del:   (path)         => request('DELETE', path),
+
+  leads: {
+    list:    (params)     => request('GET', '/api/leads' + qs(params)),
+    stats:   ()           => request('GET', '/api/leads/stats'),
+    get:     (id)         => request('GET', `/api/leads/${id}`),
+    create:  (body)       => request('POST', '/api/leads', body),
+    update:  (id, body)   => request('PATCH', `/api/leads/${id}`, body),
+    remove:  (id)         => request('DELETE', `/api/leads/${id}`),
+    bulkStatus: (ids, status) => request('POST', '/api/leads/bulk-status', { ids, status }),
+  },
+  templates: {
+    list:   ()          => request('GET', '/api/templates'),
+    create: (body)      => request('POST', '/api/templates', body),
+    update: (id, body)  => request('PUT', `/api/templates/${id}`, body),
+    remove: (id)        => request('DELETE', `/api/templates/${id}`),
+  },
+  emails: {
+    preview: (leadId, templateId) =>
+      request('GET', `/api/emails/preview${qs({ lead_id: leadId, template_id: templateId })}`),
+    log:     (body)   => request('POST', '/api/emails/log', body),
+    history: (params) => request('GET', '/api/emails/log' + qs(params)),
+  },
+  settings: {
+    get:  ()     => request('GET', '/api/settings'),
+    save: (body) => request('PUT', '/api/settings', body),
+  },
+};

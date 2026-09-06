@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { randomUUID, randomBytes } from 'node:crypto';
-import { db, getSetting, setSetting } from '../db.js';
+import { db, getSetting } from '../db.js';
 import { wrap, badRequest, notFound, conflict, nowIso, str, int, bool, looksLikeEmail } from '../lib/http.js';
 import { composeFor } from './emails.js';
 import { buildFooter, optOutMailto } from '../lib/compliance.js';

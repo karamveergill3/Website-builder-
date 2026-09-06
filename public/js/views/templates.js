@@ -1,6 +1,6 @@
 /* Template manager: create, edit, delete, with a live placeholder preview. */
 import { api } from '../api.js';
-import { html, mount, on, modal, confirmDialog, toast, fmtDate, esc } from '../dom.js';
+import { html, mount, on, modal, confirmDialog, toast, fmtDate } from '../dom.js';
 
 const SAMPLE = { business_name: 'Hillside Roofing', category: 'roofers', location: 'Otley',
                  phone: '01943 000000', email: 'hello@example.co.uk' };

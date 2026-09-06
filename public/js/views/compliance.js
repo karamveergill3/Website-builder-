@@ -2,7 +2,7 @@
    Kept in the app rather than only in docs/ because these are the rules that
    decide who you may write to, and they are worth re-reading. */
 import { api } from '../api.js';
-import { html, mount, on, $, toast, fmtDate, confirmDialog } from '../dom.js';
+import { html, mount, on, toast, fmtDate, confirmDialog } from '../dom.js';
 
 export default async function complianceView(root, _p, { refresh }) {
   const [stats, suppression] = await Promise.all([

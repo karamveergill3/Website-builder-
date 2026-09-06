@@ -58,7 +58,7 @@ for (const [mount, path] of optional) {
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown API endpoint' }));
 
-// eslint-disable-next-line no-unused-vars -- Express identifies error middleware by arity
+// Express identifies error middleware by its four-argument signature.
 app.use((err, _req, res, _next) => {
   const status = err.status ?? 500;
   if (status >= 500) console.error(err);

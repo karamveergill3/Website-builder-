@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 process.env.GOOGLE_MAPS_API_KEY = 'test-key-not-real';
 
-const { get, post, patch, del, teardown } = await import('./helpers.js');
+const { get, post, patch, teardown } = await import('./helpers.js');
 
 test.after(teardown);
 

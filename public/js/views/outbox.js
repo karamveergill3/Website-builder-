@@ -1,7 +1,7 @@
 /* Outbox — connect Gmail, review every queued email in full, then one explicit
    confirmation sends them, spaced out and under a daily cap. */
 import { api } from '../api.js';
-import { html, mount, on, $, $$, modal, confirmDialog, toast, fmtDateTime } from '../dom.js';
+import { html, mount, on, modal, confirmDialog, toast, fmtDateTime } from '../dom.js';
 
 let poller = null;
 

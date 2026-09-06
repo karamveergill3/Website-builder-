@@ -1,7 +1,7 @@
 /* Settings: the business identity that legally must appear in every email,
    plus sending guard-rails and integration status. */
 import { api } from '../api.js';
-import { html, mount, $, toast, esc } from '../dom.js';
+import { html, mount, $, toast } from '../dom.js';
 
 const IDENTITY = [
   { key: 'biz_contact_name',  label: 'Your name',            required: true,  hint: 'The real person sending the email.' },

@@ -1,6 +1,6 @@
 /* The sent log: proof of what went out, to whom, and when. */
 import { api } from '../api.js';
-import { html, mount, on, modal, fmtDateTime, esc } from '../dom.js';
+import { html, mount, on, modal, fmtDateTime } from '../dom.js';
 
 const CHANNEL_LABEL = { mailto: 'Mail app', copy: 'Copied by hand', gmail: 'Gmail API' };
 

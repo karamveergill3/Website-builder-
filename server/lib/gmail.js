@@ -179,7 +179,6 @@ const base64url = (buf) =>
 /** RFC 2047 encode a header value only when it needs it. */
 function encodeHeader(value) {
   const v = String(value ?? '');
-  // eslint-disable-next-line no-control-regex
   return /^[\x20-\x7E]*$/.test(v)
     ? v
     : `=?UTF-8?B?${Buffer.from(v, 'utf8').toString('base64')}?=`;

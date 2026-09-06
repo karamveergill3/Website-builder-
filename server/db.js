@@ -252,6 +252,46 @@ const MIGRATIONS = [
       ALTER TABLE leads ADD COLUMN website_checked_at TEXT;
     `,
   },
+  {
+    name: '011_daily_hunt',
+    up: `
+      -- One row per trade x town the hunt works through, with a cursor so
+      -- each day picks up where the last left off instead of re-reading the
+      -- same first page of the register.
+      CREATE TABLE hunt_targets (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        trade        TEXT    NOT NULL,
+        sic_codes    TEXT    NOT NULL,
+        area         TEXT,
+        cursor       INTEGER NOT NULL DEFAULT 0,
+        exhausted_at TEXT,
+        last_run_at  TEXT,
+        found_total  INTEGER NOT NULL DEFAULT 0,
+        created_at   TEXT    NOT NULL,
+        UNIQUE (trade, area)
+      );
+
+      CREATE TABLE hunt_runs (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        started_at        TEXT NOT NULL,
+        finished_at       TEXT,
+        trigger           TEXT NOT NULL,
+        target            INTEGER NOT NULL,
+        found             INTEGER NOT NULL DEFAULT 0,
+        companies_seen    INTEGER NOT NULL DEFAULT 0,
+        already_known     INTEGER NOT NULL DEFAULT 0,
+        had_website       INTEGER NOT NULL DEFAULT 0,
+        places_requests   INTEGER NOT NULL DEFAULT 0,
+        register_requests INTEGER NOT NULL DEFAULT 0,
+        areas_covered     TEXT,
+        error             TEXT
+      );
+      CREATE INDEX idx_hunt_runs_started ON hunt_runs(started_at DESC);
+
+      -- How we came to believe a lead has no website.
+      ALTER TABLE leads ADD COLUMN website_evidence TEXT;
+    `,
+  },
 ];
 
 function migrate() {

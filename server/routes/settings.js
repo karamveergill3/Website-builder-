@@ -21,6 +21,10 @@ export const ALLOWED_KEYS = new Set([
   'warmup_enabled', 'window_enabled', 'window_start_hour', 'window_end_hour',
   'window_weekdays_only', 'domain_cooldown_days', 'list_unsubscribe_enabled',
   'verify_addresses', 'spam_check_enabled',
+  // Daily hunt
+  'hunt_enabled', 'hunt_trades', 'hunt_areas', 'hunt_daily_target', 'hunt_hour',
+  'hunt_max_places_requests', 'hunt_max_register_pages',
+  'hunt_require_no_website', 'hunt_include_unlisted',
   // Lead search defaults (Phase 2)
   'default_areas', 'default_region_code',
   // Places pricing, so Google's repricing does not need a code change
@@ -49,6 +53,15 @@ export const DEFAULTS = {
   list_unsubscribe_enabled: '0',
   verify_addresses: '1',
   spam_check_enabled: '1',
+  hunt_enabled: '0',
+  hunt_trades: '',
+  hunt_areas: '',
+  hunt_daily_target: '10',
+  hunt_hour: '8',
+  hunt_max_places_requests: '40',
+  hunt_max_register_pages: '25',
+  hunt_require_no_website: '1',
+  hunt_include_unlisted: '1',
   default_region_code: 'GB',
   optout_line: DEFAULT_OPTOUT_LINE,
   marketing_line: DEFAULT_MARKETING_LINE,
@@ -109,6 +122,10 @@ router.put('/', wrap((req, res) => {
     ['window_start_hour', 0, 23],
     ['window_end_hour', 1, 24],
     ['domain_cooldown_days', 0, 365],
+    ['hunt_daily_target', 1, 200],
+    ['hunt_hour', 0, 23],
+    ['hunt_max_places_requests', 1, 500],
+    ['hunt_max_register_pages', 1, 200],
   ]) {
     if (body[key] === undefined) continue;
     const raw = String(body[key]).trim();

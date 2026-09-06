@@ -55,7 +55,7 @@ function authHeader() {
   const key = process.env.COMPANIES_HOUSE_API_KEY?.trim();
   if (!key) {
     throw new CompaniesHouseError(
-      'COMPANIES_HOUSE_API_KEY is not set. A key is free — see docs/COMPANIES-HOUSE.md.',
+      'COMPANIES_HOUSE_API_KEY is not set — see docs/COMPANIES-HOUSE.md.',
       { status: 503, code: 'NOT_CONFIGURED' }
     );
   }

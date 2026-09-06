@@ -12,7 +12,8 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "test": "node --test test/*.test.js",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "hunt": "node server/hunt.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

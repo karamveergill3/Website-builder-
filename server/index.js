@@ -45,6 +45,7 @@ const optional = [
   ['/api/places', './routes/places.js'],
   ['/api/gmail', './routes/gmail.js'],
   ['/api/companies', './routes/companies.js'],
+  ['/api/hunt', './routes/hunt.js'],
 ];
 for (const [mount, path] of optional) {
   try {
@@ -75,8 +76,38 @@ const PORT = Number(process.env.PORT ?? 3000);
 // listening on a shared network.
 const HOST = process.env.HOST ?? '127.0.0.1';
 
+/**
+ * The built-in scheduler. Checks every few minutes whether today's hunt is
+ * due and has not already run, so the server does not need to be up at
+ * exactly the right minute — only at some point during the day. For a machine
+ * that sleeps, drive server/hunt.js from cron instead.
+ */
+async function startScheduler() {
+  const { huntConfig, hunt, activeHunt, ranToday } = await import('./lib/hunter.js');
+
+  const tick = async () => {
+    try {
+      const cfg = huntConfig();
+      if (!cfg.enabled || activeHunt() || ranToday()) return;
+      if (new Date().getHours() < cfg.hour) return;
+
+      console.log(`[hunt] starting — target ${cfg.target}`);
+      const run = await hunt({ trigger: 'schedule' });
+      console.log(run.error
+        ? `[hunt] stopped: ${run.error}`
+        : `[hunt] found ${run.found} of ${run.target} (${run.companies_seen} companies seen)`);
+    } catch (err) {
+      console.error('[hunt] scheduler error:', err.message);
+    }
+  };
+
+  setInterval(tick, 5 * 60 * 1000).unref();
+  setTimeout(tick, 20_000).unref();
+}
+
 if (process.env.NODE_ENV !== 'test') {
   recoverInterruptedWork();
+  startScheduler();
   app.listen(PORT, HOST, () => {
     console.log(`\n  Prospect Book running at http://localhost:${PORT}`);
     console.log(`  Database: ${DB_PATH}`);

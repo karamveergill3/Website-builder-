@@ -12,8 +12,14 @@ Single user, runs on your own machine, keeps everything in one SQLite file.
 
 ```bash
 npm install
-cp .env.example .env      # optional for Phase 1
+cp .env.example .env
 npm start                 # http://localhost:3000
+```
+
+```bash
+npm run hunt              # find today's prospects now, without the server
+npm test                  # 143 tests
+npm run lint
 ```
 
 The database is created automatically at `data/prospect-book.db` on first run.
@@ -29,30 +35,47 @@ Sending is deliberately blocked until you do — see [Compliance](#compliance--r
 | | What it does | Needs |
 |---|---|---|
 | **Lead tracker** | Leads, templates, compose, sent log | Nothing |
-| **Find companies** | Search the companies register by trade and town | A free Companies House key |
+| **Daily hunt** | Finds 10+ qualified prospects a day, unattended | A Companies House key |
+| **Find companies** | One-off register search by trade and town | A Companies House key |
 | **Website check** | Which of them have no website | A Google Cloud API key |
 | **Outbox** | Review-then-send through your own Gmail | A Google OAuth client |
 
 The tracker works on its own with no keys at all.
 
+**Nothing here uses AI.** Three runtime dependencies — `express`,
+`better-sqlite3`, `dotenv` — and the only services it talks to are Companies
+House, Google Places and Gmail. There is a test (`test/no-ai.test.js`) that
+fails if a model provider is ever introduced, so running this costs nothing on
+any AI account.
+
 ---
 
 ## The working day
 
-The loop this is built around, aiming at ten or so a day:
+Set the **Hunt** up once — a list of trades and a list of towns — and it finds
+ten or more qualified prospects a day on its own:
 
-1. **Find** — a trade and a town. The companies register returns active limited
-   companies and LLPs, which are the only businesses UK law lets you cold-email.
-   Every result is qualified before it becomes a lead.
-2. **Check for websites** — one Google lookup each. The ones with none are your
-   prospects.
-3. **Find the addresses** — the one genuinely manual step; see below.
-4. **Queue and send** — the Outbox shows each email in full, one confirmation
+1. It reads a page of the **companies register** for a trade and town. Active
+   limited companies and LLPs are the only businesses UK law lets you
+   cold-email, so everything it finds is qualified before it becomes a lead.
+2. **One Google search per town** — "roofers in Otley" comes back with twenty
+   businesses *and* their website status for a single billed request. The ones
+   with no website are your prospects.
+3. It stops at the day's target and moves a cursor on, so tomorrow covers new
+   ground.
+
+Then your part:
+
+4. **Find the addresses** — the one genuinely manual step; see below.
+5. **Queue and send** — the Outbox shows each email in full, one confirmation
    sends them, spaced out and under a daily cap that ramps up over four weeks.
 
-You can also work the other way round — search Google Places for businesses
-with no website and check them against the register afterwards — but expect
-most of them to be sole traders you cannot lawfully email.
+The hunt never sends anything. Details and cron setup:
+[`docs/HUNT.md`](docs/HUNT.md).
+
+You can also drive it by hand — **Find** for a one-off register search, or
+**Google Places** to come at it from the other direction — but expect most of
+what a map search returns to be sole traders you cannot lawfully email.
 
 ### The bit no API solves
 
@@ -247,13 +270,15 @@ sqlite3 data/prospect-book.db ".backup 'backup.db'"
 npm test
 ```
 
-118 tests covering placeholder rendering, lead and template CRUD with
+143 tests covering placeholder rendering, lead and template CRUD with
 validation, stats, the PECR classification gate, Companies House matching and
 entity classification, suppression across lead deletion, log-snapshot
 immutability, the Places field mask and dedupe, Google's error-reason handling,
-draft scoring, address validation, the review-then-send confirmation, the daily
-cap, and header-injection resistance in message building. Every external API is
-stubbed, so the suite never spends money or needs credentials.
+draft scoring, address validation, the daily hunt's budget and cursor
+behaviour, the review-then-send confirmation, the daily cap, and
+header-injection resistance in message building. Every external API is stubbed,
+so the suite never spends money or needs credentials — and one test asserts the
+project has no AI dependency and reaches no model provider.
 
 ```bash
 npm run lint

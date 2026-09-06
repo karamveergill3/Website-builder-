@@ -37,7 +37,10 @@ status before acting on a stale record.
    COMPANIES_HOUSE_API_KEY=your-key
    ```
 
-Keys are free and there is no paid tier for the public data API.
+Keys are issued from that portal directly. The paid Companies House products
+are the separate document and bulk-order services, not this one — but the
+public data API's pricing is not stated on any page that could be checked when
+this was written, so confirm it on the Hub rather than taking my word for it.
 
 **Rate limit: 600 requests per 5 minutes.** The client runs at roughly 1.4/s,
 well under it, and serialises requests through a single queue. Companies House

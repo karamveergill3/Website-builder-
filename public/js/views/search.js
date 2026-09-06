@@ -81,12 +81,14 @@ export default async function searchView(root, params, { navigate }) {
             </div>
           </div>
           <div class="field">
-            <label for="areas">Towns and cities</label>
-            <textarea id="areas" name="areas" rows="6" required
+            <label for="areas">Towns and cities <span class="opt">(optional)</span></label>
+            <textarea id="areas" name="areas" rows="6"
                       placeholder="Leeds&#10;Bradford&#10;Harrogate&#10;Skipton">${status.default_areas ?? ''}</textarea>
             <p class="hint">
               One per line, or comma-separated — paste in as many as you like (max ${status.limits.max_areas}).
               There is no fixed location bias: the sweep goes wherever you point it.
+              Leave this empty to search the category on its own and let Google pick the
+              geography — useful for a quick look, but a list of towns gives far better coverage.
             </p>
           </div>
 
@@ -134,7 +136,6 @@ export default async function searchView(root, params, { navigate }) {
   const refreshEstimate = async () => {
     const areas = $('#areas', root).value;
     const pages = $('#pages', root).value;
-    if (!areas.trim()) return;
     const e = await api.get('/api/places/estimate', { areas, pages_per_area: pages });
     const box = $('#estimate', root);
     box.className = `note ${e.verified_on ? 'note-info' : 'note-warn'}`;
@@ -161,7 +162,7 @@ export default async function searchView(root, params, { navigate }) {
   let t;
   $('#areas', root).addEventListener('input', () => { clearTimeout(t); t = setTimeout(refreshEstimate, 300); });
   $('#pages', root).addEventListener('change', refreshEstimate);
-  if ($('#areas', root).value.trim()) refreshEstimate();
+  refreshEstimate();
 
   $('#sweep', root).addEventListener('submit', async (ev) => {
     ev.preventDefault();
@@ -194,7 +195,7 @@ async function renderRun(root, runId, navigate) {
         <div>
           <h2>${run.category}</h2>
           <p class="lede">
-            ${run.areas.split('\n').length} area${run.areas.split('\n').length === 1 ? '' : 's'} ·
+            ${data.areas.length ? `${data.areas.length} area${data.areas.length === 1 ? '' : 's'}` : 'no location set'} ·
             ${run.places_returned} businesses looked at ·
             <strong>${summary.candidates} with no website</strong>
             ${summary.already_leads ? ` · ${summary.already_leads} already in your tracker` : ''}

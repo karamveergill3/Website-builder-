@@ -254,6 +254,7 @@ export const buildQuery = (category, area) =>
 export function estimateCost({ areas, pagesPerArea = 1, rates = {} }) {
   const perThousand = Number(rates.text_search_per_1000 ?? PRICING_DEFAULTS.text_search_per_1000);
   const freeCalls = Number(rates.free_calls_per_sku_per_month ?? PRICING_DEFAULTS.free_calls_per_sku_per_month);
+  // No areas means one sweep of the bare category, so the floor is 1.
   const requests = Math.max(areas, 1) * Math.max(pagesPerArea, 1);
 
   return {

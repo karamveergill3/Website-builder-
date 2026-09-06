@@ -275,12 +275,37 @@ test('a rate limit is retried, an exhausted quota is not', async () => {
   assert.equal(calls.length, 1, 'backing off cannot refill an exhausted allocation');
 });
 
-test('search input is validated before any request is made', async () => {
+test('a category is required; a location is not', async () => {
   stubPlaces();
-  assert.equal((await post('/api/places/search', { areas: 'Leeds' })).status, 400);
-  assert.equal((await post('/api/places/search', { category: 'roofers', areas: '' })).status, 400);
-  assert.equal((await post('/api/places/search', { category: 'roofers', areas: '  ,  ,  ' })).status, 400);
+  assert.equal((await post('/api/places/search', { areas: 'Leeds' })).status, 400,
+    'a category is the one thing you must give');
+  assert.equal((await post('/api/places/search', { category: '   ' })).status, 400);
   assert.equal(calls.length, 0, 'no billed calls for invalid input');
+});
+
+test('with no location, the category is searched on its own', async () => {
+  stubPlaces();
+  nextResponses = [{ status: 200, body: { places: [place('noloc-1', 'Nationwide Co', {})] } }];
+  const start = await post('/api/places/search', { category: 'thatchers' });
+  assert.equal(start.status, 202);
+  const data = await waitForRun(start.body.run.id);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.textQuery, 'thatchers', 'no " in <area>" suffix');
+  assert.equal(calls[0].body.regionCode, 'GB', 'still constrained to the UK');
+  assert.deepEqual(data.areas, []);
+  assert.equal(data.candidates.length, 1);
+  assert.equal(data.candidates[0].area, null);
+});
+
+test('a whitespace-only area list behaves as no location', async () => {
+  stubPlaces();
+  nextResponses = [{ status: 200, body: { places: [] } }];
+  const start = await post('/api/places/search', { category: 'roofers', areas: '  ,  ,  ' });
+  assert.equal(start.status, 202);
+  await waitForRun(start.body.run.id);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.textQuery, 'roofers');
 });
 
 test('the cost estimate counts requests, not places', async () => {

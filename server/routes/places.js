@@ -244,9 +244,11 @@ router.post('/search', wrap((req, res) => {
   const category = str(req.body.category);
   if (!category) throw badRequest('category is required, e.g. "roofers"');
 
+  // A location is optional: with no areas, the category is searched on its own
+  // and Google decides the geography (biased by regionCode).
   const areas = parseAreas(req.body.areas);
-  if (areas.length === 0) throw badRequest('Give at least one town or city to search.');
   if (areas.length > MAX_AREAS) throw badRequest(`At most ${MAX_AREAS} areas per sweep.`);
+  const sweepAreas = areas.length ? areas : [null];
 
   const pagesPerArea = Math.min(Math.max(int(req.body.pages_per_area, 1), 1), MAX_PAGES_PER_AREA);
   const regionCode = str(req.body.region_code) ?? getSetting('default_region_code', 'GB');
@@ -262,11 +264,11 @@ router.post('/search', wrap((req, res) => {
   activeRun = { id: runId, category, areas: areas.length };
 
   // Fire and forget: the client polls GET /runs/:id for progress.
-  runSweep(runId, { category, areas, pagesPerArea, regionCode, verifyWithDetails });
+  runSweep(runId, { category, areas: sweepAreas, pagesPerArea, regionCode, verifyWithDetails });
 
   res.status(202).json({
     run: db.prepare('SELECT * FROM search_runs WHERE id = ?').get(runId),
-    estimate: estimateCost({ areas: areas.length, pagesPerArea, rates: rates() }),
+    estimate: estimateCost({ areas: sweepAreas.length, pagesPerArea, rates: rates() }),
   });
 }));
 
@@ -284,7 +286,7 @@ router.get('/runs/:id', wrap((req, res) => {
   res.json({
     run,
     running: activeRun?.id === run.id,
-    areas: run.areas.split('\n'),
+    areas: run.areas ? run.areas.split('\n') : [],
     candidates,
     // Listing details are held for the review session only, never stored.
     // Once they have gone the run still knows WHICH places had no website,

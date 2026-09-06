@@ -39,3 +39,23 @@ test('first_name is the first word of the business name', () => {
 test('a null template string renders as empty', () => {
   assert.equal(render(null, leadContext(LEAD)), '');
 });
+
+test('emptyPlaceholders names the tokens this lead leaves blank', async () => {
+  const { emptyPlaceholders } = await import('../server/lib/template.js');
+  const tpl = { subject: 'Hi {{business}}', body: '{{category}} in {{location}}' };
+
+  assert.deepEqual(emptyPlaceholders(tpl, LEAD), []);
+  assert.deepEqual(
+    emptyPlaceholders(tpl, { business_name: 'X', category: 'roofers' }),
+    ['location']
+  );
+  assert.deepEqual(
+    emptyPlaceholders(tpl, { business_name: 'X' }).sort(),
+    ['category', 'location']
+  );
+});
+
+test('emptyPlaceholders ignores tokens the template does not use', async () => {
+  const { emptyPlaceholders } = await import('../server/lib/template.js');
+  assert.deepEqual(emptyPlaceholders({ subject: 'Hi', body: 'there' }, {}), []);
+});

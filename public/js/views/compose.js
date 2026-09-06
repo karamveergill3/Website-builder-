@@ -169,7 +169,7 @@ export default async function composeView(root, params, { navigate }) {
               <dt>To</dt><dd>${data.lead.email ?? raw('<em>no email address</em>')}</dd>
               <dt>Subject</dt><dd class="subject">${data.subject}</dd>
             </dl></div>
-            <div class="preview-body">${main}${tail ? raw(`<span class="footer-part">${esc(tail)}</span>`) : ''}</div>
+            <div class="preview-body" style="max-height:none">${main}${tail ? raw(`<span class="footer-part">${esc(tail)}</span>`) : ''}</div>
           </div>
 
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;align-items:center">

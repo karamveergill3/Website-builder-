@@ -54,6 +54,22 @@ export function renderTemplate(template, lead) {
   };
 }
 
+/**
+ * Tokens the template uses that this lead leaves blank. Rendering them empty
+ * is the right behaviour, but it can leave text reading "roofers in ," so the
+ * preview says so rather than letting it go out unnoticed.
+ */
+export function emptyPlaceholders(template, lead) {
+  const ctx = leadContext(lead);
+  const used = new Set();
+  for (const s of [template.subject, template.body]) {
+    for (const m of String(s ?? '').matchAll(TOKEN)) used.add(m[1].toLowerCase());
+  }
+  return [...used].filter(
+    (k) => ALL_PLACEHOLDERS.includes(k) && String(ctx[k] ?? '').trim() === ''
+  );
+}
+
 /** Tokens used by a template that we do not know how to fill. */
 export function unknownPlaceholders(...strings) {
   const found = new Set();

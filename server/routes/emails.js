@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, getSettings } from '../db.js';
 import { wrap, badRequest, notFound, nowIso, int, str, looksLikeEmail } from '../lib/http.js';
-import { renderTemplate, unknownPlaceholders } from '../lib/template.js';
+import { renderTemplate, unknownPlaceholders, emptyPlaceholders } from '../lib/template.js';
 import { withFooter, buildFooter } from '../lib/compliance.js';
 import { sendability } from '../lib/pecr.js';
 import { isSuppressed } from '../lib/suppression.js';
@@ -66,6 +66,12 @@ export function composeFor(leadId, templateId, { requireEmail = false, requireCo
         ? [`Unrecognised placeholder(s): ${unknownPlaceholders(template.subject, template.body).map((u) => `{{${u}}}`).join(', ')}`]
         : []),
       ...(looksLikeEmail(lead.email ?? '') ? [] : ['This lead has no email address — you can still copy the text or phone them.']),
+      ...(emptyPlaceholders(template, lead).length
+        ? [`This lead has no ${emptyPlaceholders(template, lead).join(' or ')}, so ` +
+           `${emptyPlaceholders(template, lead).map((k) => `{{${k}}}`).join(' and ')} ` +
+           `render${emptyPlaceholders(template, lead).length === 1 ? 's' : ''} as nothing — ` +
+           'read the text above before you send it.']
+        : []),
       ...(verdict.allowed || verdict.code === 'NO_EMAIL' ? [] : [verdict.reason]),
     ],
   };

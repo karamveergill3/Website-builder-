@@ -6,7 +6,7 @@ process.env.GOOGLE_MAPS_API_KEY = 'test-places-key';
 
 const { get, post, put, del, teardown } = await import('./helpers.js');
 const { db } = await import('../server/db.js');
-const { judge, spreadByTrade } = await import('../server/lib/hunter.js');
+const { judge, spreadByTrade, sameTown } = await import('../server/lib/hunter.js');
 const { normaliseName } = await import('../server/lib/companies-house.js');
 
 test.after(teardown);
@@ -31,7 +31,20 @@ function stub() {
       calls.register++;
       const next = register.shift();
       if (!next) return reply({}, 404);            // zero results: 404, empty body
-      return reply(next.body ?? next, next.status ?? 200);
+      const body = next.body ?? next;
+      // The register returns companies whose ADDRESS matched the location
+      // filter, so anything it hands back is in that town unless the address
+      // merely mentions it. Fill the locality from the query the way the real
+      // thing would; a fixture that sets its own is testing the mismatch and
+      // is left alone.
+      const asked = new URL(u).searchParams.get('location');
+      if (asked && Array.isArray(body.items)) {
+        for (const item of body.items) {
+          const addr = item.registered_office_address;
+          if (addr && !addr.locality) addr.locality = asked;
+        }
+      }
+      return reply(body, next.status ?? 200);
     }
     if (u.includes('places.googleapis.com')) {
       calls.places++;
@@ -49,7 +62,9 @@ const company = (name, number, over = {}) => ({
   company_type: 'ltd',
   date_of_creation: '2014-06-01',
   sic_codes: ['43910'],
-  registered_office_address: { address_line_1: '1 High St', locality: 'Otley', postal_code: 'LS21 1AA' },
+  // No locality by default: the stub fills it from the town being searched,
+  // which is what the register does. A test that needs a mismatch sets one.
+  registered_office_address: { address_line_1: '1 High St', postal_code: 'LS21 1AA' },
   ...over,
 });
 
@@ -791,4 +806,83 @@ test('require-phone without a Google key is refused, and says so plainly', async
     assert.match(res.body.error, /GOOGLE_MAPS_API_KEY/);
     assert.equal(calls.register, 0, 'nothing spent finding out');
   });
+});
+
+/* ------------------------------------------------------------ right town */
+
+test('a company on a road named after another town is rejected', () => {
+  // The register's location filter matches the WHOLE address, so a search
+  // for "Stone" returns companies on Stone Road in Aylesbury. That happened
+  // on the first real run: RAULNICOLAS LTD, Aylesbury, a hundred miles from
+  // any town on the list.
+  assert.equal(sameTown('Stone', 'Aylesbury'), false);
+  assert.equal(sameTown('Stafford', 'London'), false);
+  assert.equal(sameTown('Cannock', 'Manchester'), false);
+});
+
+test('a town is not a longer town that starts the same way', () => {
+  // Substring matching would accept every one of these, which is why the
+  // comparison is by token.
+  assert.equal(sameTown('Stone', 'Stoneleigh'), false);
+  assert.equal(sameTown('Stafford', 'Staffordshire Business Park'), false);
+  assert.equal(sameTown('Wells', 'Wellsbourne'), false);
+});
+
+test('the same town spelled differently still matches', () => {
+  for (const [a, b] of [
+    ['Stoke-on-Trent', 'Stoke On Trent'],
+    ['Stoke-on-Trent', 'STOKE-ON-TRENT'],
+    ['Burton-on-Trent', 'Burton On Trent'],
+    ['Burton on Trent', 'Burton upon Trent'],
+    ['Newcastle-under-Lyme', 'Newcastle under Lyme'],
+    ['Newcastle-under-Lyme', 'Newcastle'],
+    ['  Telford ', 'Telford'],
+  ]) {
+    assert.equal(sameTown(a, b), true, `"${a}" should match "${b}"`);
+  }
+});
+
+test('two Newcastles are not one Newcastle', () => {
+  // Staffordshire and Tyneside. First words agree and everything else does
+  // not, which is exactly what the tail check is for.
+  assert.equal(sameTown('Newcastle-under-Lyme', 'Newcastle upon Tyne'), false);
+  assert.equal(sameTown('Ashby-de-la-Zouch', 'Ashby cum Fenby'), false);
+});
+
+test('a missing town on either side is not treated as a mismatch', () => {
+  // No area asked for means no filter. No locality on the company means
+  // nothing to check — the register matched it on something, and dropping a
+  // lead over a blank field costs more than the occasional stray.
+  assert.equal(sameTown(null, 'Aylesbury'), true);
+  assert.equal(sameTown('Stafford', null), true);
+  assert.equal(sameTown('Stafford', ''), true);
+  assert.equal(sameTown('', ''), true);
+});
+
+test('the hunt files only companies actually in the town, and counts the rest', async () => {
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_trades: 'roofers', hunt_areas: 'Stone',
+    hunt_daily_target: '5', hunt_require_no_website: '0', hunt_require_phone: '0',
+  });
+
+  const at = (name, number, locality) => company(name, number, {
+    registered_office_address: { address_line_1: '1 Stone Road', locality },
+  });
+  register = [{ body: { hits: 4, items: [
+    at('REAL STONE ROOFING LIMITED', '62000001', 'Stone'),
+    at('RAULNICOLAS LTD', '62000002', 'Aylesbury'),      // Stone Road, Aylesbury
+    at('FAR AWAY ROOFING LIMITED', '62000003', 'London'),
+    at('ALSO STONE LIMITED', '62000004', 'Stone'),
+  ] } }];
+
+  const run = await runAndWait();
+  assert.equal(run.found, 2, 'only the two genuinely in Stone');
+  assert.equal(run.wrong_town, 2, 'and it says how many were the wrong town');
+
+  const names = (await get('/api/leads')).body.leads.map((l) => l.business_name);
+  assert.ok(!names.includes('RAULNICOLAS LTD'));
+  assert.ok(!names.includes('FAR AWAY ROOFING LIMITED'));
+  assert.ok(names.includes('REAL STONE ROOFING LIMITED'));
 });

@@ -25,6 +25,27 @@ is retired, and re-opened a month later — new companies incorporate all the ti
 **It never sends anything.** It finds and files. Sending stays behind the
 confirmation in the Outbox.
 
+## The right town
+
+The register's `location` filter matches the **whole registered office
+address**, not the town. So a search for Stone returns companies on Stone
+Road in Aylesbury — a hundred miles from Staffordshire, and a lead you would
+ring, apologise to, and delete. The first live run produced exactly that.
+
+Every company is now checked against the town that was asked for, and the
+ones that do not belong are counted in the **Wrong town** column rather than
+filed.
+
+The comparison is by word, not by substring, because substring matching just
+trades one wrong answer for another — `"stoneleigh".includes("stone")` is
+true, and Stoneleigh is not Stone. Where both names have more than one word
+the last must agree as well, which is the entire difference between
+Newcastle-under-Lyme and Newcastle upon Tyne.
+
+A company with no locality at all is kept: the register matched it on
+something, and dropping a lead over a blank field costs more than the
+occasional stray.
+
 ## Leads you can actually contact
 
 Neither source holds an email address:

@@ -205,6 +205,7 @@ export default async function huntView(root, _p, { refresh }) {
           <thead><tr><th class="nw">When</th><th>How</th><th class="num">Found</th>
             <th class="num">Seen</th><th class="num">Had a site</th>
             <th class="num" title="Skipped: Google held no phone number">No phone</th>
+            <th class="num" title="Skipped: the address matched but the town did not">Wrong town</th>
             <th class="num">Requests</th>
             <th>Covered</th></tr></thead>
           <tbody>
@@ -216,6 +217,7 @@ export default async function huntView(root, _p, { refresh }) {
                 <td class="meta num">${r.companies_seen}</td>
                 <td class="meta num">${r.had_website}</td>
                 <td class="meta num">${r.no_contact ?? 0}</td>
+                <td class="meta num">${r.wrong_town ?? 0}</td>
                 <td class="meta num">${r.register_requests + r.places_requests}</td>
                 <td class="meta">${r.error
                   ? html`<span style="color:var(--clay)">${r.error}</span>`

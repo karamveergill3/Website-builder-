@@ -208,6 +208,45 @@ async function websiteMap(trade, area, counters) {
   return byName;
 }
 
+/**
+ * Is this company actually in the town we asked for?
+ *
+ * The register's `location` filter partial-matches the WHOLE registered
+ * office address, not the town — so a search for "Stone" returns companies
+ * on Stone Road in Aylesbury, a hundred miles from Staffordshire. That is a
+ * lead you would ring, apologise to, and delete.
+ *
+ * Compared by token rather than by substring, because substring matching
+ * trades one wrong answer for another: "stoneleigh".includes("stone") is
+ * true, and Stoneleigh is not Stone.
+ *
+ *   Stone            vs Aylesbury          -> no, different first word
+ *   Stone            vs Stoneleigh         -> no, ditto
+ *   Burton on Trent  vs Burton upon Trent  -> yes, first and last agree
+ *   Newcastle under Lyme vs Newcastle upon Tyne -> no, the tails differ,
+ *       which is the whole difference between Staffordshire and Tyneside
+ *   Newcastle under Lyme vs Newcastle      -> yes, one is just shorter
+ *
+ * A company with no locality at all is kept: the register matched it on
+ * something, and throwing away a lead over a missing field would cost more
+ * than the occasional stray.
+ */
+export function sameTown(area, locality) {
+  const norm = (v) => String(v ?? '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const a = norm(area);
+  const l = norm(locality);
+  if (!a || !l) return true;
+  if (a === l) return true;
+
+  const at = a.split(' ');
+  const lt = l.split(' ');
+  if (at[0] !== lt[0]) return false;
+  // Both multi-word: the tail has to agree too.
+  if (at.length > 1 && lt.length > 1) return at.at(-1) === lt.at(-1);
+  return true;
+}
+
 /** Website evidence for one company, read off the Places page for its town. */
 export function judge(company, byName, { includeUnlisted = true } = {}) {
   const key = normaliseName(company.company_name);
@@ -331,6 +370,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
   const counters = {
     found: 0, companies_seen: 0, already_known: 0, had_website: 0,
     no_contact: 0,
+    wrong_town: 0,
     places_requests: 0, register_requests: 0,
     maxPlacesRequests: cfg.maxPlacesRequests,
   };
@@ -342,7 +382,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
     db.prepare(
       `UPDATE hunt_runs SET found=@found, companies_seen=@companies_seen,
          already_known=@already_known, had_website=@had_website,
-         no_contact=@no_contact,
+         no_contact=@no_contact, wrong_town=@wrong_town,
          places_requests=@places_requests, register_requests=@register_requests,
          areas_covered=@areas, finished_at=@finished, error=@error
        WHERE id=@id`
@@ -352,6 +392,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
       already_known: counters.already_known,
       had_website: counters.had_website,
       no_contact: counters.no_contact,
+      wrong_town: counters.wrong_town,
       places_requests: counters.places_requests,
       register_requests: counters.register_requests,
       id: runId,
@@ -447,6 +488,11 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
         }
         if (db.prepare('SELECT 1 FROM leads WHERE company_number = ?').get(c.company_number)) {
           counters.already_known++;
+          continue;
+        }
+        // The register matched the address, not the town. Check the town.
+        if (!sameTown(t.area, c.locality)) {
+          counters.wrong_town++;
           continue;
         }
         fresh.push(c);

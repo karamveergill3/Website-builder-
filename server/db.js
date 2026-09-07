@@ -691,6 +691,15 @@ const MIGRATIONS = [
     `,
   },
   {
+    name: '021_hunt_runs_wrong_town',
+    up: `
+      -- Companies the register returned that are not in the town we asked
+      -- for. Its location filter matches the whole registered office
+      -- address, so "Stone" finds companies on Stone Road in Aylesbury.
+      ALTER TABLE hunt_runs ADD COLUMN wrong_town INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
     name: '019_backfill_company_ledger',
     up: `
       -- Carry the leads that already exist into the ledger, so the guarantee

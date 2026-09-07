@@ -100,10 +100,16 @@ external fonts or scripts — everything inlined so it opens straight from disk.
 | Section | What it does |
 |---|---|
 | Hero      | Trade + town as the headline, the CTA their answer picked |
-| Services  | One card per service, in their own words |
-| Our work  | Photo slots — honest placeholders, not stock images |
+| Services  | Their own service names, on an asymmetric grid |
+| Figures   | Four numbers at display size, left for them to fill |
+| Our work  | Photo plates — image stand-ins, not stock photography |
+| How it works | Four steps ending in the action their reply asked for |
+| In their words | A testimonial slot at display size |
 | About     | Who they are, area covered, facts panel |
 | Contact   | Phone, email, hours, area, enquiry-form placeholder |
+
+Plus whatever the trade needs on top — a price list, opening hours, areas
+covered. See [Sections each trade actually needs](#sections-each-trade-actually-needs).
 
 A one-pager is the right shape for this market. A caller wants the number,
 proof the work is decent, and the area covered — all of which fit on one
@@ -149,6 +155,51 @@ content rather than a broken one.
 `prefers-reduced-motion` stops every animation. All of them are decorative,
 so the page is complete either way — that is the test for whether an effect
 earns its place.
+
+### Why it does not look generated
+
+Three things give a generated page away, and each has a specific fix.
+
+**Equal cards in a row.** Three services, three identical boxes, one row —
+that is a CMS default and everyone has seen it. So the services grid is
+**bento**: six columns, with the first service a feature cell four columns
+wide and two rows tall carrying an image plate, and the rest falling in
+around it. The asymmetry is doing the work; nothing about the content
+changed.
+
+Six columns because six divides by both two and three, so the trailing row
+can always be made to fill whatever number of services came back. A grid
+that leaves a hole in its last row reads as a bug, not as space.
+
+**Grey boxes where photographs go.** A dashed rectangle labelled "photo"
+reads as unfinished rather than as a placeholder. Each slot is now a
+**generated plate**: a duotone field mixed from the sector palette, with the
+trade's own mark drawn oversized into it and cropped by the top edge — a
+salon's plates carry scissors, a garage's carry a wheel. The composition is
+seeded from the slot's position, so the three on a page are visibly
+different rather than the same picture three times.
+
+A light theme gets its own plate range. The dark version sweeps the accent
+all the way down to the ink, which on cream produces mud — the one thing the
+salon aesthetic cannot look like — so a light plate runs warm white through
+silver and only reaches the deep tone at the far corner.
+
+**Nothing between the hero and the phone number.** A page you can take in
+without scrolling has nothing to say. Three blocks fill the middle:
+
+- **A figures band** — four numbers set large.
+- **A four-step strip** answering the question every visitor actually has,
+  which is *what happens if I get in touch*. The first step changes with
+  the brief's primary CTA, so a site built around bookings and one built
+  around quotes do not tell the same story.
+- **A pull quote** at display size, for air.
+
+**None of these invent anything.** The figures are em-dashes and the quote
+is empty. A mockup that ships to a stranger with "18 years' experience" or
+a five-star review nobody wrote is a lie printed under their name — and a
+blank they have to fill in is a better reason for them to reply than a
+number they never gave you. A test fails the build if any block starts
+claiming years, reviews or accreditations.
 
 ### Sector themes
 
@@ -277,6 +328,13 @@ Most of these get opened on a phone, so:
   it.
 - **The artwork is dropped entirely** — the screen is better spent on the
   number than on a decorative drawing.
+- **The bento unwinds in two stages** — a feature cell over a two-up grid on
+  a tablet, then one column on a phone.
+- **Nothing overflows sideways.** Every word on the page came out of a
+  prospect's email, so none of it can be assumed to have a break
+  opportunity: a 32-character address with none pushed the whole document
+  wider than the screen, which shows up as the entire site sliding under the
+  thumb.
 
 ### The headline
 
@@ -290,9 +348,10 @@ So each register label maps to the words a customer would actually use —
 anything unmapped is trimmed generically to fit. The fuller label still
 appears in the eyebrow above, where small caps have room for it.
 
-**Placeholders are honest.** Where their photos go, the page says so.
-A dashed empty box reads better than a stock photo of someone else's van,
-and it gives you something concrete to ask them for.
+**Placeholders are honest.** Where their photos go, the page carries a
+plate in their own palette and says what it is waiting for. A stock photo of
+someone else's van would look finished and be a lie; this looks composed and
+gives you something concrete to ask them for.
 
 ## Security
 

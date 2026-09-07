@@ -18,7 +18,7 @@ npm start                 # http://localhost:3000
 
 ```bash
 npm run hunt              # find today's prospects now, without the server
-npm test                  # 256 tests
+npm test                  # 310 tests
 npm run lint
 ```
 
@@ -277,15 +277,16 @@ sqlite3 data/prospect-book.db ".backup 'backup.db'"
 npm test
 ```
 
-143 tests covering placeholder rendering, lead and template CRUD with
+310 tests covering placeholder rendering, lead and template CRUD with
 validation, stats, the PECR classification gate, Companies House matching and
 entity classification, suppression across lead deletion, log-snapshot
 immutability, the Places field mask and dedupe, Google's error-reason handling,
 draft scoring, address validation, the daily hunt's budget and cursor
 behaviour, the review-then-send confirmation, the daily cap, and
-header-injection resistance in message building. Every external API is stubbed,
-so the suite never spends money or needs credentials — and one test asserts the
-project has no AI dependency and reaches no model provider.
+header-injection resistance in message building, reply extraction, and the
+mockup builder's escaping, themes and layout blocks. Every external API is
+stubbed, so the suite never spends money or needs credentials — and one test
+asserts the project has no AI dependency and reaches no model provider.
 
 ```bash
 npm run lint

@@ -237,3 +237,31 @@ test('briefForBuild prefers the trading name and keeps the legal one', () => {
   assert.equal(b.business_name, 'Hillside Roofing');
   assert.equal(b.registered_name, 'HILLSIDE ROOFING LIMITED');
 });
+
+test('briefForBuild coerces a stray string list into an array', () => {
+  // A string has a truthy .length, so every emptiness check upstream lets it
+  // through — and the generator then calls .join on it and throws inside the
+  // one button that must not fail.
+  const b = briefForBuild({
+    services: 'Roof repairs, Guttering',
+    areas: 'Walsall, Aldridge',
+    brand_colours: '#123456',
+  }, lead);
+  assert.deepEqual(b.services, ['Roof repairs', 'Guttering']);
+  assert.deepEqual(b.areas, ['Walsall', 'Aldridge']);
+  assert.deepEqual(b.brand_colours, ['#123456']);
+});
+
+test('briefForBuild survives junk in the list columns', () => {
+  for (const junk of [null, undefined, 5, {}, true, ['', '  ', null]]) {
+    const b = briefForBuild({ services: junk, areas: junk }, lead);
+    assert.ok(Array.isArray(b.services) && b.services.length, String(junk));
+    assert.ok(Array.isArray(b.areas), String(junk));
+    assert.ok(b.areas.every((a) => typeof a === 'string'), String(junk));
+  }
+});
+
+test('briefForBuild rejects a primary_cta the generator cannot lay out', () => {
+  assert.equal(briefForBuild({ primary_cta: 'explode' }, lead).primary_cta, 'call');
+  assert.equal(briefForBuild({ primary_cta: 'book' }, lead).primary_cta, 'book');
+});

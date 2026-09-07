@@ -630,3 +630,128 @@ test('stats and testimonials are left blank rather than invented', () => {
   assert.ok(!/\d+\+? (?:jobs|years|customers) /i.test(html),
     'must not fabricate a track record');
 });
+
+/* ------------------------------------------------------------ bento grid */
+
+test('the bento is a real asymmetric grid, not a full-width banner', () => {
+  const html = renderSite(brief, { pages: 'single' })['index.html'];
+  // Six columns divide by both 2 and 3. On a four-column grid a feature
+  // spanning four columns is simply the full width, which is a banner with
+  // extra steps — the asymmetry is the whole point of the block.
+  assert.match(html, /\.bento\{[^}]*grid-template-columns:repeat\(6,1fr\)/);
+  assert.match(html, /\.bento-cell\.feature\{grid-column:span 4;grid-row:span 2/);
+});
+
+test('every service count fills its last row', () => {
+  // Services are capped at five. A count whose trailing row runs short
+  // leaves a hole that reads as a bug rather than as white space.
+  for (let n = 1; n <= 5; n += 1) {
+    const services = Array.from({ length: n }, (_, i) => `Service ${i + 1}`);
+    const html = renderSite({ ...brief, services }, { pages: 'single' })['index.html'];
+    assert.match(html, new RegExp(`<div class="bento reveal" data-n="${n}"`),
+      `${n} services: the grid must declare its count`);
+    assert.equal((html.match(/class="bento-cell/g) ?? []).length, n, `${n} cells`);
+  }
+  const html = renderSite(brief, { pages: 'single' })['index.html'];
+  for (const rule of [
+    /\.bento\[data-n="1"\] \.bento-cell\.feature\{grid-column:span 6/,
+    /\.bento\[data-n="2"\] \.bento-cell\.feature\{grid-column:span 3/,
+    /\.bento\[data-n="4"\] \.bento-cell:last-child\{grid-column:span 6/,
+    /\.bento\[data-n="5"\] \.bento-cell:nth-child\(4\)/,
+  ]) assert.match(html, rule);
+});
+
+/* ----------------------------------------------------------- photo plate */
+
+test('each trade draws its own motif into the photo plate', () => {
+  // A plate with no mark is a gradient, and a gradient reads as a slot
+  // nobody finished. The motif is what makes it look art-directed.
+  const seen = new Map();
+  for (const [trade, family] of [
+    ['Hairdressing', 'beauty'], ['Repair of motor vehicles', 'motor'],
+    ['Roofing activities', 'building'], ['Landscape service activities', 'green'],
+    ['Take-away food shops', 'food'], ['Retail sale of clothing', 'retail'],
+    ['Cleaning of buildings', 'clean'], ['Accounting and auditing', 'pro'],
+  ]) {
+    const html = renderSite({ ...brief, trade }, { pages: 'single' })['index.html'];
+    assert.match(html, /class="plate-motif"/, trade);
+    const marks = html.match(/<svg class="plate-art"[\s\S]*?<\/svg>/g) ?? [];
+    assert.ok(marks.length >= 3, `${trade}: every plate carries a mark`);
+    seen.set(family, marks[0]);
+  }
+  // Eight trades, eight different marks — otherwise it is one template again.
+  assert.equal(new Set(seen.values()).size, seen.size, 'each family draws something different');
+});
+
+test('the plate motif always bleeds off the top, never the bottom', () => {
+  // Clipped by the top edge reads as a deliberate crop; clipped by the
+  // bottom reads as a layout that overflowed.
+  const html = renderSite(brief, { pages: 'single' })['index.html'];
+  const offsets = [...html.matchAll(/--ay:(-?\d+)%/g)].map((m) => Number(m[1]));
+  assert.ok(offsets.length >= 4, 'plates are on the page');
+  for (const y of offsets) assert.ok(y < 0, `--ay:${y}% must be negative`);
+});
+
+test('a light theme keeps its plate in the cream-to-silver range', () => {
+  // The salon aesthetic is white, cream, black and silver. Sweeping a plate
+  // all the way to the ink the way a dark theme does turns cream into mud.
+  const salon = renderSite({ ...brief, trade: 'Hairdressing' }, { pages: 'single' })['index.html'];
+  assert.match(salon, /\.plate\{[\s\S]*?color-mix\(in srgb, var\(--glow\) 42%, #fff\)/);
+  const garage = renderSite({ ...brief, trade: 'Repair of motor vehicles' },
+    { pages: 'single' })['index.html'];
+  assert.match(garage, /\.plate\{[\s\S]*?color-mix\(in srgb, var\(--accent\) 92%, transparent\)/);
+});
+
+test('the bento actually uses both columns on a tablet', () => {
+  // Two columns with every cell spanning 2 is two columns of nothing: it
+  // rendered 561-900px as a single stack of full-width cards all the way
+  // down. Only the feature cell may take the full width there.
+  const html = renderSite(brief, { pages: 'single' })['index.html'];
+  const tablet = html.match(/@media \(max-width:900px\)\{\s*\.bento\{[\s\S]*?\n  \}/);
+  assert.ok(tablet, 'the tablet block exists');
+  assert.match(tablet[0], /\.bento-cell\{grid-column:span 1/);
+  assert.match(tablet[0], /\.bento-cell\.feature\{grid-column:span 2/);
+});
+
+test('the per-count bento rules cannot leak into the narrow layouts', () => {
+  // They outrank the narrow-screen resets on specificity, and a span of 3
+  // on a one-column grid invents implicit columns — which collapsed the
+  // phone layout to 62px cells.
+  const raw = renderSite(brief, { pages: 'single' })['index.html'];
+  // Comments are emitted verbatim and the one above these rules quotes the
+  // selectors it explains, so count rules rather than mentions of them.
+  const html = raw.replace(/\/\*[\s\S]*?\*\//g, '');
+  const wide = html.indexOf('@media (min-width:901px)');
+  assert.ok(wide > 0, 'the per-count rules are scoped to a wide-only block');
+
+  // Walk to the matching brace rather than to the next @media: the
+  // stylesheet carries several max-width:900px blocks and the first one is
+  // not the bento's.
+  let depth = 0;
+  let end = -1;
+  for (let i = html.indexOf('{', wide); i < html.length; i += 1) {
+    if (html[i] === '{') depth += 1;
+    else if (html[i] === '}') { depth -= 1; if (depth === 0) { end = i; break; } }
+  }
+  assert.ok(end > wide, 'the wide block closes');
+
+  const rules = [...html.matchAll(/\.bento\[data-n="(\d)"\]/g)];
+  // Three services already fill the grid from the base rules — feature 4x2
+  // with two cells stacked beside it is an exact rectangle. Every other
+  // count needs a correction, and 2 and 5 take two selectors apiece.
+  assert.deepEqual([...new Set(rules.map((m) => m[1]))].sort(), ['1', '2', '4', '5']);
+  for (const m of rules) {
+    assert.ok(m.index > wide && m.index < end,
+      `a per-count rule at ${m.index} sits outside the wide-only block`);
+  }
+});
+
+test('a long address cannot push the page sideways', () => {
+  // Everything on the page came out of a prospect's email, so no word can
+  // be assumed to carry a break opportunity. A 32-character address with
+  // none pushed the document wider than the phone screen it was on.
+  const html = renderSite({ ...brief, email: 'bookings@dunstonmotorworks.co.uk' },
+    { pages: 'single' })['index.html'];
+  assert.match(html, /body\{overflow-wrap:break-word\}/);
+  assert.match(html, /a\[href\^="mailto:"\][^{]*\{overflow-wrap:anywhere\}/);
+});

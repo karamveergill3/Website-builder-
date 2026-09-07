@@ -439,12 +439,37 @@ function remainingGaps(b) {
 }
 
 /**
+ * Coerce a list field to a real array of non-empty strings.
+ *
+ * The generator joins and maps these, so a string where an array belongs
+ * throws — and it throws inside "Build mockup", which is the one button in
+ * the tool that must not fail. The columns are JSON, written by a model, by
+ * the rules pass, and by a PATCH from the review screen, so "it is always an
+ * array upstream" is three assumptions rather than a guarantee. A bare string
+ * is the plausible mistake, and it is silent: `"a, b".length` is truthy, so
+ * every emptiness check upstream passes it straight through.
+ *
+ * Splitting a stray string on commas is the reading the user meant.
+ */
+function asStrings(v) {
+  if (Array.isArray(v)) {
+    return v.map((x) => String(x).trim()).filter(Boolean).slice(0, 20);
+  }
+  if (typeof v === 'string') {
+    return v.split(/[,\n]/).map((x) => x.trim()).filter(Boolean).slice(0, 20);
+  }
+  return [];
+}
+
+/**
  * Everything the generator needs, with sane defaults filled in. A brief with
  * gaps still produces a site — it just produces a more generic one — so the
  * user is never blocked from sending something.
  */
 export function briefForBuild(brief, lead = {}) {
   const trade = resolveTrade(lead.category ?? '')?.label ?? lead.category ?? null;
+  const services = asStrings(brief.services);
+  const areas    = asStrings(brief.areas);
   return {
     // What they asked to be called wins over the register's version. The
     // registered name is kept alongside for the footer, where the legal
@@ -452,14 +477,14 @@ export function briefForBuild(brief, lead = {}) {
     business_name: brief.trading_name || tidyRegisteredName(lead.business_name),
     registered_name: lead.business_name ?? null,
     trade,
-    services: brief.services?.length ? brief.services : defaultServices(trade, lead),
-    primary_cta: brief.primary_cta ?? 'call',
-    areas: brief.areas?.length ? brief.areas : (lead.location ? [lead.location] : []),
+    services: services.length ? services : defaultServices(trade, lead),
+    primary_cta: CTAS.includes(brief.primary_cta) ? brief.primary_cta : 'call',
+    areas: areas.length ? areas : (lead.location ? [String(lead.location)] : []),
     phone: lead.phone ?? null,
     email: lead.email ?? null,
     has_logo: Boolean(brief.has_logo),
     has_photos: Boolean(brief.has_photos),
-    brand_colours: brief.brand_colours ?? [],
+    brand_colours: asStrings(brief.brand_colours),
     tone: brief.tone ?? null,
     notes: brief.notes ?? null,
   };

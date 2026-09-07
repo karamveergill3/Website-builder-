@@ -874,6 +874,18 @@ function css(p, t) {
   const light = p.mode === 'light';
   return `
   *,*::before,*::after{box-sizing:border-box}
+  /* Every word on the page came out of a prospect's email, so nothing here
+     can assume a break opportunity exists. A 32-character address like
+     bookings@dunstonmotorworks.co.uk has none, and it pushed the whole
+     document 15px wider than a phone screen — which shows up as the entire
+     site sliding sideways under the thumb, on the one section whose job is
+     to be tapped. break-word rather than anywhere: it wraps the word
+     that will not fit without also shrinking every grid track to its
+     min-content width. */
+  body{overflow-wrap:break-word}
+  /* Addresses and links sit in grid and flex cells whose track is sized
+     from min-content, where break-word alone still overflows. */
+  a[href^="mailto:"],a[href^="http"],.facts span,.clist span{overflow-wrap:anywhere}
   :root{
     --ink:${p.ink}; --accent:${p.accent}; --glow:${p.glow ?? p.accent};
     --wash:${p.wash}; --line:${p.line}; --muted:${p.muted};
@@ -1107,15 +1119,22 @@ function css(p, t) {
     border:1px solid rgba(255,255,255,.3)}
 
   /* ---------- section heads: title left, note right ---------- */
-  .sec-head{display:flex;gap:40px;align-items:flex-end;justify-content:space-between;
+  /* Row gap and column gap are set separately on purpose. A long heading
+     wraps the note onto its own line, and a 40px row gap there leaves the
+     note floating in the middle of nothing — 14px keeps it attached to the
+     heading it belongs to. The h2's own bottom margin would stack on top of
+     that gap, so it is dropped inside a sec-head. */
+  .sec-head{display:flex;gap:14px 40px;align-items:flex-end;
+    justify-content:space-between;
     flex-wrap:wrap;padding-bottom:26px;border-bottom:1px solid var(--line)}
+  .sec-head h2{margin-bottom:0}
   .sec-note{max-width:34ch;color:var(--muted);margin:0;font-size:.98rem}
 
   /* ---------- bento: one feature cell, then the rest ----------
      Equal cards in a neat row is the most template-looking thing a page
      can do. Varying the weight is what an agency does instead. */
   .bento{display:grid;gap:16px;margin-top:36px;
-    grid-template-columns:repeat(4,1fr)}
+    grid-template-columns:repeat(6,1fr)}
   .bento-cell{grid-column:span 2;border:1px solid var(--line);
     border-radius:var(--radius);padding:30px;background:#fff;position:relative;
     overflow:hidden;transition:border-color .35s,transform .35s var(--ease),
@@ -1124,6 +1143,24 @@ function css(p, t) {
     border-color:transparent}
   .bento-cell.feature{grid-column:span 4;grid-row:span 2;
     display:flex;flex-direction:column}
+  /* Six columns divide by 2 and by 3, so the trailing row can always be
+     made to fill. Without these the last row runs short and leaves a gap
+     that reads as a bug rather than as space. Services are capped at five,
+     so every case is covered.
+
+     Scoped to the wide layout on purpose. Left unscoped they outrank the
+     narrow-screen resets below — .bento[data-n="5"] .bento-cell:nth-child(4)
+     carries more specificity than .bento-cell does — so a span 3 survived
+     into the one-column layout, span 3 on a one-column grid invents two
+     implicit columns, and the phone layout collapsed to 62px cells. */
+  @media (min-width:901px){
+    .bento[data-n="1"] .bento-cell.feature{grid-column:span 6;grid-row:span 1}
+    .bento[data-n="2"] .bento-cell.feature{grid-column:span 3;grid-row:span 1}
+    .bento[data-n="2"] .bento-cell{grid-column:span 3}
+    .bento[data-n="4"] .bento-cell:last-child{grid-column:span 6}
+    .bento[data-n="5"] .bento-cell:nth-child(4),
+    .bento[data-n="5"] .bento-cell:nth-child(5){grid-column:span 3}
+  }
   .bento-cell.feature h3{font-size:1.7rem;font-family:var(--display);
     letter-spacing:-.02em}
   .bento-cell.feature .plate{margin-top:auto;min-height:260px}
@@ -1131,9 +1168,14 @@ function css(p, t) {
     letter-spacing:.14em;color:var(--muted);opacity:.5}
   .bento-cell h3{margin-bottom:.45em}
   .bento-cell p{color:var(--muted);margin:0;font-size:.96rem}
+  /* Two columns on a tablet, and the cells have to span ONE of them or the
+     grid is two columns of nothing: every cell spanning 2 made every card
+     full width, so 561-900px was a single stack the whole way down. The
+     feature keeps the full width; the rest pair up. */
   @media (max-width:900px){
     .bento{grid-template-columns:repeat(2,1fr)}
-    .bento-cell,.bento-cell.feature{grid-column:span 2;grid-row:auto}
+    .bento-cell{grid-column:span 1;grid-row:auto}
+    .bento-cell.feature{grid-column:span 2;grid-row:auto}
   }
   @media (max-width:560px){
     .bento{grid-template-columns:1fr}
@@ -1149,22 +1191,36 @@ function css(p, t) {
      pitch cannot afford. It has to look like a deliberate image. */
   .plate{position:relative;border-radius:calc(var(--radius) - 2px);
     min-height:220px;overflow:hidden;isolation:isolate;
-    background:
-      linear-gradient(var(--pa),
-        color-mix(in srgb, var(--accent) 92%, transparent) 0%,
-        color-mix(in srgb, var(--glow) 78%, transparent) 55%,
-        color-mix(in srgb, var(--ink) 88%, transparent) 100%)}
+    background:linear-gradient(var(--pa), ${light
+      /* A light theme wants a tonal plate: warm white through silver, with
+         the deep tone only at the far corner. Sweeping all the way to the
+         ink the way a dark theme does turns cream into mud, which is the
+         one thing a salon page cannot look like. */
+      ? `color-mix(in srgb, var(--glow) 42%, #fff) 0%,
+         color-mix(in srgb, var(--accent) 52%, #fff) 54%,
+         color-mix(in srgb, var(--ink) 72%, var(--accent)) 100%`
+      : `color-mix(in srgb, var(--accent) 92%, transparent) 0%,
+         color-mix(in srgb, var(--glow) 78%, transparent) 55%,
+         color-mix(in srgb, var(--ink) 88%, transparent) 100%`})}
   .plate-fig{position:absolute;inset:0;
     background:
       radial-gradient(circle var(--pr) at var(--px) var(--py),
-        rgba(255,255,255,.34), transparent 66%),
+        rgba(255,255,255,${light ? '.5' : '.34'}), transparent 66%),
       radial-gradient(circle 30% at calc(100% - var(--px)) calc(100% - var(--py)),
-        color-mix(in srgb, var(--ink) 55%, transparent), transparent 62%)}
+        color-mix(in srgb, var(--ink) ${light ? '26' : '55'}%, transparent), transparent 62%)}
+  /* The trade's own mark, oversized and bleeding off an edge — a plate that
+     carries the motif reads as art-directed, where a bare gradient reads as
+     a slot nobody finished. */
+  .plate-motif{position:absolute;top:var(--ay);right:var(--ax);
+    width:62%;max-width:230px;aspect-ratio:1;z-index:1;
+    color:${light ? 'var(--ground)' : '#fff'};opacity:${light ? '.5' : '.26'}}
+  .plate-motif svg{width:100%;height:100%;display:block}
   /* A fine grid over the top, the way a duotone print carries a screen. */
-  .plate::after{content:"";position:absolute;inset:0;opacity:.14;
+  .plate::after{content:"";position:absolute;inset:0;z-index:1;
+    opacity:${light ? '.09' : '.14'};
     background-image:
-      linear-gradient(#fff 1px,transparent 1px),
-      linear-gradient(90deg,#fff 1px,transparent 1px);
+      linear-gradient(${light ? 'var(--ink)' : '#fff'} 1px,transparent 1px),
+      linear-gradient(90deg,${light ? 'var(--ink)' : '#fff'} 1px,transparent 1px);
     background-size:34px 34px}
   .plate-label{position:absolute;left:16px;bottom:14px;z-index:2;
     font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
@@ -1664,14 +1720,68 @@ function extraSections(b, wanted = []) {
  * honestly empty. The seed varies the composition so three slots on one
  * page are not the same picture three times.
  */
-function photoPlate(seed = 0, label = 'Your photo here') {
+function plateArt(family) {
+  const svg = (inner) =>
+    `<svg class="plate-art" viewBox="0 0 120 120" fill="none" aria-hidden="true"
+      focusable="false" stroke="currentColor" stroke-width="2.4"
+      stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+
+  switch (family) {
+    case 'beauty':
+      // Open scissors: two blades from a pivot, two loops below it.
+      return svg(`
+        <path d="M34 16 L70 74"/><path d="M86 16 L50 74"/>
+        <circle cx="44" cy="92" r="15"/><circle cx="76" cy="92" r="15"/>
+        <circle cx="60" cy="74" r="3.4"/>`);
+    case 'motor':
+      return svg(`
+        <circle cx="60" cy="60" r="42"/><circle cx="60" cy="60" r="13"/>
+        <path d="M60 18v29M60 73v29M18 60h29M73 60h29"/>`);
+    case 'building':
+      // A roofline over two courses of tiles.
+      return svg(`
+        <path d="M14 58 L60 22 L106 58"/>
+        <path d="M24 72h72M24 90h72"/>
+        <path d="M42 72v18M60 72v18M78 72v18"/>`);
+    case 'green':
+      return svg(`
+        <path d="M60 104V44"/>
+        <path d="M60 66C60 46 44 34 26 34c0 20 16 32 34 32Z"/>
+        <path d="M60 82c0-18 14-28 30-28 0 18-14 28-30 28Z"/>`);
+    case 'food':
+      return svg(`
+        <path d="M26 50h56v26a20 20 0 0 1-20 20H46a20 20 0 0 1-20-20Z"/>
+        <path d="M82 58h8a12 12 0 0 1 0 24h-8"/>
+        <path d="M44 34c0-8 8-8 8-16M60 34c0-8 8-8 8-16"/>`);
+    case 'retail':
+      return svg(`
+        <path d="M62 20H92v30L54 88 24 58Z"/>
+        <circle cx="80" cy="32" r="5"/>`);
+    case 'clean':
+      return svg(`
+        <circle cx="46" cy="52" r="24"/><circle cx="82" cy="80" r="14"/>
+        <circle cx="34" cy="90" r="9"/>`);
+    default:
+      return svg(`
+        <path d="M22 90 L60 22 L98 90Z"/><path d="M40 66h40"/>`);
+  }
+}
+
+function photoPlate(seed = 0, label = 'Your photo here', family = 'pro') {
   const angle = 120 + seed * 47;
   const cx = 30 + ((seed * 37) % 45);
   const cy = 25 + ((seed * 23) % 50);
   const r  = 34 + ((seed * 13) % 26);
+  // The motif sits off-centre and bleeds past the top edge, which is what
+  // makes it read as art direction rather than as an icon centred in a box.
+  // Always the top: a mark clipped by the bottom of a plate reads as a
+  // layout that overflowed rather than as a deliberate crop.
+  const ax = 6 + ((seed * 29) % 44);
+  const ay = -30 + ((seed * 17) % 25);
   return `
   <div class="plate" style="--pa:${angle}deg;--px:${cx}%;--py:${cy}%;--pr:${r}%">
     <div class="plate-fig"></div>
+    <div class="plate-motif" style="--ax:${ax}%;--ay:${ay}%">${plateArt(family)}</div>
     <span class="plate-label">${esc(label)}</span>
   </div>`;
 }
@@ -1681,7 +1791,7 @@ function photoPlate(seed = 0, label = 'Your photo here') {
  * of the rest. Equal cards in a neat row is the single most template-looking
  * thing a page can do.
  */
-function bentoServices(b) {
+function bentoServices(b, family = 'pro') {
   const services = (b.services ?? []).slice(0, 5);
   if (!services.length) return '';
   return `
@@ -1697,13 +1807,13 @@ function bentoServices(b) {
           ? `Across ${b.areas.slice(0, 3).join(', ')} and nearby.`
           : 'Across the local area.')}</p>
     </div>
-    <div class="bento reveal">
+    <div class="bento reveal" data-n="${services.length}">
       ${services.map((sv, i) => `
       <article class="bento-cell${i === 0 ? ' feature' : ''}">
         <span class="cell-no">${String(i + 1).padStart(2, '0')}</span>
         <h3>${esc(sv)}</h3>
         <p>${esc(serviceBlurb(sv, b))}</p>
-        ${i === 0 ? photoPlate(1, 'A photo of this work') : ''}
+        ${i === 0 ? photoPlate(1, 'A photo of this work', family) : ''}
       </article>`).join('')}
     </div>
   </div>
@@ -1856,7 +1966,7 @@ function singleBody(b, family = 'pro', sections = []) {
   </div>
 </div>
 
-${bentoServices(b)}
+${bentoServices(b, family)}
 
 ${statsBand(b)}
 
@@ -1875,7 +1985,7 @@ ${extraSections(b, sections)}
           : 'Phone photos of finished jobs are fine — real work sells far better than stock images.'}</p>
     </div>
     <div class="grid reveal" data-n="3" style="margin-top:36px">
-      ${[2, 3, 4].map((n) => photoPlate(n, `Job ${n - 1}`)).join('\n      ')}
+      ${[2, 3, 4].map((n) => photoPlate(n, `Job ${n - 1}`, family)).join('\n      ')}
     </div>
   </div>
 </section>

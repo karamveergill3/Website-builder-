@@ -53,6 +53,7 @@ export function huntConfig() {
     hour: num('hunt_hour', 8),
     maxPlacesRequests: num('hunt_max_places_requests', 80),
     maxRegisterPages: num('hunt_max_register_pages', 80),
+    maxPerTrade: num('hunt_max_per_trade', 3),
     requireNoWebsite: getSetting('hunt_require_no_website', '1') === '1',
     includeUnlisted: getSetting('hunt_include_unlisted', '1') === '1',
   };
@@ -101,11 +102,54 @@ export function syncTargets({ trades, areas }) {
 /** Targets with ground left to cover, least recently used first. */
 function nextTargets() {
   const reopen = new Date(Date.now() - REOPEN_AFTER_DAYS * 86_400_000).toISOString();
-  return db.prepare(
+  return spreadByTrade(db.prepare(
     `SELECT * FROM hunt_targets
       WHERE exhausted_at IS NULL OR exhausted_at < ?
       ORDER BY COALESCE(last_run_at, '') ASC, id ASC`
-  ).all(reopen);
+  ).all(reopen));
+}
+
+/**
+ * Deal the targets out one trade at a time, like dealing cards.
+ *
+ * syncTargets builds them trade-major — every town for roofers, then every
+ * town for electricians — so straight id order puts forty-four roofing
+ * targets before the first electrician. The run then fills its whole daily
+ * target from the front of that list, and the day's twenty leads are twenty
+ * roofers in one county. Tomorrow, twenty electricians.
+ *
+ * Round-robin instead: roofer/Stoke, electrician/Stoke, plumber/Stoke, and so
+ * on. The relative order within each trade is preserved, so the
+ * least-recently-run ordering the query established still holds inside each
+ * group.
+ */
+export function spreadByTrade(targets) {
+  const byTrade = new Map();
+  for (const t of targets) {
+    if (!byTrade.has(t.trade)) byTrade.set(t.trade, []);
+    byTrade.get(t.trade).push(t);
+  }
+
+  // Deal from the trade that has waited longest.
+  //
+  // Round-robin alone is not fair over time. The daily target is met by the
+  // first handful of trades in the rotation, and if that rotation is always
+  // in the same order it is always the same handful — a different mix within
+  // a day, and the trades at the back of the list never contacted at all.
+  // Ordering the queues by when each trade was last drawn from puts
+  // yesterday's trades behind today's, so the whole list comes round.
+  const lastUsed = (rows) => rows.reduce(
+    (latest, r) => (r.last_run_at && r.last_run_at > latest ? r.last_run_at : latest),
+    ''
+  );
+  const queues = [...byTrade.values()]
+    .sort((a, b) => lastUsed(a).localeCompare(lastUsed(b)));
+
+  const out = [];
+  for (let i = 0; out.length < targets.length; i += 1) {
+    for (const q of queues) if (i < q.length) out.push(q[i]);
+  }
+  return out;
 }
 
 /**
@@ -296,6 +340,29 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
     const seen = knownCompanyNumbers();
 
     const targets = nextTargets();
+
+    /**
+     * The most leads any one trade may contribute to this run.
+     *
+     * Interleaving alone is not enough: one register page holds a hundred
+     * companies, so the first target can still supply the whole day on its
+     * own. A cap forces the run to move on and come back with a mixed list —
+     * a roofer, a salon, a garage — which is a better day's calling than
+     * twenty roofers, and spreads the risk if one trade turns out deaf to
+     * cold contact.
+     *
+     * Raised when there are too few trades configured for the cap to be
+     * satisfiable, so a two-trade setup still reaches its target instead of
+     * quietly stopping at six.
+     */
+    const tradeCount = new Set(targets.map((t) => t.trade)).size || 1;
+    const maxPerTrade = Math.max(
+      Math.max(1, cfg.maxPerTrade),
+      Math.ceil(want / tradeCount)
+    );
+    const takenPerTrade = new Map();
+    const taken = (trade) => takenPerTrade.get(trade) ?? 0;
+
     if (!targets.length) {
       throw new Error('Every trade and town has been worked through. Add more towns, or wait — exhausted ones re-open after a month.');
     }
@@ -303,6 +370,9 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
     for (const t of targets) {
       if (counters.found >= want) break;
       if (counters.register_requests >= cfg.maxRegisterPages) break;
+      // Before the register call, not after: a trade that has had its share
+      // must not cost a request to discover that.
+      if (taken(t.trade) >= maxPerTrade) continue;
       if (cfg.requireNoWebsite && counters.places_requests >= cfg.maxPlacesRequests) break;
 
       let page;
@@ -362,6 +432,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
 
       for (const company of fresh) {
         if (counters.found >= want) break;
+        if (taken(t.trade) >= maxPerTrade) break;
         const verdict = cfg.requireNoWebsite
           ? judge(company, byName, cfg)
           : { prospect: true };
@@ -391,6 +462,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
         // share a SIC code, so the set has to grow as we go.
         const filed = String(company.company_number ?? '').trim().toUpperCase();
         if (filed) seen.add(filed);
+        takenPerTrade.set(t.trade, taken(t.trade) + 1);
         counters.found++;
         db.prepare('UPDATE hunt_targets SET found_total = found_total + 1 WHERE id = ?').run(t.id);
       }

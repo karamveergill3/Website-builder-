@@ -23,7 +23,7 @@ export const ALLOWED_KEYS = new Set([
   'verify_addresses', 'spam_check_enabled',
   // Daily hunt
   'hunt_enabled', 'hunt_trades', 'hunt_areas', 'hunt_daily_target', 'hunt_hour',
-  'hunt_max_places_requests', 'hunt_max_register_pages',
+  'hunt_max_places_requests', 'hunt_max_register_pages', 'hunt_max_per_trade',
   'hunt_require_no_website', 'hunt_include_unlisted',
   // Lead search defaults (Phase 2)
   'default_areas', 'default_region_code',
@@ -60,6 +60,9 @@ export const DEFAULTS = {
   hunt_hour: '8',
   hunt_max_places_requests: '40',
   hunt_max_register_pages: '25',
+  // A day of twenty roofers is a worse day's calling than a mixed list,
+  // and it puts all the risk on one trade answering cold contact.
+  hunt_max_per_trade: '3',
   hunt_require_no_website: '1',
   hunt_include_unlisted: '1',
   default_region_code: 'GB',
@@ -126,6 +129,7 @@ router.put('/', wrap((req, res) => {
     ['hunt_hour', 0, 23],
     ['hunt_max_places_requests', 1, 500],
     ['hunt_max_register_pages', 1, 200],
+    ['hunt_max_per_trade', 1, 50],
   ]) {
     if (body[key] === undefined) continue;
     const raw = String(body[key]).trim();

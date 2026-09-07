@@ -128,6 +128,14 @@ export default async function huntView(root, _p, { refresh }) {
               <input id="h-hour" name="hunt_hour" type="number" min="0" max="23" value="${c.hour}">
             </div>
             <div class="f">
+              <label for="h-mix">Max per trade</label>
+              <input id="h-mix" name="hunt_max_per_trade" type="number" min="1" max="50"
+                     value="${c.maxPerTrade}">
+              <p class="tip">So a day's leads are a mix, not twenty roofers.
+                Raised automatically if you have too few trades listed to reach
+                the target.</p>
+            </div>
+            <div class="f">
               <label for="h-pages">Register pages, max</label>
               <input id="h-pages" name="hunt_max_register_pages" type="number" min="1" max="500"
                      value="${c.maxRegisterPages}">

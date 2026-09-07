@@ -6,7 +6,7 @@ process.env.GOOGLE_MAPS_API_KEY = 'test-places-key';
 
 const { get, post, put, del, teardown } = await import('./helpers.js');
 const { db } = await import('../server/db.js');
-const { judge } = await import('../server/lib/hunter.js');
+const { judge, spreadByTrade } = await import('../server/lib/hunter.js');
 const { normaliseName } = await import('../server/lib/companies-house.js');
 
 test.after(teardown);
@@ -61,12 +61,21 @@ const place = (name, { website } = {}) => ({
   ...(website ? { websiteUri: website } : {}),
 });
 
+/**
+ * Settings persist across tests in this file, so every hunt setting a test
+ * depends on is restated here rather than inherited. A budget left at 2 by an
+ * earlier test is invisible from inside a later one and looks exactly like a
+ * bug in the loop under test.
+ */
 const configure = (over = {}) => put('/api/settings', {
   hunt_trades: 'roofers',
   hunt_areas: 'Otley',
   hunt_daily_target: '3',
   hunt_require_no_website: '1',
   hunt_include_unlisted: '1',
+  hunt_max_register_pages: '80',
+  hunt_max_places_requests: '80',
+  hunt_max_per_trade: '3',
   ...over,
 });
 
@@ -548,4 +557,107 @@ test('the target key survives a trade or town containing punctuation', () => {
     JSON.stringify(['roofer', '']),
     'a null area and an empty one are the same target'
   );
+});
+
+/* --------------------------------------------------------- trade variety */
+
+test('targets are dealt one trade at a time, not all of one trade first', () => {
+  // syncTargets builds them trade-major — every town for roofers, then every
+  // town for electricians — so straight id order puts 44 roofing targets
+  // before the first electrician, and a 20-lead day is 20 roofers.
+  const rows = [];
+  for (const trade of ['roofer', 'electrician', 'plumber']) {
+    for (const area of ['Stafford', 'Walsall', 'Cannock']) {
+      rows.push({ trade, area, last_run_at: null });
+    }
+  }
+  const spread = spreadByTrade(rows);
+  assert.equal(spread.length, rows.length, 'nothing is lost');
+  assert.deepEqual(
+    spread.slice(0, 3).map((t) => t.trade),
+    ['roofer', 'electrician', 'plumber'],
+    'the first three targets are three different trades'
+  );
+  // Order within a trade is preserved, so the least-recently-run ordering
+  // the query established still holds inside each group.
+  assert.deepEqual(
+    spread.filter((t) => t.trade === 'roofer').map((t) => t.area),
+    ['Stafford', 'Walsall', 'Cannock']
+  );
+});
+
+test('the trade that has waited longest is dealt first', () => {
+  // Round-robin alone is not fair over time: the target is met by the first
+  // few trades, and if the order never changes those are the only trades ever
+  // contacted. Yesterday's trades go to the back.
+  const spread = spreadByTrade([
+    { trade: 'roofer', area: 'A', last_run_at: '2026-09-06T10:00:00.000Z' },
+    { trade: 'hairdresser', area: 'A', last_run_at: null },
+    { trade: 'garage', area: 'A', last_run_at: '2026-09-01T10:00:00.000Z' },
+  ]);
+  assert.deepEqual(spread.map((t) => t.trade), ['hairdresser', 'garage', 'roofer'],
+    'never run, then longest ago, then most recent');
+});
+
+test('spreadByTrade copes with one trade and with nothing', () => {
+  assert.deepEqual(spreadByTrade([]), []);
+  const one = [{ trade: 'roofer', area: 'A', last_run_at: null },
+               { trade: 'roofer', area: 'B', last_run_at: null }];
+  assert.deepEqual(spreadByTrade(one).map((t) => t.area), ['A', 'B']);
+});
+
+test('no single trade fills the day', async () => {
+  // One register page is 100 companies, so without a cap the first target
+  // supplies the whole target on its own however well the list is ordered.
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_trades: 'roofer\nelectrician\nplumber\nplasterer',
+    hunt_areas: 'Stafford',
+    hunt_daily_target: '8',
+    hunt_max_per_trade: '2',
+    hunt_require_no_website: '0',
+  });
+
+  let n = 0;
+  const page = () => ({ body: { hits: 100, items: Array.from({ length: 100 }, () => {
+    n += 1;
+    return company(`MIXED ${n} LIMITED`, String(40000000 + n));
+  }) } });
+  register = [page(), page(), page(), page(), page(), page()];
+
+  const run = await runAndWait();
+  assert.equal(run.found, 8);
+
+  const leads = (await get('/api/leads')).body.leads;
+  const perTrade = {};
+  for (const l of leads) perTrade[l.category] = (perTrade[l.category] ?? 0) + 1;
+  for (const [trade, count] of Object.entries(perTrade)) {
+    assert.ok(count <= 2, `${trade} contributed ${count}, over the cap of 2`);
+  }
+  assert.ok(Object.keys(perTrade).length >= 4,
+    `wanted a mix, got ${JSON.stringify(perTrade)}`);
+});
+
+test('the cap lifts rather than starving a short trade list', async () => {
+  // Two trades and a cap of 3 would stop at 6 of a target of 10. The point of
+  // the cap is a mix, not a smaller day.
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_trades: 'roofer\nelectrician',
+    hunt_areas: 'Stafford',
+    hunt_daily_target: '10',
+    hunt_max_per_trade: '3',
+    hunt_require_no_website: '0',
+  });
+  let n = 0;
+  register = Array.from({ length: 4 }, () => ({ body: { hits: 100,
+    items: Array.from({ length: 100 }, () => {
+      n += 1;
+      return company(`SHORT ${n} LIMITED`, String(50000000 + n));
+    }) } }));
+
+  const run = await runAndWait();
+  assert.equal(run.found, 10, 'the target is still met');
 });

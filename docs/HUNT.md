@@ -25,6 +25,28 @@ is retired, and re-opened a month later — new companies incorporate all the ti
 **It never sends anything.** It finds and files. Sending stays behind the
 confirmation in the Outbox.
 
+## A mixed list, not twenty roofers
+
+Targets are created trade-major — every town for roofers, then every town for
+electricians — so in plain id order the first forty-four targets are all
+roofing. The run filled its whole daily target from the front of that list,
+which meant twenty roofers in one county on Monday and twenty electricians on
+Tuesday.
+
+Two things fix it:
+
+- **The targets are dealt out one trade at a time**, and the trade dealt first
+  is the one that has waited longest. Round-robin alone is not enough: the
+  target is met by the first handful of trades, and if that order never
+  changes those are the only trades ever contacted.
+- **No one trade may fill the day.** "Max per trade" on the Hunt screen
+  defaults to 3, so a twenty-lead day comes from at least seven trades. It
+  lifts automatically when there are too few trades listed to reach the
+  target, so a two-trade setup still gets its twenty.
+
+A mixed list is a better morning's calling, and it spreads the risk if one
+trade turns out to be deaf to cold contact.
+
 ## Picking towns
 
 The Towns box has a button per region — Staffordshire, West Midlands,

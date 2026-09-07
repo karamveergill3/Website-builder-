@@ -6,6 +6,7 @@ import { withFooter, buildFooter } from '../lib/compliance.js';
 import { sendability } from '../lib/pecr.js';
 import { scoreDraft } from '../lib/deliverability.js';
 import { isSuppressed } from '../lib/suppression.js';
+import { recontactCheck, recordContact } from '../lib/recontact.js';
 
 const router = Router();
 
@@ -125,6 +126,18 @@ router.post('/log', wrap((req, res) => {
   }
 
   const c = composeFor(leadId, templateId, { requireCompliance: true, requireEmail: true });
+
+  // The manual path is a send like any other. It had no prior-contact check
+  // at all, and — worse — it is invisible to the domain cooldown, which only
+  // looks at rows with channel 'gmail'. So a mail-app send yesterday left no
+  // mark that anything today would notice.
+  const again = recontactCheck(c.lead, { allowRepeat: Boolean(req.body.allow_repeat) });
+  if (!again.allowed) {
+    const err = new Error(again.reason);
+    err.status = 409;
+    err.details = { code: again.code, previous: again.previous, channel: again.channel ?? null };
+    throw err;
+  }
   // Trust the client's snapshot if it edited the draft, else use the render.
   const subject = str(req.body.subject) ?? c.subject;
   const body = str(req.body.body) ?? c.body;
@@ -146,6 +159,7 @@ router.post('/log', wrap((req, res) => {
          status = CASE WHEN status IN ('new') THEN 'sent' ELSE status END
        WHERE id = ?`
     ).run(at, c.lead.id);
+    recordContact(c.lead, channel === 'mailto' ? 'email' : 'email (copied)', at);
     return r;
   })();
 

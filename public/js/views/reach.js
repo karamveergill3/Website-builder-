@@ -101,6 +101,16 @@ function leadSummary(lead) {
         </div>
         ${!lead.can_email && lead.block_reason ? html`
           <div class="msg msg-warn" style="margin-top:8px"><div class="grow">${lead.block_reason}</div></div>` : ''}
+        ${lead.contacted_before ? html`
+          <div class="msg ${lead.can_contact ? 'msg-info' : 'msg-warn'}" style="margin-top:8px">
+            <div class="grow">
+              <b>Already approached</b>${lead.contacted_via ? ` by ${lead.contacted_via}` : ''}
+              ${lead.contacted_at ? ` on ${String(lead.contacted_at).slice(0, 10)}` : ''}.
+              ${lead.can_contact
+                ? 'They replied, so this is a conversation rather than a cold approach.'
+                : 'A second cold approach is what gets a complaint made.'}
+            </div>
+          </div>` : ''}
       </div>
     </div></div>`;
 }
@@ -276,9 +286,10 @@ function preparedPanel(prep) {
              data-act="hop" data-event="${prep.event_id}">Open ${CHANNEL_LABEL[prep.channel]}</a>
           <button data-act="mark-sent" data-event="${prep.event_id}">I sent it</button>
         </div>
-        <p class="tip">"Open" launches ${CHANNEL_LABEL[prep.channel]} with the message.
-          After you tap Send there, come back here and confirm — it updates the lead's
-          last-contacted time and moves it to <i>sent</i>.</p>
+        <p class="tip">"Open" launches ${CHANNEL_LABEL[prep.channel]} with the message,
+          and marks this company as approached — so tomorrow's list will not offer
+          it to you again. If you close ${CHANNEL_LABEL[prep.channel]} without
+          sending, undo it from the lead.</p>
       </div>
     </div>`;
 }
@@ -383,6 +394,27 @@ function wire(dlg, state) {
     } catch (err) {
       toast(err.message ?? 'Cannot prepare', { error: true, ms: 6000 });
       btn.disabled = false;
+    }
+  });
+
+  /**
+   * Tapping "Open WhatsApp" IS the send, as far as this tool can ever know.
+   * The link had no handler at all, so the only thing that recorded a message
+   * was the separate "I sent it" button next to it — and a user who taps
+   * Open, sends, and closes the tab recorded nothing. The company then looks
+   * untouched tomorrow, which is how it gets messaged twice.
+   *
+   * The link is left to navigate normally; this only files the fact.
+   */
+  on(dlg, 'click', '[data-act="hop"]', async (_e, el) => {
+    try {
+      await api.outreach.sent(el.dataset.event);
+      const fresh = await api.leads.get(state.lead.id);
+      state.lead = fresh.lead ?? fresh;
+      rerender();
+    } catch {
+      // Never block the handoff on bookkeeping: the user is mid-send, and
+      // "I sent it" is still there to file it.
     }
   });
 

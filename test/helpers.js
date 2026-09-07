@@ -34,6 +34,18 @@ export const patch = (p, b) => req('PATCH', p, b ?? {});
 export const put   = (p, b) => req('PUT', p, b ?? {});
 export const del   = (p)    => req('DELETE', p);
 
+/**
+ * A company number no other fixture is using.
+ *
+ * Fixtures used to hand every corporate lead the same '01234567', which is a
+ * shape reality never takes: a company number identifies exactly one company.
+ * Since migration 016 made that a UNIQUE index, a fixture that reuses one is
+ * asserting something false and fails at the INSERT.
+ */
+let companyCounter = 0;
+export const nextCompanyNumber = () =>
+  String(10_000_000 + (companyCounter += 1)).padStart(8, '0');
+
 export const IDENTITY = {
   biz_contact_name: 'Test Sender',
   biz_name: 'Test Web Studio',

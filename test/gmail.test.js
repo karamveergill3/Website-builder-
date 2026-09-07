@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 process.env.GMAIL_CLIENT_ID = 'test-client-id';
 process.env.GMAIL_CLIENT_SECRET = 'test-client-secret';
 
-const { get, post, put, del, IDENTITY, teardown } = await import('./helpers.js');
+const { get, post, put, del, IDENTITY, teardown, nextCompanyNumber } = await import('./helpers.js');
 const { setSetting } = await import('../server/db.js');
 const { buildRawMessage } = await import('../server/lib/gmail.js');
 
@@ -59,7 +59,7 @@ async function seed({ name, email, opted_out = false,
   email = email ?? `lead${++seedN}@example.co.uk`;
   const lead = (await post('/api/leads', {
     business_name: name, email, opted_out, entity_type,
-    company_number: entity_type === 'corporate' ? '01234567' : null,
+    company_number: entity_type === 'corporate' ? nextCompanyNumber() : null,
     category: 'roofers', location: 'Leeds',
   })).body.lead;
   return lead;

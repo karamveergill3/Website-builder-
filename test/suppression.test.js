@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { get, post, patch, del, put, IDENTITY, teardown } from './helpers.js';
+import { get, post, patch, del, put, IDENTITY, teardown, nextCompanyNumber } from './helpers.js';
 
 test.after(teardown);
 
 const corp = (over = {}) => ({
   business_name: 'Suppress Test Ltd', entity_type: 'corporate',
-  company_number: '01234567', email: 'a@suppresstest.co.uk', ...over,
+  company_number: nextCompanyNumber(), email: 'a@suppresstest.co.uk', ...over,
 });
 
 test('an opt-out is recorded against the address and survives deleting the lead', async () => {

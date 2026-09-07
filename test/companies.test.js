@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 process.env.COMPANIES_HOUSE_API_KEY = 'test-key';
 
-const { get, post, del, teardown } = await import('./helpers.js');
+const { get, post, del, teardown, nextCompanyNumber } = await import('./helpers.js');
 const ch = await import('../server/lib/companies-house.js');
 const { resolveTrade } = await import('../server/lib/sic.js');
 
@@ -31,7 +31,7 @@ function stub() {
 
 const found = (name, over = {}) => ({
   title: name, company_name: name,
-  company_number: over.company_number ?? '01234567',
+  company_number: over.company_number ?? nextCompanyNumber(),
   company_status: 'active', company_type: 'ltd',
   date_of_creation: '2011-04-02',
   address_snippet: '1 High Street, Otley, LS21 1AA',

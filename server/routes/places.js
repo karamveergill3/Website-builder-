@@ -6,6 +6,7 @@ import {
   PlacesError, PRICING_DEFAULTS, PRICING_SOURCE,
 } from '../lib/places.js';
 import { looksCorporate } from '../lib/pecr.js';
+import { recordFound, ledgerFor } from '../lib/recontact.js';
 
 const router = Router();
 
@@ -340,6 +341,26 @@ router.post('/import', wrap((req, res) => {
       if (!details) { skipped.push({ place_id: placeId, reason: 'details no longer in the review session' }); continue; }
       const area = details.area ?? null;
 
+      // The place id is not the only way we might already hold this business.
+      // A Places import keys on place_id and a register import keys on
+      // company_number, so the two paths were blind to each other: the same
+      // roofer could arrive twice and be contacted twice, once down each
+      // funnel. The ledger's name-and-town key spans both, and it also
+      // remembers a business whose lead the owner deleted.
+      const known = ledgerFor({
+        business_name: details.display_name,
+        location: area,
+      });
+      if (known) {
+        skipped.push({
+          place_id: placeId,
+          reason: known.contacted_at
+            ? `already contacted on ${String(known.contacted_at).slice(0, 10)}`
+            : 'already found under another source',
+        });
+        continue;
+      }
+
       // Imported leads always start unclassified. A name ending in "Ltd" is a
       // hint, not proof of incorporation, so it never auto-unblocks sending --
       // it only shows up in the UI as a suggestion to check Companies House.
@@ -362,6 +383,11 @@ router.post('/import', wrap((req, res) => {
       db.prepare(
         "UPDATE leads SET details_source = 'google_places', details_imported_at = ? WHERE id = ?"
       ).run(nowIso(), info.lastInsertRowid);
+      recordFound({
+        business_name: details.display_name ?? null,
+        location: area ?? null,
+        company_number: null,
+      });
 
       db.prepare('UPDATE place_cache SET imported = 1 WHERE place_id = ?').run(placeId);
       imported.push(Number(info.lastInsertRowid));

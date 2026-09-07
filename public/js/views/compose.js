@@ -22,7 +22,13 @@ export default async function composeView(root, params, { navigate }) {
   ]);
 
   const usable = leads.filter((l) => !l.opted_out && l.block_code !== 'SUPPRESSED');
-  const leadId = params.lead ?? usable.find((l) => l.can_email)?.id ?? usable[0]?.id ?? '';
+  // Land on a company that has not been approached yet. Defaulting to the
+  // first merely-emailable lead put yesterday's send at the top of the
+  // screen, ready to write again.
+  const leadId = params.lead
+    ?? usable.find((l) => l.can_email && l.can_contact)?.id
+    ?? usable.find((l) => l.can_email)?.id
+    ?? usable[0]?.id ?? '';
   const templateId = params.template ?? templates[0]?.id ?? '';
   const gmailReady = settings.integrations?.gmail_connected === true;
 
@@ -50,7 +56,8 @@ export default async function composeView(root, params, { navigate }) {
       <select id="c-lead" style="max-width:290px">
         ${usable.map((l) => html`
           <option value="${l.id}" ${String(l.id) === String(leadId) ? 'selected' : ''}>
-            ${l.business_name}${l.can_email ? '' : '  ·  blocked'}
+            ${l.business_name}${l.can_email ? '' : '  ·  blocked'}${
+              l.contacted_before && !l.can_contact ? '  ·  already approached' : ''}
           </option>`)}
       </select>
       <select id="c-template" style="max-width:210px">

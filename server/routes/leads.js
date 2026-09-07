@@ -5,6 +5,7 @@ import {
 } from '../lib/http.js';
 import { ENTITY_TYPES, sendability, looksCorporate } from '../lib/pecr.js';
 import { isSuppressed, suppress } from '../lib/suppression.js';
+import { recordContact, recordFound, recontactCheck } from '../lib/recontact.js';
 
 export const STATUSES = ['new', 'sent', 'replied', 'won', 'lost'];
 
@@ -26,6 +27,11 @@ function toApi(row) {
   if (!row) return row;
   const suppressed = isSuppressed(row.email);
   const verdict = sendability(row, { suppressed });
+  // Whether this COMPANY has been approached before, on any channel and under
+  // any lead row. Two separate questions the UI kept conflating: may we
+  // lawfully contact this business (can_email), and have we already
+  // (can_contact). A screen that only answers the first invites the repeat.
+  const again = recontactCheck(row);
   return {
     ...row,
     opted_out: row.opted_out === 1,
@@ -34,6 +40,11 @@ function toApi(row) {
     block_code: verdict.allowed ? null : verdict.code,
     block_reason: verdict.reason,
     looks_corporate: looksCorporate(row.business_name),
+    can_contact: again.allowed,
+    contacted_before: !again.allowed || again.code === 'IN_CONVERSATION',
+    contacted_at: again.previous ?? row.last_contacted_at ?? null,
+    contacted_via: again.channel ?? null,
+    contact_block_reason: again.allowed ? null : again.reason,
   };
 }
 
@@ -45,8 +56,15 @@ function parseLeadBody(body, { partial = false } = {}) {
     out.business_name = requiredStr(body.business_name, 'business_name');
   }
   for (const f of ['category', 'location', 'phone', 'notes', 'source',
-                   'google_place_id', 'company_number', 'entity_note']) {
+                   'google_place_id', 'entity_note']) {
     if (!partial || has(f)) out[f] = str(body[f]);
+  }
+  // Upper-cased on the way in. It is the dedupe key for a whole company, and
+  // it was being compared with a case-sensitive '=', so 'sc123456' and
+  // 'SC123456' were two different businesses to every check that mattered.
+  if (!partial || has('company_number')) {
+    const n = str(body.company_number);
+    out.company_number = n ? n.toUpperCase() : n;
   }
   if (!partial || has('entity_type')) {
     const et = str(body.entity_type) ?? 'unknown';
@@ -197,11 +215,26 @@ router.post('/', wrap((req, res) => {
     if (lead.opted_out === 1) {
       suppress(lead.email, { businessName: lead.business_name, reason: 'created as opted out' });
     }
-    res.status(201).json({
-      lead: toApi(db.prepare('SELECT * FROM leads WHERE id = ?').get(info.lastInsertRowid)),
-    });
+    const created = db.prepare('SELECT * FROM leads WHERE id = ?').get(info.lastInsertRowid);
+    recordFound(created);
+    if (created.last_contacted_at) recordContact(created, 'existing', created.last_contacted_at);
+    res.status(201).json({ lead: toApi(created) });
   } catch (err) {
-    if (String(err.message).includes('UNIQUE') && lead.google_place_id) {
+    const msg = String(err.message);
+    // SQLite names the column, not the index, so match on the column.
+    if (msg.includes('UNIQUE') && msg.includes('leads.company_number')) {
+      // The partial unique index from migration 016. Two rows for one company
+      // are two independent targets, contacted independently, with nothing in
+      // the UI connecting them — the split identity the ledger exists to stop.
+      const held = db.prepare(
+        'SELECT id, business_name FROM leads WHERE company_number = ?'
+      ).get(lead.company_number);
+      throw conflict(
+        `Company ${lead.company_number} is already lead #${held?.id} `
+        + `(${held?.business_name}).`
+      );
+    }
+    if (msg.includes('UNIQUE') && lead.google_place_id) {
       throw conflict('A lead with that Google place ID already exists');
     }
     throw err;
@@ -221,9 +254,17 @@ router.patch('/:id', wrap((req, res) => {
   if (patch.status === 'sent' && existing.status !== 'sent' && !('last_contacted_at' in patch)) {
     patch.last_contacted_at = nowIso();
   }
+  // Whatever route stamped the contact date, the ledger has to hear about
+  // it — it is the only record that survives this lead being deleted.
+  const contactedNow = patch.last_contacted_at
+    && patch.last_contacted_at !== existing.last_contacted_at;
 
   db.prepare(`UPDATE leads SET ${Object.keys(patch).map((c) => `${c} = @${c}`).join(', ')}
               WHERE id = @id`).run({ ...patch, id: existing.id });
+
+  if (contactedNow) {
+    recordContact({ ...existing, ...patch }, 'marked by hand', patch.last_contacted_at);
+  }
 
   // An opt-out is recorded against the address, not just the row, so deleting
   // or re-importing the lead cannot resurrect it as a target.
@@ -232,6 +273,11 @@ router.patch('/:id', wrap((req, res) => {
       businessName: patch.business_name ?? existing.business_name,
       reason: 'marked opted out',
     });
+    // suppression_list is keyed on an email address, so a phone-only lead —
+    // which most no-website trades are — could not be suppressed at all, and
+    // its opt-out died with the row. The ledger is keyed on the company, so
+    // it can carry one for a business that has never given us an address.
+    recordContact({ ...existing, ...patch }, 'opted out');
   }
 
   res.json({ lead: toApi(db.prepare('SELECT * FROM leads WHERE id = ?').get(existing.id)) });
@@ -250,8 +296,23 @@ router.post('/bulk-status', wrap((req, res) => {
   const ids = Array.isArray(req.body.ids) ? req.body.ids.map(Number).filter(Number.isFinite) : [];
   if (ids.length === 0) throw badRequest('ids must be a non-empty array');
 
+  // Marking a batch as "sent" by hand is a claim that they were contacted, so
+  // it stamps the date exactly as the single-lead PATCH does. It did not, so
+  // the list showed a contacted lead with no contact date on it.
+  const now = nowIso();
   const stmt = db.prepare('UPDATE leads SET status = ? WHERE id = ?');
-  const run = db.transaction((rows) => rows.forEach((id) => stmt.run(status, id)));
+  const stamp = db.prepare(
+    'UPDATE leads SET status = ?, last_contacted_at = ? WHERE id = ? AND status != ?'
+  );
+  const run = db.transaction((rows) => {
+    for (const id of rows) {
+      if (status !== 'sent') { stmt.run(status, id); continue; }
+      const before = db.prepare('SELECT * FROM leads WHERE id = ?').get(id);
+      if (!before) continue;
+      stamp.run(status, before.last_contacted_at ?? now, id, 'sent');
+      if (!before.last_contacted_at) recordContact(before, 'marked by hand', now);
+    }
+  });
   run(ids);
   res.json({ updated: ids.length, status });
 }));

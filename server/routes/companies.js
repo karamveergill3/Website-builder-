@@ -6,12 +6,38 @@ import {
   isBodyCorporate, isTrading, AUTO_MATCH, CompaniesHouseError,
 } from '../lib/companies-house.js';
 import { resolveTrade, tradeList } from '../lib/sic.js';
+import { recordFound } from '../lib/recontact.js';
 
 const router = Router();
 
-/** Write a register entry onto a lead. Only a body corporate unblocks sending. */
+/**
+ * Write a register entry onto a lead. Only a body corporate unblocks sending.
+ *
+ * Throws when another lead already holds this company number. That used to be
+ * a silent success: two lead rows ended up "corporate" with the same number,
+ * each independently emailable and each showing the owner no sign of the
+ * other. Since migration 016 a partial UNIQUE index makes it an error, and
+ * an error the caller can report is far better than two cold emails.
+ */
 function applyMatch(leadId, company, { note } = {}) {
   const corporate = isBodyCorporate(company.company_type) && isTrading(company);
+  const number = String(company.company_number ?? '').trim().toUpperCase() || null;
+
+  if (number) {
+    const clash = db.prepare(
+      'SELECT id, business_name FROM leads WHERE company_number = ? AND id != ?'
+    ).get(number, leadId);
+    if (clash) {
+      const err = new Error(
+        `Company ${number} is already on lead #${clash.id} (${clash.business_name}). `
+        + 'Two leads for one company get contacted twice.'
+      );
+      err.status = 409;
+      err.details = { existing_lead_id: clash.id, company_number: number };
+      throw err;
+    }
+  }
+
   db.prepare(
     `UPDATE leads SET
        entity_type = @entity_type, company_number = @company_number,
@@ -25,7 +51,7 @@ function applyMatch(leadId, company, { note } = {}) {
     // A register entry that is not a body corporate is positive evidence the
     // other way: it is a partnership or a branch, so it cannot be emailed.
     entity_type: corporate ? 'corporate' : 'individual',
-    company_number: company.company_number,
+    company_number: number,
     registered_name: company.company_name,
     registered_address: company.address_snippet ?? null,
     company_status: company.company_status,
@@ -35,6 +61,9 @@ function applyMatch(leadId, company, { note } = {}) {
     entity_note: note ?? `Companies House ${company.company_number}`,
     now: nowIso(),
   });
+  // The lead now has a company number, which is the ledger's strong key. File
+  // it so a later Places sweep or hunt page recognises this business.
+  recordFound(db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId));
   return corporate;
 }
 

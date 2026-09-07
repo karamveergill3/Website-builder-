@@ -18,7 +18,7 @@ npm start                 # http://localhost:3000
 
 ```bash
 npm run hunt              # find today's prospects now, without the server
-npm test                  # 310 tests
+npm test                  # 334 tests
 npm run lint
 ```
 
@@ -43,6 +43,7 @@ Sending is deliberately blocked until you do — see [Compliance](#compliance--r
 | **Contact finder** | Scrapes the lead's website + public directories | Nothing (free)  |
 | **Replies** | Reads what came back and pulls out a brief | Nothing (free)  |
 | **Mockups** | Builds a one-page site from that brief, on a private link | Nothing (free) |
+| **No repeats** | One approach per company, ever, across every channel | Nothing |
 
 The tracker works on its own with no keys at all.
 
@@ -83,6 +84,44 @@ The hunt never sends anything. Details and cron setup:
 You can also drive it by hand — **Find** for a one-off register search, or
 **Google Places** to come at it from the other direction — but expect most of
 what a map search returns to be sole traders you cannot lawfully email.
+
+### One company, one approach
+
+**A business you have already approached is never offered to you again** — not
+by tomorrow's hunt, not in the email queue, not in the Reach modal, and not
+after you delete the lead.
+
+That last one is the reason it needs its own table. `DELETE FROM leads` is a
+hard delete, and the lead row used to be the only memory that a company had
+ever been seen. So the one gesture that means *not interested in this one* was
+also the gesture that put it back in tomorrow's list. `company_ledger` outlives
+the lead, the way the suppression list already does.
+
+It is keyed on the **company**, not the lead:
+
+- The company number wins whenever there is one — it is the only identifier
+  that survives a rename, and it is compared case-insensitively now, so
+  `sc123456` and `SC123456` are one business rather than two.
+- Failing that, a normalised trading name plus town, which is what lets a
+  Google Places import recognise a company the register filed last week.
+  Those two funnels key on different identifiers and were previously blind to
+  each other.
+- Where the register says two similarly-named firms have **different** company
+  numbers, that wins over the name guess. They are different businesses.
+
+The rule is one *cold approach* per company, not one message ever:
+
+- **A prospect who replied can always be answered.** Once they have written
+  back it is a conversation, and refusing to let you reply would be absurd.
+- **You can go again deliberately.** Queue with the lead explicitly named, or
+  tick the override in Reach. Every override is still counted, so
+  `times_contacted` tells the truth.
+
+Two rows for one company are now impossible: a partial `UNIQUE` index on
+`company_number` makes it a storage error rather than something each call site
+has to remember to check, and any duplicates already in your database are
+merged into the oldest row on upgrade — notes appended, child records moved,
+nothing dropped.
 
 ### The bit no API solves
 
@@ -255,6 +294,9 @@ data/               SQLite file (gitignored)
   website, so no place is paid for twice. Deliberately holds **no** listing
   content — see the compliance note above
 - **suppression_list** — opted-out addresses, normalised, outliving the lead
+- **company_ledger** — every company ever found, and whether it has ever been
+  approached. Keyed on the company rather than the lead, and it outlives the
+  lead row, so deleting a lead does not make its company a fresh target again
 - **settings**, **search_runs**, **send_queue** — supporting tables for Phases 2–3
 
 Migrations in `server/db.js` are append-only: add a new one rather than editing
@@ -277,14 +319,15 @@ sqlite3 data/prospect-book.db ".backup 'backup.db'"
 npm test
 ```
 
-310 tests covering placeholder rendering, lead and template CRUD with
+334 tests covering placeholder rendering, lead and template CRUD with
 validation, stats, the PECR classification gate, Companies House matching and
 entity classification, suppression across lead deletion, log-snapshot
 immutability, the Places field mask and dedupe, Google's error-reason handling,
 draft scoring, address validation, the daily hunt's budget and cursor
 behaviour, the review-then-send confirmation, the daily cap, and
 header-injection resistance in message building, reply extraction, and the
-mockup builder's escaping, themes and layout blocks. Every external API is
+mockup builder's escaping, themes and layout blocks, and the one-approach-per-
+company rule across every channel. Every external API is
 stubbed, so the suite never spends money or needs credentials — and one test
 asserts the project has no AI dependency and reaches no model provider.
 

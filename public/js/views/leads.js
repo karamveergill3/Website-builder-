@@ -121,7 +121,11 @@ export default async function leadsView(root, params, { refresh }) {
     unchecked: (l) => l.block_code === 'UNCLASSIFIED',
     noemail:   (l) => l.can_email === false && l.block_code === 'NO_EMAIL',
     nosite:    (l) => l.has_website === 0,
-    ready:     (l) => l.can_email === true,
+    // "Ready" has to mean ready to APPROACH. It meant "lawful to email",
+    // which is a different question, so every lead emailed yesterday counted
+    // as ready again this morning — and the bulk queue took the lot.
+    ready:     (l) => l.can_email === true && l.can_contact === true,
+    contacted: (l) => l.contacted_before === true,
   };
   const leads = view && VIEWS[view] ? allLeads.filter(VIEWS[view]) : allLeads;
   const counts = Object.fromEntries(
@@ -155,6 +159,9 @@ export default async function leadsView(root, params, { refresh }) {
         ${(counts.unchecked || counts.noemail || counts.nosite || view) ? html`<span class="sep"></span>` : ''}
         ${counts.ready ? html`
           <button class="pill" data-view="ready" aria-pressed="${view === 'ready'}">ready <b>${counts.ready}</b></button>` : ''}
+        ${counts.contacted ? html`
+          <button class="pill" data-view="contacted" aria-pressed="${view === 'contacted'}"
+            title="Already approached — these are not fresh targets">done <b>${counts.contacted}</b></button>` : ''}
         ${counts.unchecked ? html`
           <button class="pill" data-view="unchecked" aria-pressed="${view === 'unchecked'}">unchecked <b>${counts.unchecked}</b></button>` : ''}
         ${counts.noemail ? html`
@@ -206,7 +213,9 @@ export default async function leadsView(root, params, { refresh }) {
             ${leads.map((l) => html`
               <tr data-id="${l.id}">
                 <td class="c-pick"><input type="checkbox" class="pick" value="${l.id}"
-                       data-ok="${l.can_email}" aria-label="Select ${l.business_name}"></td>
+                       data-ok="${l.can_email && l.can_contact}"
+                       data-contacted="${l.contacted_before === true}"
+                       aria-label="Select ${l.business_name}"></td>
                 <td class="c-name">
                   <span class="name">${l.business_name}</span>
                   <span class="meta">
@@ -225,11 +234,19 @@ export default async function leadsView(root, params, { refresh }) {
                   ${!l.can_email && l.block_code !== 'NO_EMAIL'
                     ? html` <span class="flag" title="${l.block_reason}">${BLOCKED[l.block_code] ?? 'blocked'}</span>` : ''}
                 </td>
-                <td class="meta nw">${l.last_contacted_at ? relative(l.last_contacted_at) : '—'}</td>
+                <td class="meta nw">
+                  ${l.contacted_at ? relative(l.contacted_at) : '—'}
+                  ${l.contacted_before && !l.can_contact ? html`
+                    <span class="flag" title="${l.contact_block_reason}"
+                      >done${l.contacted_via ? ` · ${l.contacted_via}` : ''}</span>` : ''}
+                </td>
                 <td class="c-act">
-                  ${l.can_email ? html`<button class="mini" data-act="write" data-id="${l.id}">Write</button>` : ''}
-                  <button class="mini" data-act="reach" data-id="${l.id}"
-                          title="WhatsApp, SMS, call — or find contact details">Reach</button>
+                  ${l.can_email && l.can_contact
+                    ? html`<button class="mini" data-act="write" data-id="${l.id}">Write</button>` : ''}
+                  <button class="mini${l.can_contact ? '' : ' ghost'}" data-act="reach" data-id="${l.id}"
+                          title="${l.can_contact
+                            ? 'WhatsApp, SMS, call — or find contact details'
+                            : l.contact_block_reason}">Reach</button>
                   ${l.block_code === 'UNCLASSIFIED' ? html`
                       <button class="mini" data-act="classify" data-id="${l.id}">Check</button>` : ''}
                   <button class="mini" data-act="edit" data-id="${l.id}">Edit</button>
@@ -311,8 +328,15 @@ export default async function leadsView(root, params, { refresh }) {
     if (!bar) return;
     const n = picked().length;
     bar.hidden = n === 0;
-    const ready = picked().filter((c) => c.dataset.ok === 'true').length;
-    $('#bulk-n', root).textContent = `${n} selected${canQueue ? ` · ${ready} ready to email` : ''}`;
+    const chosen = picked();
+    const ready = chosen.filter((c) => c.dataset.ok === 'true').length;
+    // Say why the numbers differ. "20 selected · 3 ready to email" with no
+    // explanation reads as a bug; the reason is that seventeen of them have
+    // already had their approach.
+    const done = chosen.filter((c) => c.dataset.contacted === 'true').length;
+    $('#bulk-n', root).textContent = n + ' selected'
+      + (canQueue ? ` · ${ready} ready to email` : '')
+      + (done ? ` · ${done} already approached` : '');
     for (const row of $$('.rows tbody tr', root)) {
       const box = row.querySelector('.pick');
       row.setAttribute('aria-selected', box?.checked ? 'true' : 'false');
@@ -412,7 +436,12 @@ export default async function leadsView(root, params, { refresh }) {
 
   on(root, 'click', '[data-act="bulk-queue"]', async () => {
     const ready = picked().filter((c) => c.dataset.ok === 'true').map((c) => Number(c.value));
-    if (!ready.length) return toast('None of those are ready to email', { error: true });
+    if (!ready.length) {
+      const done = picked().filter((c) => c.dataset.contacted === 'true').length;
+      return toast(done
+        ? `All ${done} of those have already been approached`
+        : 'None of those are ready to email', { error: true });
+    }
 
     const { templates } = await api.templates.list();
     if (!templates.length) return toast('Write a template first', { error: true });

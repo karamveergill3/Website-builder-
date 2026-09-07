@@ -6,6 +6,7 @@ import {
 } from '../lib/hunter.js';
 import { configured as chConfigured } from '../lib/companies-house.js';
 import { resolveTrade, allTradeKeywords } from '../lib/sic.js';
+import { ledgerStats } from '../lib/recontact.js';
 
 const router = Router();
 
@@ -96,5 +97,12 @@ router.post('/targets/:id/reset', wrap((req, res) => {
   if (!info.changes) throw badRequest('No such target.');
   res.json({ targets: targetProgress() });
 }));
+
+/**
+ * How many companies this tool has ever put in front of the owner, and how
+ * many of those have been approached. Answers "why did today's hunt only
+ * find six" without the owner having to guess.
+ */
+router.get('/ledger', wrap((_req, res) => res.json({ ledger: ledgerStats() })));
 
 export default router;

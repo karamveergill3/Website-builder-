@@ -7,6 +7,7 @@ import { composeFor } from './emails.js';
 import { buildFooter, optOutMailto } from '../lib/compliance.js';
 import { sendability } from '../lib/pecr.js';
 import { isSuppressed } from '../lib/suppression.js';
+import { recontactCheck, recordContact } from '../lib/recontact.js';
 import { scoreDraft } from '../lib/deliverability.js';
 import { checkAddress } from '../lib/addresses.js';
 import { capState, windowState, domainCooldown, policyState } from '../lib/sending-policy.js';
@@ -121,6 +122,14 @@ router.post('/queue', wrap(async (req, res) => {
     ? req.body.lead_ids.map(Number).filter(Number.isFinite) : [];
   if (leadIds.length === 0) throw badRequest('Pick at least one lead');
 
+  // Deliberately writing again to specific leads. Naming them one by one is
+  // the point: `allow_repeat: true` across a whole selection would be the
+  // same mistake the ledger exists to prevent, just spelled differently.
+  const allowRepeat = new Set(
+    Array.isArray(req.body.allow_repeat_lead_ids)
+      ? req.body.allow_repeat_lead_ids.map(Number).filter(Number.isFinite) : []
+  );
+
   const footer = buildFooter();
   if (!footer.complete) {
     const err = new Error(
@@ -149,6 +158,19 @@ router.post('/queue', wrap(async (req, res) => {
       if (!looksLikeEmail(lead.email ?? '')) {
         skipped.push({ lead_id: leadId, name: lead.business_name, reason: 'no email address' }); continue;
       }
+      // Already approached, on any channel, on any earlier day. The ledger is
+      // keyed on the company rather than the lead, so a second lead row for
+      // the same business is caught too. `allow_repeat` is the deliberate
+      // override; the caller has to ask for it.
+      const again = recontactCheck(lead, { allowRepeat: allowRepeat.has(leadId) });
+      if (!again.allowed) {
+        skipped.push({
+          lead_id: leadId, name: lead.business_name,
+          reason: 'already contacted', detail: again.reason,
+          previous: again.previous, channel: again.channel ?? null,
+        });
+        continue;
+      }
       const already = db.prepare(
         "SELECT id FROM send_queue WHERE lead_id = ? AND status = 'pending'"
       ).get(leadId);
@@ -158,9 +180,11 @@ router.post('/queue', wrap(async (req, res) => {
 
       const c = composeFor(leadId, templateId, { requireEmail: true, requireCompliance: true });
       const info = db.prepare(
-        `INSERT INTO send_queue (lead_id, template_id, to_email, subject, body, status, created_at)
-         VALUES (?, ?, ?, ?, ?, 'pending', ?)`
-      ).run(leadId, templateId, lead.email, c.subject, c.body, nowIso());
+        `INSERT INTO send_queue
+           (lead_id, template_id, to_email, subject, body, status, created_at, allow_repeat)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`
+      ).run(leadId, templateId, lead.email, c.subject, c.body, nowIso(),
+            allowRepeat.has(leadId) ? 1 : 0);
       queued.push({ id: Number(info.lastInsertRowid), lead, subject: c.subject, body: c.body });
     }
   });
@@ -260,6 +284,22 @@ async function runSend(queueIds, delayMin, delayMax) {
     if (!looksLikeEmail(item.to_email)) { fail('no usable email address'); continue; }
     if (!settings.footer.complete) { fail('business identity details are incomplete'); continue; }
 
+    // The same check the queue made, made again here. A queue row can sit
+    // overnight, and in between the owner may have WhatsApped this company
+    // or emailed a second lead row for it — both of which happen through
+    // paths that never touch this queue item.
+    const again = recontactCheck(lead, { allowRepeat: item.allow_repeat === 1 });
+    if (!again.allowed) { fail(again.reason); continue; }
+
+    // The hold the queue wrote is now enforced rather than decorative. It
+    // was being set on a row that stayed 'pending', and nothing on this path
+    // ever read it, so "Held: recent contact" sent anyway. Recorded as a
+    // skip because that is what it is, with the reason kept in `error`.
+    if (item.error?.startsWith('Held:') && item.allow_repeat !== 1) {
+      fail(item.error);
+      continue;
+    }
+
     const { remaining } = capState();
     if (remaining <= 0) {
       // Stop without touching this item: it stays pending for tomorrow rather
@@ -321,6 +361,7 @@ async function runSend(queueIds, delayMin, delayMax) {
              status = CASE WHEN status = 'new' THEN 'sent' ELSE status END
            WHERE id = ?`
         ).run(at, lead.id);
+        recordContact(lead, 'email', at);
       })();
 
       activeSend.sent++;
@@ -331,6 +372,12 @@ async function runSend(queueIds, delayMin, delayMax) {
       console.error('[gmail] send succeeded but logging failed:', err);
       db.prepare("UPDATE send_queue SET status = 'sent', sent_at = ?, error = ? WHERE id = ?")
         .run(nowIso(), `sent, but logging failed: ${err.message}`, queueId);
+      // The message left. If the ledger does not hear about it the company
+      // is contactable again tomorrow as though nothing happened, so this
+      // gets its own attempt outside the transaction that just failed.
+      try { recordContact(lead, 'email'); } catch (e) {
+        console.error('[gmail] and the contact ledger write failed too:', e.message);
+      }
       activeSend.sent++;
       activeSend.done++;
     }

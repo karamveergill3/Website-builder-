@@ -21,6 +21,169 @@ db.pragma('foreign_keys = ON');
  * transaction, and is recorded in schema_migrations. Never edit a migration
  * that has already shipped — add a new one.
  */
+/**
+ * Collapse lead rows that are the same company, then make new ones impossible.
+ *
+ * Duplicates get in through three doors: a Places import and a register import
+ * of one business key on different identifiers (place id vs company number),
+ * `applyMatch` stamps a number onto a lead without checking another lead holds
+ * it, and two hunt processes can pass the same SELECT before either INSERTs.
+ * None of that is intentional, so merging is safe in a way that merging user
+ * records usually is not.
+ *
+ * The oldest row wins, because it carries the history. Everything the newer
+ * rows know is moved onto it rather than dropped: child rows are repointed,
+ * notes are appended, and any field the winner left blank is filled from a
+ * loser. Only then is the loser deleted.
+ */
+function mergeDuplicateCompanies() {
+  const dupes = db.prepare(
+    `SELECT company_number FROM leads
+      WHERE company_number IS NOT NULL
+      GROUP BY company_number HAVING COUNT(*) > 1`
+  ).all();
+
+  // Child tables that carry a lead_id. contact_signals and contact_finds have
+  // uniqueness within a lead, so a repoint can collide; those are moved with
+  // OR IGNORE and the leftovers dropped with the loser.
+  const CHILDREN = [
+    ['email_log', false], ['send_queue', false], ['outreach_events', false],
+    ['replies', false], ['briefs', false], ['mockups', false],
+    ['contact_signals', true], ['contact_finds', true],
+  ];
+  // Fields worth rescuing from a row that is about to go.
+  const FILLABLE = [
+    'email', 'phone', 'company_number', 'registered_name', 'registered_address',
+    'company_status', 'company_type', 'incorporated_on', 'sic_codes',
+    'entity_type', 'entity_note', 'category', 'location', 'google_place_id',
+    'has_website', 'website_evidence', 'website_checked_at', 'checked_at',
+  ];
+
+  let merged = 0;
+  for (const { company_number: number } of dupes) {
+    const rows = db.prepare(
+      `SELECT * FROM leads WHERE company_number = ?
+        ORDER BY COALESCE(created_at, '') ASC, id ASC`
+    ).all(number);
+    const [winner, ...losers] = rows;
+    if (!winner || !losers.length) continue;
+
+    for (const loser of losers) {
+      for (const [table, mayCollide] of CHILDREN) {
+        db.prepare(
+          `UPDATE ${mayCollide ? 'OR IGNORE ' : ''}${table} SET lead_id = ? WHERE lead_id = ?`
+        ).run(winner.id, loser.id);
+      }
+
+      const patch = {};
+      for (const field of FILLABLE) {
+        if ((winner[field] === null || winner[field] === '') && loser[field] != null) {
+          patch[field] = loser[field];
+          winner[field] = loser[field];
+        }
+      }
+      // An opt-out on either row binds the merged row: the safe direction.
+      if (loser.opted_out === 1 && winner.opted_out !== 1) patch.opted_out = 1;
+      // The earliest contact and the latest both matter; keep the latest,
+      // since every repeat check asks "how recently".
+      if (loser.last_contacted_at
+          && (!winner.last_contacted_at || loser.last_contacted_at > winner.last_contacted_at)) {
+        patch.last_contacted_at = loser.last_contacted_at;
+      }
+      const note = String(loser.notes ?? '').trim();
+      if (note && !String(winner.notes ?? '').includes(note)) {
+        patch.notes = [String(winner.notes ?? '').trim(), note].filter(Boolean).join('\n\n');
+        winner.notes = patch.notes;
+      }
+      const keys = Object.keys(patch);
+      if (keys.length) {
+        db.prepare(`UPDATE leads SET ${keys.map((k) => `${k} = @${k}`).join(', ')} WHERE id = @id`)
+          .run({ ...patch, id: winner.id });
+      }
+
+      db.prepare('DELETE FROM leads WHERE id = ?').run(loser.id);
+      merged += 1;
+    }
+  }
+  if (merged) console.log(`[db] merged ${merged} duplicate lead row(s) into their originals`);
+
+  // Now that the column is clean, make a second row for one company a
+  // storage-layer error rather than something each call site must remember
+  // to check. Partial, because most leads legitimately have no number yet.
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_company_number
+       ON leads (company_number) WHERE company_number IS NOT NULL`
+  );
+}
+
+/**
+ * Finish the ledger backfill for the rows SQL alone cannot key.
+ *
+ * A lead with no company number — every Places import, and anything typed in
+ * by hand — is identified by a normalised name plus town. That normaliser
+ * lives in lib/companies-house.js, which imports this module, so it cannot be
+ * imported back here without a cycle. It is mirrored below instead, and
+ * test/recontact.test.js fails if the two ever disagree.
+ */
+const LEDGER_NOISE = new Set([
+  'ltd', 'limited', 'llp', 'plc', 'cic', 'co', 'company', 'the', 'and', 'uk',
+]);
+function ledgerNormaliseName(name) {
+  return String(name ?? '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w && !LEDGER_NOISE.has(w))
+    .join(' ')
+    .trim();
+}
+
+function backfillLedgerNameKeys() {
+  const nameKey = (name, town) => {
+    const n = ledgerNormaliseName(name);
+    return n ? `nm:${n}|${ledgerNormaliseName(town)}` : null;
+  };
+
+  // Fill name_key on everything already in the ledger, including the rows the
+  // SQL half just inserted, so the number path and the name path meet.
+  const setKey = db.prepare('UPDATE company_ledger SET name_key = ? WHERE company_key = ?');
+  for (const row of db.prepare(
+    'SELECT company_key, business_name, location FROM company_ledger WHERE name_key IS NULL'
+  ).all()) {
+    const nk = nameKey(row.business_name, row.location);
+    if (nk) setKey.run(nk, row.company_key);
+  }
+
+  // Then the leads that have no company number at all.
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO company_ledger
+       (company_key, company_number, business_name, location,
+        found_at, contacted_at, last_channel, times_contacted, name_key)
+     VALUES (@key, NULL, @name, @town, @found, @contacted, @channel, @times, @key)`
+  );
+  let n = 0;
+  for (const lead of db.prepare(
+    `SELECT business_name, location, created_at, last_contacted_at FROM leads
+      WHERE company_number IS NULL OR TRIM(company_number) = ''`
+  ).all()) {
+    const key = nameKey(lead.business_name, lead.location);
+    if (!key) continue;
+    const info = insert.run({
+      key,
+      name: lead.business_name,
+      town: lead.location,
+      found: lead.created_at ?? lead.last_contacted_at ?? new Date().toISOString(),
+      contacted: lead.last_contacted_at ?? null,
+      channel: lead.last_contacted_at ? 'before the ledger' : null,
+      times: lead.last_contacted_at ? 1 : 0,
+    });
+    n += info.changes;
+  }
+  const total = db.prepare('SELECT COUNT(*) c FROM company_ledger').get().c;
+  console.log(`[db] company ledger backfilled: ${total} companies (${n} by name)`);
+}
+
 const MIGRATIONS = [
   {
     name: '001_initial',
@@ -429,6 +592,123 @@ const MIGRATIONS = [
       ALTER TABLE briefs ADD COLUMN trading_name TEXT;
     `,
   },
+  {
+    name: '015_company_ledger',
+    up: `
+      -- A permanent record of every company this tool has ever put in front
+      -- of the owner, and whether it has ever been contacted.
+      --
+      -- It has to be a separate table because the lead row is not durable:
+      -- DELETE FROM leads is a hard delete, and the hunt's only defence
+      -- against re-finding a company is "SELECT 1 FROM leads WHERE
+      -- company_number = ?". Delete a lead you were not interested in and
+      -- tomorrow's hunt files it again, spends a Places request on it, and
+      -- offers it up for a second cold email. suppression_list already
+      -- outlives the lead for exactly this reason; this is the same idea
+      -- applied to "have I already approached this business".
+      --
+      -- Keyed on company_key rather than on lead id, so two lead rows for one
+      -- real company — a Places import and a register import of the same
+      -- business — count as one company. See companyKey() in lib/recontact.js.
+      CREATE TABLE company_ledger (
+        company_key    TEXT PRIMARY KEY,
+        company_number TEXT,
+        business_name  TEXT,
+        location       TEXT,
+        found_at       TEXT NOT NULL,
+        contacted_at   TEXT,
+        last_channel   TEXT,
+        times_contacted INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX idx_company_ledger_number ON company_ledger (company_number);
+      CREATE INDEX idx_company_ledger_contacted ON company_ledger (contacted_at);
+    `,
+  },
+  {
+    name: '016_one_row_per_company',
+    up: `
+      -- One company, one lead row.
+      --
+      -- company_number arrived as a plain nullable TEXT column, was written
+      -- exactly as typed, and was compared with a case-sensitive '='. So
+      -- 'sc123456' and 'SC123456' were two different companies as far as
+      -- every dedupe check was concerned — and the checks were only ever soft
+      -- anyway: SELECT-then-INSERT with a network round trip in between, from
+      -- a process holding a lock no other process can see.
+      --
+      -- Two rows for one business are two independent targets. Each can be
+      -- emailed, each can be WhatsApped, and the owner sees no connection
+      -- between them. To the business it is one firm contacting them twice.
+      --
+      -- Numbers are folded to upper case here; the duplicate merge and the
+      -- UNIQUE index follow in the JS half, which needs real logic.
+      UPDATE leads
+         SET company_number = UPPER(TRIM(company_number))
+       WHERE company_number IS NOT NULL AND TRIM(company_number) <> '';
+
+      UPDATE leads SET company_number = NULL
+       WHERE company_number IS NOT NULL AND TRIM(company_number) = '';
+    `,
+    run: mergeDuplicateCompanies,
+  },
+  {
+    name: '017_send_queue_allow_repeat',
+    up: `
+      -- A queue row the owner deliberately wants sent to a company already
+      -- contacted. Without it the send loop's re-check, which runs after the
+      -- row may have sat overnight, would refuse the very thing the owner
+      -- asked for at queue time.
+      ALTER TABLE send_queue ADD COLUMN allow_repeat INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    name: '018_company_ledger_name_key',
+    up: `
+      -- A second way into the same ledger row.
+      --
+      -- The register path knows a company number and nothing else useful; the
+      -- Places path knows a trading name and a town and never learns a
+      -- number. Keyed on one of those, the two funnels are blind to each
+      -- other and the same business arrives down both — as two leads, each
+      -- independently contactable.
+      --
+      -- So every row carries a name key as well as its primary key, and a
+      -- lookup tries both. The name key is weaker (two firms called "Ace
+      -- Plumbing" in one town collide), but the failure it causes is that one
+      -- of them is not contacted, which is much cheaper than contacting the
+      -- same one twice.
+      ALTER TABLE company_ledger ADD COLUMN name_key TEXT;
+      CREATE INDEX idx_company_ledger_name ON company_ledger (name_key);
+    `,
+  },
+  {
+    name: '019_backfill_company_ledger',
+    up: `
+      -- Carry the leads that already exist into the ledger, so the guarantee
+      -- covers the list the owner has been working rather than starting from
+      -- whenever this upgrade landed. Without it, every lead emailed last
+      -- week is a clean sheet again.
+      --
+      -- company_key mirrors companyKey() in lib/recontact.js: 'ch:<NUMBER>'
+      -- when we hold a number. Rows without one are backfilled in the JS half,
+      -- which can run the same name normaliser the application uses rather
+      -- than a SQL approximation of it that would drift from it.
+      INSERT OR IGNORE INTO company_ledger
+        (company_key, company_number, business_name, location,
+         found_at, contacted_at, last_channel, times_contacted)
+      SELECT 'ch:' || UPPER(TRIM(company_number)),
+             UPPER(TRIM(company_number)),
+             business_name,
+             location,
+             COALESCE(created_at, last_contacted_at),
+             last_contacted_at,
+             CASE WHEN last_contacted_at IS NOT NULL THEN 'before the ledger' END,
+             CASE WHEN last_contacted_at IS NOT NULL THEN 1 ELSE 0 END
+        FROM leads
+       WHERE company_number IS NOT NULL AND TRIM(company_number) <> '';
+    `,
+    run: backfillLedgerNameKeys,
+  },
 ];
 
 function migrate() {
@@ -444,7 +724,12 @@ function migrate() {
   for (const m of MIGRATIONS) {
     if (applied.has(m.name)) continue;
     db.transaction(() => {
-      db.exec(m.up);
+      if (m.up) db.exec(m.up);
+      // Some migrations cannot be expressed as a statement list — merging
+      // duplicate rows has to read what is there and decide. `run` executes
+      // inside the same transaction, so a failure rolls the whole migration
+      // back rather than leaving the schema half-moved.
+      if (m.run) m.run();
       db.prepare('INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)').run(
         m.name,
         new Date().toISOString()

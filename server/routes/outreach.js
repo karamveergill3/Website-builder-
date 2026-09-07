@@ -13,6 +13,7 @@ import { Router } from 'express';
 import { db } from '../db.js';
 import { wrap, badRequest, notFound, nowIso, requiredStr } from '../lib/http.js';
 import { sendability } from '../lib/pecr.js';
+import { recontactCheck, recordContact } from '../lib/recontact.js';
 import { isSuppressed } from '../lib/suppression.js';
 import { discover, signalsForLead, promoteSignal, recentFinds } from '../lib/contact-finder.js';
 import { handoff } from '../lib/handoff.js';
@@ -116,6 +117,23 @@ router.post('/outreach/prepare', wrap((req, res) => {
     });
   }
 
+  // Whether this company has been approached before, on ANY channel. Until
+  // now this endpoint had exactly one gate — the PECR check above — which
+  // asks whether we may lawfully contact this business at all, never whether
+  // we already have. So the same roofer could be handed a fresh WhatsApp
+  // link every morning, and an email yesterday placed no obstacle at all.
+  const again = recontactCheck(lead, { allowRepeat: Boolean(req.body?.allow_repeat) });
+  if (!again.allowed) {
+    return res.status(422).json({
+      error: again.reason,
+      code: again.code,
+      channel,
+      previous: again.previous,
+      previous_channel: again.channel ?? null,
+      times: again.times ?? null,
+    });
+  }
+
   let text = null;
   let templateId = null;
   let subject = null;
@@ -183,6 +201,8 @@ router.post('/outreach/:id/sent', wrap((req, res) => {
     db.prepare(
       `UPDATE leads SET last_contacted_at = ?, status = CASE WHEN status = 'new' THEN 'sent' ELSE status END WHERE id = ?`
     ).run(now, row.lead_id);
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(row.lead_id);
+    if (lead) recordContact(lead, row.channel, now);
   }
   res.json({ ok: true, confirmed_sent_at: now });
 }));

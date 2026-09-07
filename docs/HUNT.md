@@ -10,7 +10,7 @@ combination it:
 1. Reads a page of the **Companies House** register — active companies of that
    trade, in that town. Every one is a body corporate, so every one is lawful
    to cold-email.
-2. Skips any it already holds.
+2. Skips any it has ever held — see [No repeats](#no-repeats).
 3. Runs **one Google Places search** for the whole town — "roofers in Otley" —
    which comes back with twenty businesses *and* their website status for a
    single billed request.
@@ -24,6 +24,39 @@ is retired, and re-opened a month later — new companies incorporate all the ti
 
 **It never sends anything.** It finds and files. Sending stays behind the
 confirmation in the Outbox.
+
+## No repeats
+
+New day, new companies. A business the hunt has already filed is never filed
+again, and that holds even after you delete its lead.
+
+Step 2 used to be `SELECT 1 FROM leads WHERE company_number = ?`, which made
+the lead row the only memory the hunt had. Deleting a lead — the ordinary way
+of saying *not interested in this one* — erased it, so the next run filed the
+same company as brand new, spent a Places request re-checking it, and put it
+back in the outreach funnel.
+
+The check now runs against `company_ledger`, which outlives the lead. It is
+loaded once per run rather than once per company, because a register page is up
+to a hundred companies across every trade and town.
+
+Three things follow from that:
+
+- **A deleted lead stays deleted.** The company will not come back tomorrow.
+- **Restarting a target is safe.** Rewinding a cursor to zero re-reads
+  companies you have already seen, but they are recognised and skipped, so it
+  costs a register request and nothing else.
+- **Two hunts at once cannot duplicate.** `active` is a module-level variable,
+  so it locks one Node process — and the cron entry point is a second one.
+  A partial `UNIQUE` index on `company_number` means the loser of that race
+  gets a constraint error, which is counted as "already known" rather than
+  aborting the run.
+
+The **Never repeated** and **Approached** tiles on the Hunt screen show what
+the ledger is holding.
+
+Contacting is covered by the same ledger, across every channel — see
+[No repeats](../README.md#one-company-one-approach) in the README.
 
 ## The economics
 

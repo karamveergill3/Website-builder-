@@ -207,6 +207,57 @@ test('companies already held are never re-imported or re-checked', async () => {
   assert.equal((await get('/api/leads')).body.leads.length, 2, 'no duplicates');
 });
 
+test('a company whose lead was deleted is never found again', async () => {
+  // The whole reason the ledger is a separate table. DELETE FROM leads is a
+  // hard delete, and the hunt's only memory used to be that row — so the one
+  // gesture that means "not interested in this one" was also the gesture that
+  // put it back in tomorrow's list, and back into the outreach funnel.
+  stub();
+  await clearLeads();
+  await configure({ hunt_daily_target: '2' });
+
+  register = [{ body: { hits: 2, items: [
+    company('BINNED ROOFING LIMITED', '30000101'),
+    company('KEPT ROOFING LIMITED', '30000102'),
+  ] } }];
+  places = [{ places: [] }];
+  assert.equal((await runAndWait()).found, 2);
+
+  const binned = (await get('/api/leads')).body.leads
+    .find((l) => l.company_number === '30000101');
+  assert.equal((await del(`/api/leads/${binned.id}`)).status, 204);
+  assert.equal((await get('/api/leads')).body.leads.length, 1, 'the lead really is gone');
+
+  // The same register page, on a later day.
+  db.prepare('UPDATE hunt_targets SET cursor = 0, last_run_at = NULL').run();
+  stub();
+  register = [{ body: { hits: 2, items: [
+    company('BINNED ROOFING LIMITED', '30000101'),
+    company('KEPT ROOFING LIMITED', '30000102'),
+  ] } }];
+  places = [{ places: [] }];
+  const second = await runAndWait();
+
+  assert.equal(second.found, 0, 'a deleted lead is a decision, not an invitation to re-file');
+  assert.equal(second.already_known, 2);
+  assert.equal(second.places_requests, 0, 'and no Places request is spent re-checking it');
+  assert.equal((await get('/api/leads')).body.leads.length, 1);
+});
+
+test('a company the hunt files is on the ledger straight away', async () => {
+  stub();
+  await clearLeads();
+  await configure({ hunt_daily_target: '1' });
+  register = [{ body: { hits: 1, items: [company('LEDGERED ROOFING LIMITED', '30000201')] } }];
+  places = [{ places: [] }];
+  assert.equal((await runAndWait()).found, 1);
+
+  const row = db.prepare('SELECT * FROM company_ledger WHERE company_number = ?').get('30000201');
+  assert.ok(row, 'filed as found');
+  assert.equal(row.contacted_at, null, 'found is not contacted');
+  assert.ok(row.name_key, 'and carries a name key, so a Places sweep recognises it too');
+});
+
 test('the cursor advances so the next day covers new ground', async () => {
   stub();
   await clearLeads();

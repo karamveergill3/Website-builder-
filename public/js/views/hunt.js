@@ -6,6 +6,7 @@ import {
 
 export default async function huntView(root, _p, { refresh }) {
   const s = await api.get('/api/hunt/status').catch(() => null);
+  const { ledger } = await api.get('/api/hunt/ledger').catch(() => ({ ledger: null }));
 
   if (!s?.configured) {
     mount(root, html`
@@ -40,6 +41,11 @@ export default async function huntView(root, _p, { refresh }) {
         <b class="num">${c.enabled ? 'On' : 'Off'}</b><span>Schedule</span></div>
       <div><b class="num">${s.coverage.total - s.coverage.exhausted}</b><span>Areas left</span></div>
       <div><b class="num">${s.coverage.found_total}</b><span>Found in total</span></div>
+      ${ledger ? html`
+        <div title="Companies this tool has ever shown you. None of them will be found again."
+          ><b class="num">${ledger.companies}</b><span>Never repeated</span></div>
+        <div title="Approached at least once, on any channel. These are not offered again."
+          ><b class="num">${ledger.contacted}</b><span>Approached</span></div>` : ''}
     </div>
 
     ${s.active ? html`

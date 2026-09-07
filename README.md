@@ -21,7 +21,7 @@ npm start                 # http://localhost:3000
 ```bash
 npm run doctor            # is it actually ready? makes real API calls
 npm run hunt              # find today's prospects now, without the server
-npm test                  # 362 tests
+npm test                  # 367 tests
 npm run lint
 ```
 
@@ -48,7 +48,7 @@ Sending is deliberately blocked until you do — see [Compliance](#compliance--r
 | **Website check** | Which of them have no website | A Google Cloud API key |
 | **Outbox** | Review-then-send through your own Gmail | A Google OAuth client |
 | **Reach**  | WhatsApp / SMS / call any lead — one tap per send  | A UK phone number |
-| **Contact finder** | Scrapes the lead's website + public directories | Nothing (free)  |
+| **Contact finder** | Directory lookups for a phone or email, one lead or in bulk | Nothing (free)  |
 | **Replies** | Reads what came back and pulls out a brief | Nothing (free)  |
 | **Mockups** | Builds a one-page site from that brief, on a private link | Nothing (free) |
 | **No repeats** | One approach per company, ever, across every channel | Nothing |
@@ -327,7 +327,7 @@ sqlite3 data/prospect-book.db ".backup 'backup.db'"
 npm test
 ```
 
-362 tests covering placeholder rendering, lead and template CRUD with
+367 tests covering placeholder rendering, lead and template CRUD with
 validation, stats, the PECR classification gate, Companies House matching and
 entity classification, suppression across lead deletion, log-snapshot
 immutability, the Places field mask and dedupe, Google's error-reason handling,

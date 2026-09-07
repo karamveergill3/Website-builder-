@@ -66,6 +66,87 @@ router.post('/leads/:id/find-contacts', wrap(async (req, res) => {
   });
 }));
 
+/* ------------------------------------------------- bulk contact discovery */
+
+/**
+ * Find contact details for a batch of leads.
+ *
+ * The hunt files companies Google has never heard of — registered, real,
+ * and with no listing at all. Those arrive with no website AND no phone,
+ * because Google was the only thing that could have supplied one. They are
+ * often the best prospects precisely because nobody has marketed to them,
+ * and until now the only way to get a number was to open each lead and press
+ * a button.
+ *
+ * Runs in the background because contact-finder.js is deliberately slow: a
+ * three-second global gate between fetches, so forty leads is minutes rather
+ * than seconds. Polled the same way the hunt is.
+ */
+let sweep = null;
+export const activeSweep = () => sweep;
+
+router.post('/leads/find-contacts', wrap(async (req, res) => {
+  if (sweep?.running) throw badRequest('A contact sweep is already running.');
+
+  const ids = Array.isArray(req.body?.lead_ids)
+    ? req.body.lead_ids.map(Number).filter(Number.isInteger)
+    : [];
+  // With no explicit list, sweep the leads that need it most: no email, no
+  // phone, and never approached. Those are the ones that are otherwise dead.
+  const leads = ids.length
+    ? ids.map((id) => db.prepare('SELECT * FROM leads WHERE id = ?').get(id)).filter(Boolean)
+    : db.prepare(
+      `SELECT * FROM leads
+        WHERE (email IS NULL OR TRIM(email) = '')
+          AND (phone IS NULL OR TRIM(phone) = '')
+          AND opted_out = 0
+        ORDER BY created_at DESC
+        LIMIT 100`
+    ).all();
+
+  if (!leads.length) {
+    return res.json({ started: false, reason: 'Nothing to look up — every lead already has a phone or an email.' });
+  }
+
+  sweep = {
+    running: true, total: leads.length, done: 0,
+    found_phone: 0, found_email: 0, none: 0,
+    started_at: nowIso(), finished_at: null, error: null,
+  };
+
+  (async () => {
+    for (const lead of leads) {
+      if (!sweep.running) break;
+      try {
+        const out = await discover(lead, { web: lead.has_website !== 0 });
+        const kinds = new Set((out.signals ?? []).map((sig) => sig.kind));
+        if (kinds.has('phone')) sweep.found_phone += 1;
+        if (kinds.has('email')) sweep.found_email += 1;
+        if (!kinds.has('phone') && !kinds.has('email')) sweep.none += 1;
+      } catch (err) {
+        // One lead failing must not end the sweep — a directory being down
+        // says nothing about the next lead.
+        sweep.none += 1;
+        sweep.error = err.message;
+      }
+      sweep.done += 1;
+    }
+    sweep.running = false;
+    sweep.finished_at = nowIso();
+  })();
+
+  res.status(202).json({ started: true, total: leads.length });
+}));
+
+router.get('/leads/find-contacts/status', wrap((_req, res) => {
+  res.json({ sweep });
+}));
+
+router.post('/leads/find-contacts/stop', wrap((_req, res) => {
+  if (sweep?.running) sweep.running = false;
+  res.json({ sweep });
+}));
+
 router.post('/leads/:id/signals/:sid/promote', wrap((req, res) => {
   const id = Number(req.params.id);
   const sid = Number(req.params.sid);

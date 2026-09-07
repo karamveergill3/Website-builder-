@@ -192,6 +192,7 @@ export default async function leadsView(root, params, { refresh }) {
       <button data-act="paste-emails">Paste emails</button>
       <button data-act="bulk-site">Check websites</button>
       ${canQueue ? html`<button class="primary" data-act="bulk-queue">Queue emails</button>` : ''}
+      <button data-act="bulk-find">Find contacts</button>
       <button class="mini ghost" data-act="bulk-clear">Clear</button>
     </div>
 
@@ -350,6 +351,63 @@ export default async function leadsView(root, params, { refresh }) {
     }
     sync();
   });
+  /**
+   * Look up phone numbers and emails for the selected leads.
+   *
+   * The hunt files companies Google has never heard of, and those arrive
+   * with nothing to contact them by. This searches directory listings — Yell,
+   * Facebook, Checkatrade — which is the only remaining source once a
+   * business has no website and no Google entry.
+   *
+   * Slow on purpose: the finder waits between requests so it reads like a
+   * person rather than a scraper, so this is a background job with progress
+   * rather than something to wait on.
+   */
+  on(root, 'click', '[data-act="bulk-find"]', async (_e, btn) => {
+    const ids = picked().map((c) => Number(c.value));
+    if (!ids.length) return toast('Pick some leads first', { error: true });
+
+    const mins = Math.max(1, Math.ceil((ids.length * 5) / 60));
+    const go = await confirmDialog({
+      title: `Find contacts for ${ids.length} lead${ids.length === 1 ? '' : 's'}`,
+      message: 'Searches public directory listings for a phone number or an '
+        + 'email. It is deliberately unhurried — roughly five seconds a lead, '
+        + `so this will take about ${mins} minute${mins === 1 ? '' : 's'}. `
+        + 'Nothing is sent to anyone; it only reads pages that are already '
+        + 'public.',
+      confirmLabel: 'Start looking',
+    });
+    if (!go) return;
+
+    btn.disabled = true;
+    try {
+      const res = await api.post('/api/leads/find-contacts', { lead_ids: ids });
+      if (!res.started) return toast(res.reason ?? 'Nothing to look up');
+      toast(`Looking up ${res.total}…`);
+
+      // Poll until it finishes, then refresh so the new numbers show.
+      const tick = setInterval(async () => {
+        const { sweep } = await api.get('/api/leads/find-contacts/status');
+        if (!sweep) return;
+        const bar = $('#bulk-n', root);
+        if (bar && sweep.running) {
+          bar.textContent = `Looking up ${sweep.done} of ${sweep.total}…`;
+        }
+        if (!sweep.running) {
+          clearInterval(tick);
+          toast(`Found a phone for ${sweep.found_phone}, an email for ${sweep.found_email}`
+            + `, nothing for ${sweep.none}`);
+          refresh();
+        }
+      }, 1500);
+      registerInterval(tick);
+    } catch (err) {
+      toast(err.message ?? 'Could not start', { error: true });
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   on(root, 'click', '[data-act="bulk-clear"]', () => {
     $$('.pick', root).forEach((c) => { c.checked = false; });
     sync();

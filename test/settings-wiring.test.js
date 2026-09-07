@@ -85,3 +85,19 @@ test('the hunt form covers the options the hunt actually reads', () => {
     assert.ok(names.has(key), `the Hunt screen has no control for ${key}`);
   }
 });
+
+test('the hunt budget ships high enough to actually reach a target', () => {
+  // It shipped at 25 register pages / 40 lookups. Because most high-street
+  // trades are sole traders the register does not hold, that burned out after
+  // a handful of limited companies and stopped — looking like it had run out
+  // of towns. If someone lowers these again, a fresh install goes back to
+  // finding single figures and no test would have said why.
+  assert.ok(Number(DEFAULTS.hunt_max_register_pages) >= 150,
+    'register pages default is too low to plough past the sole traders');
+  assert.ok(Number(DEFAULTS.hunt_max_places_requests) >= 100,
+    'Google-lookup default is too low to reach a 20 target');
+  // ...but the lookups must stay inside the free 5,000/SKU/month even run
+  // daily: value x 30 days must not exceed 5,000.
+  assert.ok(Number(DEFAULTS.hunt_max_places_requests) * 30 <= 5000,
+    'a daily run at this budget would blow the free Google allowance');
+});

@@ -25,6 +25,38 @@ export default async function huntView(root, _p, { refresh }) {
   const last = s.runs[0];
   const short = last && !last.error && last.found < last.target;
 
+  // Why a run came up short, told honestly. The old message always blamed
+  // "the towns are worked through", which is usually the one thing that did
+  // NOT happen: a run stops the moment it hits its per-run budget, with
+  // thousands of trade/town combinations still untried. Saying so — and
+  // naming the exact cap to raise — is the difference between "this is
+  // broken" and "turn this number up".
+  let shortReason = '';
+  if (short) {
+    const areasLeft = s.coverage.total - s.coverage.exhausted;
+    const hitPages = (last.register_requests ?? 0) >= c.maxRegisterPages;
+    const hitLookups = (last.places_requests ?? 0) >= c.maxPlacesRequests;
+    if (hitPages) {
+      shortReason = `It read its limit of ${c.maxRegisterPages} register pages `
+        + `and stopped, with ${areasLeft.toLocaleString()} trade/town combinations `
+        + 'still to try. Raise “Register pages, max” below — the register is free, '
+        + 'so this costs nothing — and run again.';
+    } else if (hitLookups) {
+      shortReason = `It used its budget of ${c.maxPlacesRequests} Google lookups `
+        + `and stopped, with ${areasLeft.toLocaleString()} combinations still to try. `
+        + 'Raise “Google lookups, max” below and run again (5,000 free a month).';
+    } else if (areasLeft <= 0) {
+      shortReason = 'It has worked through every trade and town you listed. '
+        + 'Add more towns or trades — worked-through ones re-open after a month.';
+    } else {
+      shortReason = 'Most high-street trades — hairdressers, nail bars, cafés — '
+        + 'are sole traders, which Companies House does not hold and this tool '
+        + 'cannot lawfully cold-contact, so the register simply has fewer of them. '
+        + 'Add more towns, or mix in limited-company trades (electricians, '
+        + 'plumbers, builders, garages) to reach the target faster.';
+    }
+  }
+
   mount(root, html`
     <div class="bar">
       <h2>Daily hunt</h2>
@@ -60,8 +92,7 @@ export default async function huntView(root, _p, { refresh }) {
 
     ${short ? html`
       <div class="msg msg-warn" style="margin-bottom:10px"><div class="grow">
-        Last run found ${last.found} of ${last.target}. Usually means the towns listed are
-        worked through — add more, or raise the page budget.
+        Last run found ${last.found} of ${last.target}. ${shortReason}
       </div></div>` : ''}
 
     ${c.enabled && !s.active ? html`

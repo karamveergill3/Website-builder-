@@ -767,6 +767,29 @@ const MIGRATIONS = [
     name: '023_starter_templates',
     run: seedStarterTemplates,
   },
+  {
+    name: '024_raise_hunt_budget',
+    // The per-run budget shipped far too low: 25 register pages and 40 Google
+    // lookups. Because most high-street trades are sole traders the register
+    // does not hold, a run burned that budget turning up only a handful of
+    // limited companies and stopped — looking, wrongly, like it had run out
+    // of towns. The defaults are raised; this carries an install that already
+    // saved the old ones up with them, but ONLY where the stored value is
+    // still at or below the old ceiling, so a number the owner deliberately
+    // set higher is never pulled down.
+    run: () => {
+      const bump = (key, atOrBelow, to) => {
+        const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+        if (!row) return; // never saved → the new, higher default already applies
+        const n = Number(row.value);
+        if (Number.isFinite(n) && n <= atOrBelow) {
+          db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(String(to), key);
+        }
+      };
+      bump('hunt_max_register_pages', 80, 200);
+      bump('hunt_max_places_requests', 80, 120);
+    },
+  },
 ];
 
 function migrate() {

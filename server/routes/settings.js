@@ -59,8 +59,14 @@ export const DEFAULTS = {
   hunt_areas: '',
   hunt_daily_target: '10',
   hunt_hour: '8',
-  hunt_max_places_requests: '40',
-  hunt_max_register_pages: '25',
+  // The register is free, so read plenty of it: most high-street trades are
+  // sole traders the register does not hold, so it takes a lot of pages to
+  // turn up enough limited companies to hit the target. Google lookups do
+  // cost against the free 5,000/SKU/month, but only for towns that actually
+  // held a fresh company — 120 a run is ~3,600 a month, well inside the free
+  // allowance even run daily.
+  hunt_max_places_requests: '120',
+  hunt_max_register_pages: '200',
   // A day of twenty roofers is a worse day's calling than a mixed list,
   // and it puts all the risk on one trade answering cold contact.
   hunt_max_per_trade: '3',

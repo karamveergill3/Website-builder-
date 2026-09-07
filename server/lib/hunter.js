@@ -51,8 +51,8 @@ export function huntConfig() {
     areas: lines(getSetting('hunt_areas', getSetting('default_areas', ''))),
     target: num('hunt_daily_target', 20),
     hour: num('hunt_hour', 8),
-    maxPlacesRequests: num('hunt_max_places_requests', 80),
-    maxRegisterPages: num('hunt_max_register_pages', 80),
+    maxPlacesRequests: num('hunt_max_places_requests', 120),
+    maxRegisterPages: num('hunt_max_register_pages', 200),
     maxPerTrade: num('hunt_max_per_trade', 3),
     requireNoWebsite: getSetting('hunt_require_no_website', '1') === '1',
     // A mobile is a phone, so asking for one asks for the other. Left as two

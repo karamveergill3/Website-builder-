@@ -58,10 +58,19 @@ console.log([
 ].filter((l) => l !== null).join('\n'));
 
 if (run.found < run.target && !run.error) {
-  console.log(
-    '\nShort of target. Usually means the towns configured are worked through — '
-  + 'add more, or raise hunt_max_register_pages.'
-  );
+  // Name the cap that actually stopped it, rather than always blaming the
+  // towns — which is usually the one thing that did not happen.
+  const hitPages = run.register_requests >= cfg.maxRegisterPages;
+  const hitLookups = run.places_requests >= cfg.maxPlacesRequests;
+  const why = hitPages
+    ? `Read its limit of ${cfg.maxRegisterPages} register pages and stopped. `
+      + 'Raise hunt_max_register_pages — the register is free.'
+    : hitLookups
+    ? `Used its budget of ${cfg.maxPlacesRequests} Google lookups and stopped. `
+      + 'Raise hunt_max_places_requests (5,000 free a month).'
+    : 'Most high-street trades are sole traders the register does not hold. '
+      + 'Add more towns, or mix in limited-company trades.';
+  console.log(`\nShort of target. ${why}`);
 }
 
 process.exit(run.error ? 1 : 0);

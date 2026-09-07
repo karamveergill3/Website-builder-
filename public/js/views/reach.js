@@ -49,6 +49,11 @@ export async function openReachDialog(leadId) {
     channel: defaultChannel,
     template_id: null,
     text: '',
+    // What the last template render produced. Switching channel refills the
+    // box only while the text is still exactly that — anything typed is the
+    // user's, and losing it to a stray click is unforgivable.
+    rendered: '',
+    empty: [],
     finding: false,
     lastPrepare: null,
     manualUrl: '',
@@ -59,6 +64,11 @@ export async function openReachDialog(leadId) {
   state.signals = initial.signals;
   state.finds   = initial.finds;
 
+  // Open with the message already written, and already about this company.
+  // A dialog that opens on an empty box and a template dropdown is a dialog
+  // that asks you to do the work it exists to have done.
+  await fillDefault(state);
+
   return modal({
     title: `Reach ${leadRow.business_name}`,
     wide: true,
@@ -68,6 +78,42 @@ export async function openReachDialog(leadId) {
       wire(dlg, state);
     },
   });
+}
+
+/**
+ * The template to open with, for one channel.
+ *
+ * The shipped first-message templates are named "First message — WhatsApp"
+ * and so on, so prefer one of those and fall back to whatever exists. A
+ * follow-up must never be the thing that opens on a business that has not
+ * been written to yet.
+ */
+function defaultTemplateFor(templates, channel) {
+  const forChannel = templates.filter((t) => t.channel === channel);
+  return forChannel.find((t) => /^first/i.test(t.name)) ?? forChannel[0] ?? null;
+}
+
+/** Fill the box from a template, rendered for this lead by the server. */
+async function fillFrom(state, id) {
+  state.template_id = id || null;
+  if (!id) { state.rendered = ''; state.empty = []; return; }
+  try {
+    const r = await api.templates.render(id, state.lead.id);
+    state.text = r.body;
+    state.rendered = r.body;
+    state.empty = r.empty ?? [];
+  } catch (err) {
+    toast(err.message ?? 'Could not fill that template in', { error: true, ms: 5000 });
+  }
+}
+
+/** Pick this channel's opening message, unless the user has typed their own. */
+async function fillDefault(state) {
+  if (state.channel === 'email' || state.channel === 'call') return;
+  if (state.text && state.text !== state.rendered) return;   // theirs, not ours
+  const tpl = defaultTemplateFor(state.templates, state.channel);
+  if (!tpl) { state.text = ''; state.rendered = ''; state.empty = []; return; }
+  await fillFrom(state, tpl.id);
 }
 
 /* --------------------------------------------------------------- render */
@@ -249,6 +295,19 @@ function messagePanel(state) {
         <span class="meta">${len}/${soft} chars${len > soft ? ' — over limit' : ''}</span>
       </div>
       <div class="panel-bd">
+        <p class="tip" style="margin-top:0">
+          Written for <b>${lead.business_name}</b>${lead.location ? ` in ${lead.location}` : ''}${
+            lead.category ? ` · ${lead.category}` : ''} — the name, town and trade
+          are filled in from the lead, and your own details from Settings.
+        </p>
+        ${state.empty?.length ? html`
+          <div class="msg msg-warn" style="margin-bottom:10px"><div class="grow">
+            Nothing to put in ${state.empty.map((k) => `{{${k}}}`).join(', ')}, so
+            ${state.empty.length === 1 ? 'it is' : 'they are'} blank in the message.
+            ${state.empty.some((k) => k.startsWith('my_'))
+              ? html`Your own details live on the <a href="#/settings" data-act="tpl-hop">Settings screen</a>.`
+              : 'Fill it in on the lead, or edit the wording below.'}
+          </div></div>` : ''}
         <div class="f">
           <label for="reach-tpl">Template</label>
           <select id="reach-tpl" data-act="tpl">
@@ -302,24 +361,17 @@ function wire(dlg, state) {
     if (root) root.outerHTML = renderBody(state).toString();
   };
 
-  on(dlg, 'click', '[data-act="channel"]', (_e, el) => {
+  on(dlg, 'click', '[data-act="channel"]', async (_e, el) => {
     state.channel = el.dataset.channel;
     // When switching, drop any prepared handoff so we don't confuse the user.
     state.lastPrepare = null;
-    if (state.channel === 'call') state.text = '';
+    if (state.channel === 'call') { state.text = ''; state.rendered = ''; }
+    else await fillDefault(state);
     rerender();
   });
 
   on(dlg, 'change', '[data-act="tpl"]', async (_e, el) => {
-    const id = Number(el.value);
-    state.template_id = id || null;
-    if (!id) { rerender(); return; }
-    // Render via the preview endpoint... except templates render is a server
-    // concern for email only. For SMS/WhatsApp we render locally with a
-    // minimal renderer that mirrors the server's.
-    const tpl = state.templates.find((t) => t.id === id);
-    if (!tpl) { rerender(); return; }
-    state.text = renderLocal(tpl.body, state.lead);
+    await fillFrom(state, Number(el.value));
     rerender();
   });
 
@@ -438,23 +490,4 @@ function wire(dlg, state) {
   });
 }
 
-/**
- * Local placeholder renderer for the modal preview. Server does the real
- * render at prepare-time; this just keeps the textarea in sync so the user
- * can tweak before sending.
- */
-function renderLocal(body, lead) {
-  const ctx = {
-    business: lead.business_name ?? '',
-    category: lead.category ?? '',
-    location: lead.location ?? '',
-    phone:    lead.phone ?? '',
-    email:    lead.email ?? '',
-    first_name: String(lead.business_name ?? '').trim().split(/\s+/)[0] ?? '',
-  };
-  return String(body ?? '').replace(/\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}/gi, (m, key) => {
-    const k = key.toLowerCase();
-    return Object.prototype.hasOwnProperty.call(ctx, k) ? String(ctx[k] ?? '') : m;
-  });
-}
 

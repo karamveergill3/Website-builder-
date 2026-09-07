@@ -15,12 +15,16 @@ async function copyText(text) {
 }
 
 export default async function composeView(root, params, { navigate }) {
-  const [{ leads }, { templates }, settings] = await Promise.all([
+  const [{ leads }, { templates: allTemplates }, settings] = await Promise.all([
     api.leads.list({ limit: 1000 }),
     api.templates.list(),
     api.settings.get(),
   ]);
 
+  // Email templates only. WhatsApp and SMS wording has no subject line and is
+  // written for a phone screen; offering it here produced an email whose
+  // subject was blank and whose body said "Reply STOP".
+  const templates = allTemplates.filter((t) => (t.channel ?? 'email') === 'email');
   const usable = leads.filter((l) => !l.opted_out && l.block_code !== 'SUPPRESSED');
   // Land on a company that has not been approached yet. Defaulting to the
   // first merely-emailable lead put yesterday's send at the top of the
@@ -29,7 +33,11 @@ export default async function composeView(root, params, { navigate }) {
     ?? usable.find((l) => l.can_email && l.can_contact)?.id
     ?? usable.find((l) => l.can_email)?.id
     ?? usable[0]?.id ?? '';
-  const templateId = params.template ?? templates[0]?.id ?? '';
+  // Open on a first approach rather than a follow-up: this screen is reached
+  // from a lead that has not been written to.
+  const templateId = params.template
+    ?? templates.find((t) => /^first/i.test(t.name))?.id
+    ?? templates[0]?.id ?? '';
   const gmailReady = settings.integrations?.gmail_connected === true;
 
   const go = (key, value) => {
@@ -43,8 +51,8 @@ export default async function composeView(root, params, { navigate }) {
     mount(root, html`
       <div class="bar"><h2>Compose</h2></div>
       <div class="panel"><div class="blank">
-        <strong>${needTemplate ? 'No templates yet' : 'No leads yet'}</strong>
-        <a href="${needTemplate ? '#/templates' : '#/leads'}">${needTemplate ? 'Write one' : 'Add a lead'}</a>
+        <strong>${needTemplate ? 'No email templates yet' : 'No leads yet'}</strong>
+        <a href="${needTemplate ? '#/templates' : '#/leads'}">${needTemplate ? 'Write one, or add the starters' : 'Add a lead'}</a>
       </div></div>`);
     return;
   }

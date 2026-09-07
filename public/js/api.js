@@ -51,6 +51,9 @@ export const api = {
     create: (body)      => request('POST', '/api/templates', body),
     update: (id, body)  => request('PUT', `/api/templates/${id}`, body),
     remove: (id)        => request('DELETE', `/api/templates/${id}`),
+    starters: ()        => request('POST', '/api/templates/starters', {}),
+    render: (id, leadId) =>
+      request('GET', `/api/templates/${id}/render${qs({ lead_id: leadId })}`),
   },
   emails: {
     preview: (leadId, templateId) =>

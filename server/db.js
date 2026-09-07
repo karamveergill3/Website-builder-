@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { STARTERS, missingStarters } from './lib/starters.js';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -137,6 +138,30 @@ function ledgerNormaliseName(name) {
     .filter((w) => w && !LEDGER_NOISE.has(w))
     .join(' ')
     .trim();
+}
+
+/**
+ * Put the shipped messages in the box.
+ *
+ * There was a button for this and it went unpressed, so a live install ran a
+ * hunt, filed sixty companies and then offered an empty template list on
+ * every screen that needed one. Wording is not an optional extra: without it
+ * the Reach dialog can only say "no templates yet" and the whole day's work
+ * stops there. Matched on name, so a starter already present — or edited and
+ * kept under the same name — is left exactly as it is.
+ */
+function seedStarterTemplates() {
+  const have = db.prepare('SELECT name FROM templates').all().map((r) => r.name);
+  const now = new Date().toISOString();
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO templates (name, subject, body, channel, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  );
+  let n = 0;
+  for (const t of missingStarters(have)) {
+    n += insert.run(t.name, t.subject, t.body, t.channel, now, now).changes;
+  }
+  if (n) console.log(`[db] seeded ${n} of ${STARTERS.length} starter templates`);
 }
 
 function backfillLedgerNameKeys() {
@@ -737,6 +762,10 @@ const MIGRATIONS = [
       -- different problems with different answers.
       ALTER TABLE hunt_runs ADD COLUMN not_mobile INTEGER NOT NULL DEFAULT 0;
     `,
+  },
+  {
+    name: '023_starter_templates',
+    run: seedStarterTemplates,
   },
 ];
 

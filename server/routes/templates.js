@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { db } from '../db.js';
-import { wrap, badRequest, notFound, conflict, nowIso, str, requiredStr } from '../lib/http.js';
-import { CANONICAL_PLACEHOLDERS, ALL_PLACEHOLDERS, unknownPlaceholders } from '../lib/template.js';
+import { wrap, badRequest, notFound, conflict, nowIso, str, requiredStr, int } from '../lib/http.js';
+import {
+  CANONICAL_PLACEHOLDERS, SENDER_PLACEHOLDERS, ALL_PLACEHOLDERS,
+  unknownPlaceholders, renderTemplate, emptyPlaceholders,
+} from '../lib/template.js';
+import { STARTERS, missingStarters } from '../lib/starters.js';
 
 const router = Router();
 
@@ -26,9 +30,36 @@ router.get('/', wrap((req, res) => {
   res.json({
     templates: rows,
     placeholders: CANONICAL_PLACEHOLDERS,
+    sender_placeholders: SENDER_PLACEHOLDERS,
     all_placeholders: ALL_PLACEHOLDERS,
     channels: CHANNELS,
     sms_soft_limit: SMS_SOFT_LIMIT,
+  });
+}));
+
+/**
+ * POST /api/templates/starters — put back the messages the tool ships with.
+ *
+ * They are seeded on first run, so this is for the install that deleted one
+ * and wants it back, or that upgraded from a version with fewer channels.
+ * Matched on name, so an edited starter is never overwritten.
+ */
+router.post('/starters', wrap((_req, res) => {
+  const have = db.prepare('SELECT name FROM templates').all().map((r) => r.name);
+  const wanted = missingStarters(have);
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO templates (name, subject, body, channel, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  );
+  const now = nowIso();
+  let added = 0;
+  for (const t of wanted) {
+    added += insert.run(t.name, t.subject, t.body, t.channel, now, now).changes;
+  }
+  res.json({
+    added,
+    already_had: STARTERS.length - wanted.length,
+    templates: db.prepare('SELECT * FROM templates ORDER BY channel, name COLLATE NOCASE').all(),
   });
 }));
 
@@ -36,6 +67,37 @@ router.get('/:id', wrap((req, res) => {
   const t = db.prepare('SELECT * FROM templates WHERE id = ?').get(req.params.id);
   if (!t) throw notFound('Template not found');
   res.json({ template: t });
+}));
+
+/**
+ * GET /api/templates/:id/render?lead_id= — the message, filled in for one
+ * business.
+ *
+ * The Reach dialog used to fill placeholders itself, with a copy of the
+ * renderer written in the browser. Two renderers is one too many: the moment
+ * a token exists on one side and not the other, the text on screen stops
+ * being the text that gets sent, and nothing says so. This is the only
+ * renderer, and the dialog shows exactly what the handoff will carry.
+ */
+router.get('/:id/render', wrap((req, res) => {
+  const t = db.prepare('SELECT * FROM templates WHERE id = ?').get(req.params.id);
+  if (!t) throw notFound('Template not found');
+
+  const leadId = int(req.query.lead_id);
+  if (!leadId) throw badRequest('lead_id is required');
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
+  if (!lead) throw notFound('Lead not found');
+
+  const rendered = renderTemplate(t, lead);
+  res.json({
+    template: { id: t.id, name: t.name, channel: t.channel },
+    lead: { id: lead.id, business_name: lead.business_name, location: lead.location },
+    subject: rendered.subject,
+    body: rendered.body,
+    // Tokens that rendered to nothing. "{{my_name}} from " with the name
+    // missing reads as a bug in the message rather than a gap in Settings.
+    empty: emptyPlaceholders(t, lead),
+  });
 }));
 
 router.post('/', wrap((req, res) => {

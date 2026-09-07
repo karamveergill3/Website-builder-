@@ -466,6 +466,24 @@ test('only the derived website flag is stored, never listing content', async () 
   assert.equal(cached[0].has_website, 1);
 });
 
+/**
+ * Run `fn` with no Google key, then put it back.
+ *
+ * A local `let` restored in a finally after an await trips eslint's
+ * require-atomic-updates, and it was duplicated in both tests. The closure
+ * keeps the saved value out of the async body entirely.
+ */
+async function withoutPlacesKey(fn) {
+  const saved = Object.prototype.hasOwnProperty.call(process.env, 'GOOGLE_MAPS_API_KEY')
+    ? process.env.GOOGLE_MAPS_API_KEY : undefined;
+  const restore = () => {
+    if (saved === undefined) delete process.env.GOOGLE_MAPS_API_KEY;
+    else process.env.GOOGLE_MAPS_API_KEY = saved;
+  };
+  delete process.env.GOOGLE_MAPS_API_KEY;
+  try { return await fn(); } finally { restore(); }
+}
+
 test('the no-website filter is refused without a Google key, by route AND by hunt', async () => {
   // Two guards on purpose. The route has always refused this, but the route
   // is only the "Run now" button — server/hunt.js (cron) and the built-in
@@ -475,9 +493,7 @@ test('the no-website filter is refused without a Google key, by route AND by hun
   stub();
   await clearLeads();
   await configure({ hunt_require_no_website: '1' });
-  const key = process.env.GOOGLE_MAPS_API_KEY;
-  delete process.env.GOOGLE_MAPS_API_KEY;
-  try {
+  await withoutPlacesKey(async () => {
     const res = await post('/api/hunt/run', {});
     assert.equal(res.status, 400, 'the button refuses');
     assert.match(res.body.error, /GOOGLE_MAPS_API_KEY/);
@@ -495,18 +511,14 @@ test('the no-website filter is refused without a Google key, by route AND by hun
       'the unattended path refuses too'
     );
     assert.equal(calls.register, 0, 'and still spends nothing');
-  } finally {
-    if (key !== undefined) process.env.GOOGLE_MAPS_API_KEY = key;
-  }
+  });
 });
 
 test('with the filter off, no Google key is needed at all', async () => {
   stub();
   await clearLeads();
   await configure({ hunt_require_no_website: '0', hunt_daily_target: '2' });
-  const key = process.env.GOOGLE_MAPS_API_KEY;
-  delete process.env.GOOGLE_MAPS_API_KEY;
-  try {
+  await withoutPlacesKey(async () => {
     register = [{ body: { hits: 2, items: [
       company('NO FILTER ROOFING LIMITED', '30000301'),
       company('NO FILTER SPARKS LIMITED', '30000302'),
@@ -515,9 +527,7 @@ test('with the filter off, no Google key is needed at all', async () => {
     assert.equal(run.error ?? null, null);
     assert.equal(run.found, 2, 'files everything for you to check yourself');
     assert.equal(run.places_requests, 0, 'and never asks Google');
-  } finally {
-    if (key !== undefined) process.env.GOOGLE_MAPS_API_KEY = key;
-  }
+  });
 });
 
 test('the target key survives a trade or town containing punctuation', () => {

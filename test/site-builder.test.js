@@ -413,3 +413,48 @@ test('a long headline still fits beside the art', () => {
   const size = html.match(/h1\{font-size:clamp\([^,]+,([\d.]+)vw/)?.[1];
   assert.ok(Number(size) <= 6, `headline scales too fast for a half column: ${size}vw`);
 });
+
+test('the artwork is drawn as objects, not as bare strokes', () => {
+  // Line art of even width reads as a diagram. A blade, a tyre and a leaf
+  // only look like themselves when they have a filled body.
+  for (const trade of ['Hairdressing and beauty', 'Vehicle maintenance and repair',
+                       'Roofing', 'Landscaping', 'Florists']) {
+    const html = renderSite({ ...brief, trade })['index.html'];
+    const art = html.match(/<svg class="art"[\s\S]*?<\/svg>/)[0];
+    assert.match(art, /fill="currentColor"/, `${trade} art has no filled body`);
+  }
+});
+
+test('the wheel has tread and shaped spokes, not concentric circles', () => {
+  const art = renderSite({ ...brief, trade: 'Vehicle maintenance and repair' })['index.html']
+    .match(/<svg class="art"[\s\S]*?<\/svg>/)[0];
+  assert.match(art, /stroke-dasharray="9 20"/, 'the tyre needs tread blocks');
+  // Five spokes drawn as wedges, each an arc-capped path rather than a line.
+  assert.equal((art.match(/A104 104 0 0 1/g) ?? []).length, 5, 'five shaped spokes');
+});
+
+test('the scissors have two blades crossing at a screw', () => {
+  const art = renderSite({ ...brief, trade: 'Hairdressing and beauty' })['index.html']
+    .match(/<svg class="art"[\s\S]*?<\/svg>/)[0];
+  assert.ok(art.includes('class="blade-a"') && art.includes('class="blade-b"'));
+  // Finger loops below the pivot; blades above. If the loops end up on top
+  // the whole thing reads as a slingshot.
+  const loops = [...art.matchAll(/<ellipse cx="\d+" cy="(\d+)"/g)].map((m) => Number(m[1]));
+  assert.equal(loops.length, 2, 'two finger loops');
+  assert.ok(loops.every((y) => y > 160), `loops must sit below the pivot, got ${loops}`);
+});
+
+test('nothing animated is left with a zero-length or paused animation', () => {
+  // A keyframe set with no animation referencing it is dead decoration.
+  for (const trade of ['Hairdressing and beauty', 'Vehicle maintenance and repair',
+                       'Roofing', 'Landscaping', 'Bakeries', 'Cleaning of buildings',
+                       'Florists', 'Architecture']) {
+    const html = renderSite({ ...brief, trade })['index.html'];
+    const names = [...html.matchAll(/@keyframes ([a-z-]+)\{/g)].map((m) => m[1]);
+    for (const n of names) {
+      assert.ok(new RegExp(`animation:[^;]*\\b${n}\\b`).test(html)
+             || new RegExp(`animation-name:[^;]*\\b${n}\\b`).test(html),
+        `${trade}: @keyframes ${n} is never used`);
+    }
+  }
+});

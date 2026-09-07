@@ -204,11 +204,20 @@ Each sector opens with a piece of line art that animates in:
 **Inline SVG animated with CSS.** No image request, no JavaScript, nothing
 that can fail to load — and it scales to any screen without going soft. It
 uses `currentColor`, so a salon's scissors come out pink and a garage's
-wheel red without a second asset existing anywhere.
+wheel red without a second asset existing anywhere. The whole page
+including the artwork is about 20 KB.
 
-Line art rather than illustration on purpose: a stroke drawing reads as
-considered where a cartoon reads as clip art. The whole page including the
-artwork is about 20 KB.
+**Drawn as objects, not as strokes.** A line of even width reads as a
+diagram whatever you do with it. The scissors have tapered blades that come
+to a point, handles curving to real finger loops, and a screw at the pivot.
+The wheel has tread blocks cut into the tyre, five shaped spokes with the
+gaps showing, a centre cap and lug bolts. The tiles are filled and overlap
+with a curved top edge; the leaves are two arcs meeting at a tip. Filled
+bodies are what make them read as things rather than as icons.
+
+Everything is genuinely in motion — the wheel turns continuously, the
+scissors keep snipping, the bubbles keep rising. A screenshot only ever
+catches one frame of it.
 
 The art is `aria-hidden` — it carries no information a screen reader needs —
 and it is dropped entirely below 900px, where the screen is better spent on

@@ -494,87 +494,138 @@ function heroArt(family) {
 
   switch (family) {
     case 'beauty':
-      // Scissors that open and close, slowly, over a comb.
+      // Scissors: each half is a tapered blade above the pivot and a
+      // handle curving down to a finger loop below it, crossing at the
+      // screw. Blades are filled shapes — a stroke of even width reads as
+      // a line, not a blade, however you arrange it.
       return svg(`
-        <g class="a-scissors" stroke="currentColor" stroke-width="2.2"
-           stroke-linecap="round" stroke-linejoin="round">
-          <!-- Each half is one stroke: blade above the pivot, handle below,
-               crossing at it. Loops sit at the BOTTOM, where fingers go. -->
-          <g class="blade-a">
-            <path d="M198 40 L150 150 L124 214"/>
-            <circle cx="112" cy="236" r="19"/>
+        <g class="a-scissors">
+          <g class="blade-a" fill="currentColor" stroke="currentColor"
+             stroke-width="2" stroke-linejoin="round">
+            <!-- blade: 16px at the pivot, tapering to a point -->
+            <path d="M150 156 L238 40 Q244 34 246 42 L164 168 Z"/>
+            <!-- handle and finger loop -->
+            <path d="M154 164 C142 190 130 206 120 218" fill="none" stroke-width="7"
+                  stroke-linecap="round"/>
+            <ellipse cx="104" cy="242" rx="25" ry="29" fill="none" stroke-width="7"
+                     transform="rotate(-24 104 242)"/>
           </g>
-          <g class="blade-b">
-            <path d="M122 40 L170 150 L196 214"/>
-            <circle cx="208" cy="236" r="19"/>
+          <g class="blade-b" fill="currentColor" stroke="currentColor"
+             stroke-width="2" stroke-linejoin="round">
+            <path d="M170 156 L82 40 Q76 34 74 42 L156 168 Z"/>
+            <path d="M166 164 C178 190 190 206 200 218" fill="none" stroke-width="7"
+                  stroke-linecap="round"/>
+            <ellipse cx="216" cy="242" rx="25" ry="29" fill="none" stroke-width="7"
+                     transform="rotate(24 216 242)"/>
           </g>
-          <circle cx="160" cy="152" r="6"/>
+          <!-- the screw sits on top of both halves -->
+          <circle cx="160" cy="160" r="9" fill="currentColor"/>
+          <circle cx="160" cy="160" r="3.5" fill="var(--ink)"/>
         </g>
-        <g class="a-comb" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-          <path d="M66 288 H254"/>
-          ${Array.from({ length: 15 }, (_, i) =>
-            `<path class="tooth" style="--i:${i}" d="M${74 + i * 12.6} 290 V310"/>`).join('')}
+        <g class="a-comb" stroke="currentColor" stroke-width="6" stroke-linecap="round">
+          <path d="M52 296 H268"/>
+          ${Array.from({ length: 17 }, (_, i) =>
+            `<path class="tooth" style="--i:${i}" stroke-width="4" d="M${58 + i * 13} 300 V318"/>`).join('')}
         </g>`);
 
     case 'motor':
-      // An alloy wheel turning. The tread is a dashed ring so it reads as a
-      // tyre rather than a gear.
+      // An alloy wheel: a tyre with real tread blocks, a rim, five tapered
+      // spokes with the gaps between them showing, a centre cap and lug
+      // bolts. Thin concentric circles read as a gear; the tread and the
+      // spoke shape are what make it a wheel.
       return svg(`
-        <g class="a-wheel" stroke="currentColor" stroke-linecap="round">
-          <circle cx="160" cy="160" r="118" stroke-width="2" opacity=".35"
-                  stroke-dasharray="10 12"/>
-          <circle cx="160" cy="160" r="100" stroke-width="2.4"/>
-          <circle cx="160" cy="160" r="30" stroke-width="2.4"/>
-          <circle cx="160" cy="160" r="9" stroke-width="2.4"/>
+        <g class="a-wheel">
+          <!-- tyre -->
+          <circle cx="160" cy="160" r="140" fill="none" stroke="currentColor"
+                  stroke-width="26" opacity=".85"/>
+          <!-- tread blocks, cut into the tyre -->
+          <circle cx="160" cy="160" r="140" fill="none" stroke="var(--ink)"
+                  stroke-width="26" stroke-dasharray="9 20" opacity=".55"/>
+          <!-- sidewall and rim lip -->
+          <circle cx="160" cy="160" r="127" fill="none" stroke="currentColor"
+                  stroke-width="2" opacity=".5"/>
+          <circle cx="160" cy="160" r="112" fill="none" stroke="currentColor"
+                  stroke-width="5"/>
+          ${Array.from({ length: 5 }, (_, i) => {
+            // Each spoke is a wedge: narrow at the hub, wider at the rim.
+            const mid = (i * 72 - 90) * Math.PI / 180;
+            const pt = (r, a) => `${(160 + Math.cos(a) * r).toFixed(1)} ${(160 + Math.sin(a) * r).toFixed(1)}`;
+            const hubHalf = 0.20, rimHalf = 0.42;
+            return `<path fill="currentColor" opacity=".9" d="`
+              + `M${pt(38, mid - hubHalf)} `
+              + `L${pt(104, mid - rimHalf)} `
+              + `A104 104 0 0 1 ${pt(104, mid + rimHalf)} `
+              + `L${pt(38, mid + hubHalf)} `
+              + `A38 38 0 0 0 ${pt(38, mid - hubHalf)} Z"/>`;
+          }).join('')}
+          <!-- centre cap and lug bolts -->
+          <circle cx="160" cy="160" r="40" fill="var(--ink)" stroke="currentColor" stroke-width="4"/>
           ${Array.from({ length: 5 }, (_, i) => {
             const a = (i * 72 - 90) * Math.PI / 180;
-            const x1 = 160 + Math.cos(a) * 32, y1 = 160 + Math.sin(a) * 32;
-            const x2 = 160 + Math.cos(a) * 96, y2 = 160 + Math.sin(a) * 96;
-            const ca = a + 0.30;
-            const cx = 160 + Math.cos(ca) * 70, cy = 160 + Math.sin(ca) * 70;
-            return `<path stroke-width="2.6" d="M${x1.toFixed(1)} ${y1.toFixed(1)} Q${cx.toFixed(1)} ${cy.toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}"/>`;
+            return `<circle cx="${(160 + Math.cos(a) * 24).toFixed(1)}" `
+                 + `cy="${(160 + Math.sin(a) * 24).toFixed(1)}" r="5" fill="currentColor"/>`;
           }).join('')}
+          <circle cx="160" cy="160" r="8" fill="none" stroke="currentColor" stroke-width="3"/>
         </g>
-        <g class="a-motion" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" opacity=".55">
-          <path class="dash" style="--i:0" d="M12 118 H60"/>
-          <path class="dash" style="--i:1" d="M0 160 H40"/>
-          <path class="dash" style="--i:2" d="M12 202 H60"/>
+        <g class="a-motion" stroke="currentColor" stroke-width="5" stroke-linecap="round" opacity=".6">
+          <path class="dash" style="--i:0" d="M4 108 H56"/>
+          <path class="dash" style="--i:1" d="M-10 160 H34"/>
+          <path class="dash" style="--i:2" d="M4 212 H56"/>
         </g>`);
 
     case 'building':
-      // Courses of roof tiles dropping into place, bottom row first.
+      // Roof tiles: filled and overlapping with a curved top edge, laid in
+      // courses. Outlined rectangles read as a brick diagram; the overlap
+      // and the curve are what make them tiles.
       return svg(`
-        <g class="a-roof" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round">
+        <g class="a-roof">
           ${[0, 1, 2, 3].map((row) => {
-            const y = 250 - row * 26;
-            const inset = row * 22;
+            const y = 226 - row * 30;
+            const inset = row * 26;
             const count = 5 - row;
+            const w = (250 - inset * 2) / count;
             return Array.from({ length: count }, (_, i) => {
-              const w = (240 - inset * 2) / count;
-              const x = 40 + inset + i * w;
-              return `<rect class="tile" style="--i:${row * 5 + i}" x="${x.toFixed(1)}" y="${y}" `
-                   + `width="${(w - 4).toFixed(1)}" height="22" rx="3"/>`;
+              const x = 35 + inset + i * w;
+              const tw = w - 3;
+              return `<path class="tile" style="--i:${(3 - row) * 5 + i}" `
+                + `fill="currentColor" stroke="var(--ink)" stroke-width="2" `
+                + `d="M${x.toFixed(1)} ${y + 34} V${y + 10} `
+                + `Q${x.toFixed(1)} ${y} ${(x + tw / 2).toFixed(1)} ${y} `
+                + `Q${(x + tw).toFixed(1)} ${y} ${(x + tw).toFixed(1)} ${y + 10} `
+                + `V${y + 34} Z"/>`;
             }).join('');
           }).join('')}
         </g>`);
 
     case 'green':
-      // Stems growing up out of the ground, then swaying.
+      // Stems with real leaf shapes — two arcs meeting at a point. A bare
+      // curve reads as a wire; the leaf shape is what makes it a plant.
       return svg(`
-        <g class="a-garden" stroke="currentColor" stroke-width="2.4"
-           stroke-linecap="round" stroke-linejoin="round">
-          <path d="M46 272 H274" opacity=".4"/>
+        <g class="a-garden">
+          <path d="M34 286 H286" stroke="currentColor" stroke-width="5"
+                stroke-linecap="round" opacity=".45"/>
           ${[
-            { x: 96,  h: 116, i: 0 },
-            { x: 160, h: 160, i: 1 },
-            { x: 224, h: 128, i: 2 },
-          ].map(({ x, h, i }) => `
-            <g class="stem" style="--i:${i}">
-              <path d="M${x} 270 V${270 - h}"/>
-              <path d="M${x} ${270 - h * 0.55} Q${x - 34} ${270 - h * 0.72} ${x - 8} ${270 - h * 0.86}"/>
-              <path d="M${x} ${270 - h * 0.34} Q${x + 34} ${270 - h * 0.5} ${x + 8} ${270 - h * 0.64}"/>
-              <circle cx="${x}" cy="${270 - h - 8}" r="9"/>
-            </g>`).join('')}
+            { x: 92,  h: 132, i: 0 },
+            { x: 160, h: 186, i: 1 },
+            { x: 228, h: 148, i: 2 },
+          ].map(({ x, h, i }) => {
+            const top = 284 - h;
+            // A leaf: out and back, the two arcs meeting at the tip.
+            const leaf = (y, dir, len) => {
+              const tipX = x + dir * len, tipY = y - len * 0.5;
+              return `<path fill="currentColor" opacity=".9" d="`
+                + `M${x} ${y} Q${x + dir * len * 0.35} ${y - len * 0.62} ${tipX} ${tipY} `
+                + `Q${x + dir * len * 0.62} ${y - len * 0.08} ${x} ${y} Z"/>`;
+            };
+            return `<g class="stem" style="--i:${i}">
+              <path d="M${x} 284 V${top}" stroke="currentColor" stroke-width="6"
+                    stroke-linecap="round" fill="none"/>
+              ${leaf(284 - h * 0.34, -1, 40)}
+              ${leaf(284 - h * 0.56, 1, 44)}
+              ${leaf(284 - h * 0.78, -1, 34)}
+              <circle cx="${x}" cy="${top - 10}" r="13" fill="currentColor"/>
+            </g>`;
+          }).join('')}
         </g>`);
 
     case 'food':
@@ -582,7 +633,8 @@ function heroArt(family) {
       return svg(`
         <g class="a-cup" stroke="currentColor" stroke-width="2.4"
            stroke-linecap="round" stroke-linejoin="round">
-          <path d="M92 190 H212 V236 A32 32 0 0 1 180 268 H124 A32 32 0 0 1 92 236 Z"/>
+          <path fill="currentColor" fill-opacity=".22" stroke-width="5"
+                d="M92 190 H212 V236 A32 32 0 0 1 180 268 H124 A32 32 0 0 1 92 236 Z"/>
           <path d="M212 200 H236 A22 22 0 0 1 236 244 H212" opacity=".7"/>
           <path d="M74 284 H238" opacity=".4"/>
         </g>
@@ -603,22 +655,29 @@ function heroArt(family) {
             { x: 138, r: 12, i: 3 }, { x: 200, r: 22, i: 4 }, { x: 88,  r: 15, i: 5 },
           ].map(({ x, r, i }) => `
             <g class="bub" style="--i:${i}">
-              <circle cx="${x}" cy="272" r="${r}"/>
+              <circle cx="${x}" cy="272" r="${r}" fill="currentColor" fill-opacity=".16"/>
               <path d="M${x - r * 0.42} ${272 - r * 0.42} a${r * 0.5} ${r * 0.5} 0 0 1 ${r * 0.34} ${-r * 0.2}"
                     stroke-width="1.8" opacity=".8" stroke-linecap="round"/>
             </g>`).join('')}
         </g>`);
 
     case 'retail':
-      // A price tag on a hook, swinging.
+      // A price tag: a pentagon that comes to a point at the top with an
+      // eyelet through it, hanging on a hook. Drawn upright — rotating a
+      // pointed shape by 45 degrees just moves the point out of frame and
+      // leaves a rounded square.
       return svg(`
-        <g stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M160 44 V92" opacity=".5"/>
+        <g stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M160 22 V52" stroke-width="4" opacity=".55" fill="none"/>
+          <path d="M160 52 A18 18 0 0 0 160 88" stroke-width="4" opacity=".55" fill="none"/>
           <g class="a-tag">
-            <path d="M160 92 L236 168 L168 236 L92 160 Z"/>
-            <circle cx="160" cy="126" r="11"/>
-            <path d="M150 196 H196" opacity=".6"/>
-            <path d="M138 178 H176" opacity=".4"/>
+            <path fill="currentColor" stroke-width="3"
+                  d="M160 62 L226 128 A10 10 0 0 1 229 135 V250
+                     A12 12 0 0 1 217 262 H103 A12 12 0 0 1 91 250
+                     V135 A10 10 0 0 1 94 128 Z"/>
+            <circle cx="160" cy="112" r="15" fill="var(--ink)" stroke-width="3"/>
+            <path d="M116 196 H204" stroke-width="4" opacity=".45" stroke="var(--ink)"/>
+            <path d="M116 222 H176" stroke-width="4" opacity=".3" stroke="var(--ink)"/>
           </g>
         </g>`);
 
@@ -637,18 +696,27 @@ function heroArt(family) {
 
 /** The keyframes each piece of art needs. Only the active sector's are emitted. */
 function heroArtCss(family) {
-  const shared = `
+  const base = `
   .art{width:min(46vw,460px);aspect-ratio:1;color:var(--accent);
     opacity:.9;overflow:visible}
   @media (max-width:900px){.art{display:none}}`;
 
+  // The entrance is only emitted for the pieces that move as a whole. The
+  // ones whose parts animate individually — tiles, stems, bubbles, strokes
+  // — never reference it, and an unused keyframe is dead weight.
+  const entrance = `
+  @keyframes art-in{
+    from{opacity:0;transform:translateY(16px) scale(.97)}
+    to{opacity:.9;transform:none}}`;
+  const shared = base + entrance;
+
   switch (family) {
     case 'beauty': return `${shared}
-  .blade-a,.blade-b{transform-box:view-box;transform-origin:160px 152px}
-  .blade-a{animation:snip-a 3.4s ease-in-out .6s infinite}
-  .blade-b{animation:snip-b 3.4s ease-in-out .6s infinite}
-  @keyframes snip-a{0%,58%,100%{transform:rotate(0deg)}30%{transform:rotate(-7deg)}}
-  @keyframes snip-b{0%,58%,100%{transform:rotate(0deg)}30%{transform:rotate(7deg)}}
+  .blade-a,.blade-b{transform-box:view-box;transform-origin:160px 160px}
+  .blade-a{animation:snip-a 2.6s ease-in-out .6s infinite}
+  .blade-b{animation:snip-b 2.6s ease-in-out .6s infinite}
+  @keyframes snip-a{0%,55%,100%{transform:rotate(0deg)}28%{transform:rotate(-13deg)}}
+  @keyframes snip-b{0%,55%,100%{transform:rotate(0deg)}28%{transform:rotate(13deg)}}
   .a-comb .tooth{opacity:0;animation:tooth .5s ease-out forwards;
     animation-delay:calc(.9s + var(--i) * .045s)}
   @keyframes tooth{to{opacity:.75}}
@@ -657,7 +725,7 @@ function heroArtCss(family) {
     case 'motor': return `${shared}
   .a-wheel{transform-box:fill-box;transform-origin:50% 50%;
     animation:art-in .9s cubic-bezier(.16,1,.3,1) .2s backwards,
-              spin 9s linear .2s infinite}
+              spin 6s linear .2s infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   .a-motion .dash{opacity:0;animation:whoosh 2.4s ease-out infinite;
     animation-delay:calc(1s + var(--i) * .14s)}
@@ -666,17 +734,15 @@ function heroArtCss(family) {
     35%{opacity:.6}
     100%{opacity:0;transform:translateX(-14px)}}`;
 
-    case 'building': return `${shared}
-  .a-roof{opacity:0;animation:art-in .5s ease-out .15s forwards}
+    case 'building': return `${base}
   .tile{opacity:0;transform-box:fill-box;transform-origin:50% 50%;
-    animation:lay .55s cubic-bezier(.2,.8,.2,1) forwards;
-    animation-delay:calc(.35s + var(--i) * .055s)}
+    animation:lay .6s cubic-bezier(.2,.8,.2,1) forwards;
+    animation-delay:calc(.3s + var(--i) * .05s)}
   @keyframes lay{
-    from{opacity:0;transform:translateY(-22px)}
-    to{opacity:.85;transform:none}}`;
+    from{opacity:0;transform:translateY(-26px) scale(.94)}
+    to{opacity:.92;transform:none}}`;
 
-    case 'green': return `${shared}
-  .a-garden{opacity:0;animation:art-in .6s ease-out .15s forwards}
+    case 'green': return `${base}
   .stem{transform-box:fill-box;transform-origin:50% 100%;
     animation:sprout 1.1s cubic-bezier(.22,1,.36,1) backwards,
               sway 5.5s ease-in-out infinite;
@@ -695,7 +761,7 @@ function heroArtCss(family) {
     30%{opacity:.65}
     100%{opacity:0;transform:translateY(-34px) scaleX(1.1)}}`;
 
-    case 'clean': return `${shared}
+    case 'clean': return `${base}
   .bub{opacity:0;transform-box:fill-box;transform-origin:50% 50%;
     animation:float 6s ease-in-out infinite;
     animation-delay:calc(var(--i) * .8s)}
@@ -706,13 +772,13 @@ function heroArtCss(family) {
     100%{opacity:0;transform:translateY(-220px) scale(1.05)}}`;
 
     case 'retail': return `${shared}
-  .a-tag{transform-box:fill-box;transform-origin:50% 0;
+  .a-tag{transform-box:view-box;transform-origin:160px 70px;
     animation:art-in .8s cubic-bezier(.16,1,.3,1) .2s backwards,
               swing 4.5s ease-in-out 1s infinite}
   @keyframes swing{
     0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}`;
 
-    default: return `${shared}
+    default: return `${base}
   .a-draw .ln{stroke-dasharray:900;stroke-dashoffset:900;
     animation:draw 1.6s cubic-bezier(.22,1,.36,1) forwards;
     animation-delay:calc(.3s + var(--i) * .18s)}
@@ -887,10 +953,7 @@ function css(p, t) {
     .hero-art{display:none}
     .hero h1{max-width:18ch}
   }
-  /* Shared entrance for every piece of art. */
-  @keyframes art-in{
-    from{opacity:0;transform:translateY(16px) scale(.97)}
-    to{opacity:.9;transform:none}}
+
   .hero h1{max-width:14ch;overflow-wrap:break-word;
     background:linear-gradient(170deg,#fff 30%,rgba(255,255,255,.80));
     -webkit-background-clip:text;background-clip:text;color:transparent}

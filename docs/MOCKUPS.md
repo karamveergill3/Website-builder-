@@ -162,6 +162,7 @@ as generic. So each trade family gets its own **type, shape and motion**:
 | Motor     | Chakra Petch, caps| Sharp 2px  | Sweeps sideways, slight skew | Technical grid |
 | Landscaping | Fraunces        | Round 22px | Grows up out of the ground | Organic curves |
 | Hair & beauty | Cormorant Garamond, light | Editorial 2px | Slow unveil, weightless | Soft bloom + hairline rule |
+| *(beauty runs on a light ground — see below)* | | | | |
 | Food      | Playfair Display  | Warm 14px  | Gentle rise | Warm glow from below |
 | Retail    | DM Serif Display  | Editorial 3px | Staggered | Column rules |
 | Cleaning  | Outfit            | Soft 18px  | Light lift | Floating bubbles |
@@ -171,6 +172,20 @@ A salon gets a high-contrast serif at 300 weight, wide-tracked small caps,
 square edges and a slow fade. A garage gets uppercase technical type, sharp
 corners, a measuring grid and motion that passes sideways. They do not read
 as the same site.
+
+#### Light and dark grounds
+
+Most sectors open on a dark hero. **Hair and beauty does not** — those sites
+live in warm white, cream, soft black and silver. A dark plum ground with a
+hot pink accent reads as a bar, not a salon, so the beauty theme runs
+`mode: 'light'`: a warm-white ground, near-black serif type, a silver-taupe
+accent and a solid black button.
+
+A light ground is not the dark one with its colours swapped. The mesh drops
+from 55% to 32% opacity and the grain switches from `overlay` to
+`multiply`, because the same values that read as depth on near-black read
+as a stain on cream. The hero type, the button fills, the ticker and the
+header all branch on the mode.
 
 **Palette still follows the trade**, and each one carries a second, lighter
 hue so the mesh has depth across the whole hero instead of one lit corner. A

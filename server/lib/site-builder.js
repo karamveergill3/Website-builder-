@@ -37,7 +37,11 @@ const PALETTES = {
   building: { ink: '#0d1520', accent: '#f97316', glow: '#eab308', wash: '#f6f4f1', line: '#e2ddd6', muted: '#5b6673' },
   motor:    { ink: '#0a0d14', accent: '#ef4444', glow: '#f59e0b', wash: '#f5f6f7', line: '#e0e3e7', muted: '#565e6b' },
   green:    { ink: '#0a1811', accent: '#34d399', glow: '#84cc16', wash: '#f4f7f3', line: '#dbe4d9', muted: '#54655a' },
-  beauty:   { ink: '#1c1219', accent: '#f472b6', glow: '#a78bfa', wash: '#fbf7f8', line: '#eedde2', muted: '#6b5560' },
+  // Light: the ground is warm white, the type is soft black, the accent is
+  // a silver-taupe. Hair and beauty sites live in cream and black — a dark
+  // plum with hot pink reads as a nightclub, not a salon.
+  beauty:   { mode: 'light', ink: '#1a1613', accent: '#8c7f72', glow: '#cbb9a6',
+              wash: '#f4efe7', ground: '#faf7f1', line: '#e6ded1', muted: '#6f665c' },
   food:     { ink: '#17100a', accent: '#fb923c', glow: '#f43f5e', wash: '#fcf8f2', line: '#ebe1d1', muted: '#6b5b48' },
   retail:   { ink: '#12141f', accent: '#818cf8', glow: '#22d3ee', wash: '#f7f7fa', line: '#e2e2ea', muted: '#5c6070' },
   clean:    { ink: '#07171f', accent: '#22d3ee', glow: '#38bdf8', wash: '#f3f8fa', line: '#d8e6ea', muted: '#4f6672' },
@@ -184,6 +188,8 @@ const NAMED_COLOURS = {
 
 export function resolvePalette(trade, brandColours = []) {
   const base = { ...PALETTES[tradeFamily(trade)] };
+  base.mode ??= 'dark';
+  base.ground ??= base.ink;
   for (const raw of brandColours) {
     const c = String(raw).trim().toLowerCase();
     const hit = /^#[0-9a-f]{3,8}$/i.test(c) ? c : NAMED_COLOURS[c];
@@ -825,11 +831,16 @@ const ANCHORS = [
  */
 function css(p, t) {
   const m = MOTION[t.motion] ?? MOTION.rise;
+  // A light-ground theme is not the dark one with colours swapped: the
+  // contrast, the button fills, the mesh opacity and the grain blend mode
+  // all have to change or it reads as a washed-out version of the dark.
+  const light = p.mode === 'light';
   return `
   *,*::before,*::after{box-sizing:border-box}
   :root{
     --ink:${p.ink}; --accent:${p.accent}; --glow:${p.glow ?? p.accent};
     --wash:${p.wash}; --line:${p.line}; --muted:${p.muted};
+    --ground:${p.ground ?? p.ink};
     --radius:${t.radius};
     --btn-radius:${t.btnRadius};
     --display:${t.display};
@@ -861,7 +872,7 @@ function css(p, t) {
      the pattern never visibly repeats. GPU-composited transforms only. */
   .mesh{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0}
   .mesh::before,.mesh::after{content:"";position:absolute;border-radius:50%;
-    filter:blur(70px);opacity:.55;will-change:transform}
+    filter:blur(70px);opacity:${light ? '.32' : '.55'};will-change:transform}
   .mesh::before{width:70vw;height:70vw;left:-15vw;top:-25vw;
     background:radial-gradient(circle at 50% 50%,var(--accent),transparent 68%);
     animation:drift-a 26s var(--ease) infinite alternate}
@@ -877,8 +888,9 @@ function css(p, t) {
 
   /* Film grain. An inline SVG turbulence — no request, no dependency —
      which is what stops a big flat gradient looking like a cheap CSS demo. */
-  .grain{position:absolute;inset:0;pointer-events:none;z-index:1;opacity:.42;
-    mix-blend-mode:overlay;
+  .grain{position:absolute;inset:0;pointer-events:none;z-index:1;
+    opacity:${light ? '.2' : '.42'};
+    mix-blend-mode:${light ? 'multiply' : 'overlay'};
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E")}
 
   ${ornamentCss(t.ornament)}
@@ -902,11 +914,11 @@ function css(p, t) {
        one block, then resolves to white as the hero scrolls away.
        background-COLOR, not the shorthand: the shorthand does not
        interpolate reliably here. */
-    header{background-color:var(--ink);border-bottom-color:transparent;
+    header{background-color:var(--ground);border-bottom-color:transparent;
       animation:header-solid 1s linear both;
       animation-timeline:scroll();animation-range:0 200px}
     @keyframes header-solid{
-      from{background-color:var(--ink);border-bottom-color:rgba(0,0,0,0)}
+      from{background-color:var(--ground);border-bottom-color:rgba(0,0,0,0)}
       to  {background-color:rgba(255,255,255,.92);border-bottom-color:var(--line)}}
 
     header .brand{animation:brand-on-dark 1s linear both;
@@ -915,10 +927,11 @@ function css(p, t) {
       animation-timeline:scroll();animation-range:0 200px}
     header .tel{animation:tel-on-dark 1s linear both;
       animation-timeline:scroll();animation-range:0 200px}
-    @keyframes brand-on-dark{from{color:#fff}to{color:var(--ink)}}
-    @keyframes nav-on-dark{from{color:rgba(255,255,255,.75)}to{color:var(--muted)}}
+    @keyframes brand-on-dark{from{color:${light ? 'var(--ink)' : '#fff'}}to{color:var(--ink)}}
+    @keyframes nav-on-dark{
+      from{color:${light ? 'var(--muted)' : 'rgba(255,255,255,.75)'}}to{color:var(--muted)}}
     @keyframes tel-on-dark{
-      from{background-color:rgba(255,255,255,.16)}
+      from{background-color:${light ? 'var(--ink)' : 'rgba(255,255,255,.16)'}}
       to  {background-color:var(--ink)}}
   }
   .bar{display:flex;align-items:center;gap:26px;min-height:74px;flex-wrap:wrap}
@@ -943,7 +956,8 @@ function css(p, t) {
 
   /* ---------- hero ---------- */
   .hero{position:relative;isolation:isolate;overflow:hidden;
-    background:var(--ink);color:#fff;padding:120px 0 118px;margin-top:-1px}
+    background:var(--ground);color:${light ? 'var(--ink)' : '#fff'};
+    padding:120px 0 118px;margin-top:-1px}
   .hero .wrap{position:relative;z-index:2}
   .hero-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,auto);
     gap:48px;align-items:center}
@@ -955,31 +969,41 @@ function css(p, t) {
   }
 
   .hero h1{max-width:14ch;overflow-wrap:break-word;
-    background:linear-gradient(170deg,#fff 30%,rgba(255,255,255,.80));
+    background:${light
+      ? 'linear-gradient(170deg,var(--ink) 40%,rgba(26,22,19,.72))'
+      : 'linear-gradient(170deg,#fff 30%,rgba(255,255,255,.80))'};
     -webkit-background-clip:text;background-clip:text;color:transparent}
-  .hero p.lede{font-size:clamp(1.05rem,2vw,1.3rem);color:rgba(255,255,255,.72);
+  .hero p.lede{font-size:clamp(1.05rem,2vw,1.3rem);
+    color:${light ? 'var(--muted)' : 'rgba(255,255,255,.72)'};
     max-width:52ch;margin:26px 0 38px;font-weight:400}
   .hero .eyebrow{color:var(--accent)}
 
   .cta{display:inline-flex;align-items:center;gap:10px;
-    background:var(--accent);color:#0b0b0b;padding:17px 32px;border-radius:var(--btn-radius);
+    background:${light ? 'var(--ink)' : 'var(--accent)'};
+    color:${light ? 'var(--ground)' : '#0b0b0b'};
+    padding:17px 32px;border-radius:var(--btn-radius);
     text-decoration:none;font-weight:700;font-size:1.02rem;letter-spacing:-.01em;
     transition:transform .25s var(--ease),box-shadow .25s var(--ease);
-    box-shadow:0 8px 30px -8px var(--accent)}
-  .cta:hover{transform:translateY(-3px);box-shadow:0 16px 44px -10px var(--accent)}
-  .cta.ghost{background:transparent;color:#fff;box-shadow:none;
-    border:1px solid rgba(255,255,255,.28);margin-left:12px}
-  .cta.ghost:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.5)}
+    box-shadow:${light ? '0 8px 26px -10px rgba(26,22,19,.5)' : '0 8px 30px -8px var(--accent)'}}
+  .cta:hover{transform:translateY(-3px);
+    box-shadow:${light ? '0 16px 40px -12px rgba(26,22,19,.55)' : '0 16px 44px -10px var(--accent)'}}
+  .cta.ghost{background:transparent;box-shadow:none;margin-left:12px;
+    color:${light ? 'var(--ink)' : '#fff'};
+    border:1px solid ${light ? 'var(--line)' : 'rgba(255,255,255,.28)'}}
+  .cta.ghost:hover{background:${light ? 'rgba(26,22,19,.04)' : 'rgba(255,255,255,.08)'};
+    border-color:${light ? 'var(--muted)' : 'rgba(255,255,255,.5)'}}
 
   /* Service ticker under the hero — motion that carries information. */
   .ticker{position:relative;z-index:2;margin-top:60px;
-    border-top:1px solid rgba(255,255,255,.12);padding-top:26px;
+    border-top:1px solid ${light ? 'var(--line)' : 'rgba(255,255,255,.12)'};
+    padding-top:26px;
     -webkit-mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent);
     mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent);
     overflow:hidden}
   .ticker-track{display:flex;gap:44px;width:max-content;
     animation:slide 32s linear infinite}
-  .ticker span{color:rgba(255,255,255,.5);font-weight:600;white-space:nowrap;
+  .ticker span{color:${light ? 'var(--muted)' : 'rgba(255,255,255,.5)'};
+    font-weight:600;white-space:nowrap;
     font-size:.95rem;letter-spacing:.02em}
   .ticker span::before{content:"◆";color:var(--accent);margin-right:14px;font-size:.6em;
     vertical-align:middle}
@@ -1051,7 +1075,8 @@ function css(p, t) {
   footer a{color:var(--muted)}
   footer a:hover{color:var(--accent)}
 
-  .draft{background:var(--accent);color:#0b0b0b;font-weight:600;
+  .draft{background:${light ? 'var(--ink)' : 'var(--accent)'};
+    color:${light ? 'var(--ground)' : '#0b0b0b'};font-weight:600;
     font-size:.8rem;padding:9px 18px;text-align:center;letter-spacing:.03em;
     position:relative;z-index:60;line-height:1.4}
 

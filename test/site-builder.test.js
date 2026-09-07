@@ -458,3 +458,44 @@ test('nothing animated is left with a zero-length or paused animation', () => {
     }
   }
 });
+
+/* ------------------------------------------------------------ light mode */
+
+test('a salon renders on a light ground, not a dark one', () => {
+  // Hair and beauty sites live in warm white, cream and soft black. A dark
+  // ground with a hot accent reads as a bar, not a salon.
+  const p = resolvePalette('Hairdressing and beauty', []);
+  assert.equal(p.mode, 'light');
+  const lum = (hex) => {
+    const n = Number.parseInt(hex.slice(1), 16);
+    return (((n >> 16) & 255) + ((n >> 8) & 255) + (n & 255)) / 3;
+  };
+  assert.ok(lum(p.ground) > 220, `ground should be near-white, got ${p.ground}`);
+  assert.ok(lum(p.ink) < 60, `type should be near-black, got ${p.ink}`);
+});
+
+test('light mode changes the treatment, not just the colours', () => {
+  const salon = renderSite({ ...brief, trade: 'Hairdressing and beauty' })['index.html'];
+  const roofer = renderSite({ ...brief, trade: 'Roofing' })['index.html'];
+
+  // Text on cream must be ink, not white-on-white.
+  assert.match(salon, /\.hero\{[^}]*color:var\(--ink\)/);
+  assert.match(roofer, /\.hero\{[^}]*color:#fff/);
+  // The mesh and grain have to be quieter on a light ground or they stain it.
+  assert.match(salon, /filter:blur\(70px\);opacity:\.32/);
+  assert.match(roofer, /filter:blur\(70px\);opacity:\.55/);
+  assert.match(salon, /mix-blend-mode:multiply/);
+  assert.match(roofer, /mix-blend-mode:overlay/);
+});
+
+test('every theme still declares a mode, so none renders undefined', () => {
+  for (const trade of ['Roofing', 'Vehicle maintenance and repair', 'Landscaping',
+                       'Hairdressing and beauty', 'Bakeries', 'Florists',
+                       'Cleaning of buildings', 'Architecture']) {
+    const p = resolvePalette(trade, []);
+    assert.ok(['light', 'dark'].includes(p.mode), `${trade}: ${p.mode}`);
+    assert.match(p.ground, /^#[0-9a-f]{6}$/i, `${trade} ground: ${p.ground}`);
+    const html = renderSite({ ...brief, trade })['index.html'];
+    assert.ok(!html.includes('undefined'), `${trade} leaked undefined`);
+  }
+});

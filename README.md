@@ -17,10 +17,16 @@ npm start                 # http://localhost:3000
 ```
 
 ```bash
+npm run doctor            # is it actually ready? makes real API calls
 npm run hunt              # find today's prospects now, without the server
 npm test                  # 334 tests
 npm run lint
 ```
+
+**Start with `npm run doctor`.** Everything else in this project is tested
+against stubs, which proves the code is right and proves nothing about whether
+your keys work. The doctor makes real calls, reports what came back, and ends
+with the single next thing to do. It never sends anything to anybody.
 
 The database is created automatically at `data/prospect-book.db` on first run.
 There is nothing else to set up for the lead tracker.

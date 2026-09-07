@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { networkInterfaces } from 'node:os';
 
 import { DB_PATH, db } from './db.js';
 import leads from './routes/leads.js';
@@ -131,6 +132,25 @@ const PORT = Number(process.env.PORT ?? 3000);
 const HOST = process.env.HOST ?? '127.0.0.1';
 
 /**
+ * The addresses a phone on the same network can use to reach the app.
+ *
+ * Every non-internal IPv4 the machine holds, as a full URL. This is only ever
+ * printed when the owner has opted into HOST=0.0.0.0, and it saves them
+ * reading their LAN IP out of ipconfig by hand.
+ */
+export function lanUrls(port = PORT) {
+  const urls = [];
+  for (const addrs of Object.values(networkInterfaces())) {
+    for (const a of addrs ?? []) {
+      // node <18 gives a string family, >=18 a number; accept both.
+      const four = a.family === 'IPv4' || a.family === 4;
+      if (four && !a.internal) urls.push(`http://${a.address}:${port}`);
+    }
+  }
+  return urls;
+}
+
+/**
  * The built-in scheduler. Checks every few minutes whether today's hunt is
  * due and has not already run, so the server does not need to be up at
  * exactly the right minute — only at some point during the day. For a machine
@@ -170,7 +190,14 @@ if (process.env.NODE_ENV !== 'test') {
     console.log(`\n  Prospect Book running at http://localhost:${PORT}`);
     console.log(`  Database: ${DB_PATH}`);
     if (HOST !== '127.0.0.1') {
-      console.log(`  WARNING: listening on ${HOST} — this app has no login. Do not expose it.`);
+      // Listening beyond loopback, so a phone on the same Wi-Fi can reach it.
+      // Print the exact address to type into the phone rather than making the
+      // owner dig their machine's IP out of ipconfig.
+      for (const url of lanUrls(PORT)) {
+        console.log(`  On the same Wi-Fi (e.g. your phone): ${url}`);
+      }
+      console.log('  Note: this has no password, so anyone on this Wi-Fi can open');
+      console.log('  it. Fine on your own home/office network; not on public Wi-Fi.');
     }
     console.log('');
   });

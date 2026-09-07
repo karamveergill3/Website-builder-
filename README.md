@@ -21,9 +21,24 @@ npm start                 # http://localhost:3000
 ```bash
 npm run doctor            # is it actually ready? makes real API calls
 npm run hunt              # find today's prospects now, without the server
-npm test                  # 377 tests
+npm test                  # tests
 npm run lint
 ```
+
+### Reaching it from your phone
+
+By default the app answers only on the machine it runs on
+(`http://localhost:3000`), because it has no password of its own. To open it
+on a phone — handy for tapping the WhatsApp hand-offs straight into the app —
+put the phone and the PC on the **same Wi-Fi** and add one line to `.env`:
+
+```
+HOST=0.0.0.0
+```
+
+Restart, and the terminal prints the exact address to type on the phone
+(e.g. `http://192.168.1.42:3000`). Anyone on that Wi-Fi can then reach it, so
+do this on your own home/office network — never on public Wi-Fi.
 
 **Start with `npm run doctor`.** Everything else in this project is tested
 against stubs, which proves the code is right and proves nothing about whether

@@ -2,11 +2,11 @@
   "name": "prospect-book",
   "version": "1.0.0",
   "private": true,
-  "description": "UK no-website business outreach tool \u2014 lead tracker, Google Places lead finder, Gmail sender",
+  "description": "UK no-website business outreach tool — lead tracker, Google Places lead finder, Gmail sender",
   "type": "module",
   "main": "server/index.js",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "start": "node server/index.js",
@@ -17,7 +17,7 @@
     "doctor": "node server/doctor.js"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^13.0.3",
     "dotenv": "^16.4.7",
     "express": "^4.21.2"
   },

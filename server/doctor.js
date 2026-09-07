@@ -37,9 +37,11 @@ const MARK = { ok: '  ok  ', warn: ' todo ', bad: ' STOP ' };
 
 function checkNode() {
   const major = Number(process.versions.node.split('.')[0]);
-  if (major >= 20) return ok('Node', `v${process.versions.node}`);
+  if (major >= 22) return ok('Node', `v${process.versions.node}`);
   bad('Node', `v${process.versions.node} — too old`,
-    'Install Node 20 or newer from nodejs.org. better-sqlite3 will not build on older versions.');
+    'Install Node 22 or newer from nodejs.org. better-sqlite3 needs it, and '
+    + 'below that npm falls back to compiling from source, which on Windows '
+    + 'means installing several gigabytes of Visual Studio build tools.');
 }
 
 function checkInstall() {

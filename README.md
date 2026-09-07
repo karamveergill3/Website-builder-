@@ -10,6 +10,8 @@ Single user, runs on your own machine, keeps everything in one SQLite file.
 
 ## Quick start
 
+Needs **Node 22 or newer**. On Windows, `cp` is `copy`.
+
 ```bash
 npm install
 cp .env.example .env

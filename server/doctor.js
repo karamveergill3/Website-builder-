@@ -124,10 +124,47 @@ async function checkPlaces() {
     return ok('Google Places',
       `live — ${places.length} businesses back, ${noSite} with no website`);
   } catch (err) {
-    return bad('Google Places', err.message,
-      'Usually one of: the Places API (New) is not enabled on the project, '
-      + 'billing is not on, or the key is restricted to the wrong referrer. '
-      + 'A server-side key needs no referrer restriction.');
+    // places.js already works out WHICH of the usual causes it is, from the
+    // reason Google returns. Printing a generic "usually one of three things"
+    // underneath that threw the answer away and left the reader guessing.
+    const CONSOLE = 'console.cloud.google.com';
+    const HINTS = {
+      API_NOT_ENABLED:
+        `Enable it: ${CONSOLE} → search "Places API (New)" → Enable. Make sure `
+        + 'the project selected in the top bar is the one the key belongs to. '
+        + 'It can take a minute to take effect after enabling.',
+      BILLING_DISABLED:
+        `Switch billing on: ${CONSOLE} → Billing → link a billing account to `
+        + 'this project. The free monthly credit covers far more than this '
+        + 'tool uses, but Google will not answer at all until a card is on '
+        + 'the account.',
+      KEY_SERVICE_BLOCKED:
+        `The key is restricted to the wrong APIs: ${CONSOLE} → APIs & Services `
+        + '→ Credentials → click the key → API restrictions → add "Places API '
+        + '(New)" to the allowed list.',
+      KEY_REFERRER_BLOCKED:
+        'The key has an HTTP referrer restriction, which only works for '
+        + 'browser requests. This runs on your machine, so set Application '
+        + 'restrictions to None.',
+      KEY_IP_BLOCKED:
+        'The key is restricted to specific IP addresses and yours is not one '
+        + 'of them. A home connection changes address, so set Application '
+        + 'restrictions to None rather than chasing it.',
+      KEY_INVALID:
+        'Copy the key again from Credentials — a truncated paste or a stray '
+        + 'space is the usual cause. Check there is no # at the start of the '
+        + 'line in .env.',
+      NO_API_KEY:
+        'The key never reached Google. Check the line in .env reads '
+        + 'GOOGLE_MAPS_API_KEY=... with no quotes and no spaces around the =.',
+      QUOTA_EXHAUSTED:
+        'The allocation is spent for now. Nothing to fix in the tool.',
+      RATE_LIMITED: 'Too many requests just now — wait a moment and run again.',
+      UPSTREAM: 'Google is having trouble, not you. Try again shortly.',
+    };
+    return bad('Google Places', err.message, HINTS[err.code]
+      ?? 'Check the key in .env, that Places API (New) is enabled on the '
+         + 'project, and that billing is on.');
   }
 }
 

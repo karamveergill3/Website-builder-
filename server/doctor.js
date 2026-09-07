@@ -152,13 +152,42 @@ async function checkGmail() {
 }
 
 async function checkIdentity() {
+  // Do exactly what booting the server does, first. These values live in
+  // .env and only reach the settings table when something copies them
+  // across; without this the preflight would tell you to put them in .env
+  // and then, on the very next run, report them missing.
+  const { seedIdentityFromEnv, envIdentityKeys } = await import('./lib/identity.js');
+  const seeded = seedIdentityFromEnv();
+
   const { missingIdentityFields } = await import('./lib/compliance.js');
   const missing = missingIdentityFields();
-  if (!missing.length) return ok('Your business details', 'complete');
-  bad('Your business details', `missing ${missing.map((f) => f.label).join(', ')}`,
+
+  if (!missing.length) {
+    return ok('Your business details',
+      seeded.length ? `complete (${seeded.length} read from .env just now)` : 'complete');
+  }
+
+  // "You have not written these down" and "they are in .env but a different
+  // spelling" are different problems with different fixes, and they looked
+  // identical before.
+  const inEnv = envIdentityKeys();
+  const detail = `missing ${missing.map((f) => f.label).join(', ')}`;
+
+  const NOTHING_IN_ENV =
     'No email can lawfully be produced until these are filled in — Companies '
-    + 'Act 2006 and PECR both require them. Start the server and fill in '
-    + 'Settings, or put them in .env as BIZ_* and they will be seeded on boot.');
+    + 'Act 2006 and PECR both require them. Add these four to .env, with no # '
+    + 'at the start of the line: BIZ_TRADING_NAME, BIZ_CONTACT_NAME, '
+    + 'BIZ_ADDRESS, BIZ_EMAIL. Then run this again. (Or start the server and '
+    + 'fill in Settings, which does the same job.)';
+
+  const SOMETHING_IN_ENV =
+    `.env sets ${inEnv.join(', ')} and those were just read in, but the fields `
+    + 'above are still empty — so one of the names is misspelt, or its line '
+    + 'still has a # at the start. Check those exact lines. Note that a value '
+    + 'already saved in Settings wins over .env, so if you set one by hand '
+    + 'earlier, .env will not override it.';
+
+  bad('Your business details', detail, inEnv.length ? SOMETHING_IN_ENV : NOTHING_IN_ENV);
 }
 
 async function checkHunt() {

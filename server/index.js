@@ -3,7 +3,7 @@ import express from 'express';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { DB_PATH, db, getSetting, setSetting } from './db.js';
+import { DB_PATH, db } from './db.js';
 import leads from './routes/leads.js';
 import templates from './routes/templates.js';
 import emails from './routes/emails.js';
@@ -11,6 +11,7 @@ import settings from './routes/settings.js';
 import suppression from './routes/suppression.js';
 import outreach from './routes/outreach.js';
 import mockups, { MOCKUP_ROOT } from './routes/mockups.js';
+import { seedIdentityFromEnv } from './lib/identity.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, '..', 'public');
@@ -21,40 +22,6 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.static(PUBLIC_DIR, { extensions: ['html'] }));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, db: DB_PATH }));
-
-/**
- * Copy business-identity values from env vars into the settings table on
- * boot, but only for keys the user has not already set through the UI.
- *
- * Lives in .env, which is gitignored — never in the repo, never in the
- * database dump when copied. Manual edits in Settings win: a filled row
- * is never overwritten.
- */
-const ENV_SEEDS = {
-  BIZ_TRADING_NAME:        'biz_name',
-  BIZ_CONTACT_NAME:        'biz_contact_name',
-  BIZ_ADDRESS:             'biz_address',
-  BIZ_EMAIL:               'biz_email',
-  BIZ_PHONE:               'biz_phone',
-  BIZ_WEBSITE:             'biz_website',
-  BIZ_COMPANY_NUMBER:      'biz_company_number',
-  BIZ_VAT_NUMBER:          'biz_vat_number',
-  BIZ_PLACE_OF_REGISTRATION: 'biz_place_of_registration',
-};
-function seedIdentityFromEnv() {
-  const seeded = [];
-  for (const [envKey, settingKey] of Object.entries(ENV_SEEDS)) {
-    const v = process.env[envKey]?.trim();
-    if (!v) continue;
-    const existing = getSetting(settingKey, '');
-    if (existing) continue; // manual edits win
-    setSetting(settingKey, v);
-    seeded.push(settingKey);
-  }
-  if (seeded.length) {
-    console.log(`[server] seeded ${seeded.length} identity setting(s) from .env: ${seeded.join(', ')}`);
-  }
-}
 
 /**
  * A sweep or a send that was in flight when the process died leaves rows that
@@ -193,7 +160,10 @@ async function startScheduler() {
 }
 
 if (process.env.NODE_ENV !== 'test') {
-  seedIdentityFromEnv();
+  const seeded = seedIdentityFromEnv();
+  if (seeded.length) {
+    console.log(`[server] seeded ${seeded.length} identity setting(s) from .env: ${seeded.join(', ')}`);
+  }
   recoverInterruptedWork();
   startScheduler();
   app.listen(PORT, HOST, () => {

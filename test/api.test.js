@@ -214,3 +214,32 @@ test('unknown API routes return JSON 404, not the SPA shell', async () => {
   assert.equal(r.status, 404);
   assert.equal(r.body.error, 'Unknown API endpoint');
 });
+
+/* ------------------------------------------------- identity seeding */
+
+test('the identity seed reads .env and never overwrites a manual edit', async () => {
+  const { seedIdentityFromEnv, envIdentityKeys } =
+    await import('../server/lib/identity.js');
+  const { getSetting, setSetting } = await import('../server/db.js');
+
+  // A value already set by hand must survive: .env is a convenience, not an
+  // authority. Settings is where the user's own decision lives.
+  setSetting('biz_name', 'Set By Hand');
+  process.env.BIZ_TRADING_NAME = 'From Env';
+  process.env.BIZ_PLACE_OF_REGISTRATION = 'England and Wales';
+
+  const seeded = seedIdentityFromEnv();
+  assert.equal(getSetting('biz_name'), 'Set By Hand', 'a manual edit wins');
+  assert.ok(seeded.includes('biz_place_of_registration'), 'an empty one is filled');
+  assert.equal(getSetting('biz_place_of_registration'), 'England and Wales');
+
+  // Seeding twice must be a no-op, since the doctor and the server both run it.
+  assert.deepEqual(seedIdentityFromEnv(), [], 'idempotent');
+
+  assert.ok(envIdentityKeys().includes('BIZ_TRADING_NAME'),
+    'envIdentityKeys reports what is actually set, so the doctor can tell '
+    + '"you never wrote these down" apart from "they are there but misspelt"');
+
+  delete process.env.BIZ_TRADING_NAME;
+  delete process.env.BIZ_PLACE_OF_REGISTRATION;
+});

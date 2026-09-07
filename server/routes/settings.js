@@ -25,6 +25,7 @@ export const ALLOWED_KEYS = new Set([
   'hunt_enabled', 'hunt_trades', 'hunt_areas', 'hunt_daily_target', 'hunt_hour',
   'hunt_max_places_requests', 'hunt_max_register_pages', 'hunt_max_per_trade',
   'hunt_require_no_website', 'hunt_include_unlisted', 'hunt_require_phone',
+  'hunt_require_mobile',
   // Lead search defaults (Phase 2)
   'default_areas', 'default_region_code',
   // Places pricing, so Google's repricing does not need a code change
@@ -67,6 +68,10 @@ export const DEFAULTS = {
   // Off by default: it needs the Google key, and turning it on without one
   // would make a fresh install refuse to run.
   hunt_require_phone: '0',
+  // Tighter still: only 07 numbers, the ones WhatsApp and SMS reach. Off by
+  // default for the same reason as the line above, and because a landline is
+  // still a business you can ring.
+  hunt_require_mobile: '0',
   hunt_include_unlisted: '1',
   default_region_code: 'GB',
   optout_line: DEFAULT_OPTOUT_LINE,

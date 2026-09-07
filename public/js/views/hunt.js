@@ -174,6 +174,17 @@ export default async function huntView(root, _p, { refresh }) {
             <label for="h-phone">Only businesses with a phone number
               ${!s.places_configured ? html`<span class="flag">needs a Google key</span>` : ''}</label>
           </div>
+          <div class="check" style="margin-top:6px;margin-left:22px">
+            <input id="h-mobile" name="hunt_require_mobile" type="checkbox"
+                   ${s.places_configured && c.requireMobile ? 'checked' : ''}
+                   ${s.places_configured ? '' : 'disabled'}>
+            <label for="h-mobile">…and only mobiles, starting 07
+              <span class="tip" style="display:block;font-weight:400">
+                WhatsApp and SMS reach 07 numbers and nothing else. A landline is a
+                phone call in office hours — which is the one channel that costs you
+                an hour a day. Tightest filter here: expect far fewer, all of them
+                messageable.</span></label>
+          </div>
           <p class="tip" style="margin-top:4px">
             Neither Companies House nor Google holds an email address, so there
             is no "must have an email" to tick — nothing could satisfy it.
@@ -205,6 +216,7 @@ export default async function huntView(root, _p, { refresh }) {
           <thead><tr><th class="nw">When</th><th>How</th><th class="num">Found</th>
             <th class="num">Seen</th><th class="num">Had a site</th>
             <th class="num" title="Skipped: Google held no phone number">No phone</th>
+            <th class="num" title="Skipped: the only number was a landline, which WhatsApp and SMS cannot reach">Landline</th>
             <th class="num" title="Skipped: the address matched but the town did not">Wrong town</th>
             <th class="num">Requests</th>
             <th>Covered</th></tr></thead>
@@ -217,6 +229,7 @@ export default async function huntView(root, _p, { refresh }) {
                 <td class="meta num">${r.companies_seen}</td>
                 <td class="meta num">${r.had_website}</td>
                 <td class="meta num">${r.no_contact ?? 0}</td>
+                <td class="meta num">${r.not_mobile ?? 0}</td>
                 <td class="meta num">${r.wrong_town ?? 0}</td>
                 <td class="meta num">${r.register_requests + r.places_requests}</td>
                 <td class="meta">${r.error

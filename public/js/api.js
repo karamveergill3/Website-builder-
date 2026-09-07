@@ -44,6 +44,7 @@ export const api = {
     update:  (id, body)   => request('PATCH', `/api/leads/${id}`, body),
     remove:  (id)         => request('DELETE', `/api/leads/${id}`),
     bulkStatus: (ids, status) => request('POST', '/api/leads/bulk-status', { ids, status }),
+    bulkDelete: (body)        => request('POST', '/api/leads/bulk-delete', body),
   },
   templates: {
     list:   ()          => request('GET', '/api/templates'),

@@ -80,7 +80,7 @@ test('the hunt form covers the options the hunt actually reads', () => {
   for (const key of [
     'hunt_trades', 'hunt_areas', 'hunt_daily_target', 'hunt_hour',
     'hunt_max_per_trade', 'hunt_require_no_website', 'hunt_require_phone',
-    'hunt_include_unlisted', 'hunt_enabled',
+    'hunt_require_mobile', 'hunt_include_unlisted', 'hunt_enabled',
   ]) {
     assert.ok(names.has(key), `the Hunt screen has no control for ${key}`);
   }

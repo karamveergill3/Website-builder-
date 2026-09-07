@@ -74,7 +74,9 @@ router.post('/run', wrap((req, res) => {
   if ((cfg.requireNoWebsite || cfg.requirePhone) && !placesConfigured()) {
     const wanted = [
       cfg.requireNoWebsite && '"only businesses with no website"',
-      cfg.requirePhone && '"only businesses with a phone number"',
+      cfg.requireMobile
+        ? '"only businesses with a mobile number"'
+        : cfg.requirePhone && '"only businesses with a phone number"',
     ].filter(Boolean).join(' and ');
     throw badRequest(
       `${wanted} needs GOOGLE_MAPS_API_KEY — Google is the only source for `

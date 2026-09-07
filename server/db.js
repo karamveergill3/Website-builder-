@@ -727,6 +727,17 @@ const MIGRATIONS = [
     `,
     run: backfillLedgerNameKeys,
   },
+  {
+    name: '022_hunt_runs_not_mobile',
+    up: `
+      -- Companies skipped because the only number Google held was a landline.
+      -- WhatsApp and SMS reach 07 numbers and nothing else, so a landline is
+      -- a call and only a call. Counted separately from no_contact: "Google
+      -- had no number" and "Google had a number you cannot message" are
+      -- different problems with different answers.
+      ALTER TABLE hunt_runs ADD COLUMN not_mobile INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 function migrate() {

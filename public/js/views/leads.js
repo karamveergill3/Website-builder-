@@ -132,6 +132,10 @@ export default async function leadsView(root, params, { refresh }) {
     Object.entries(VIEWS).map(([k, f]) => [k, allLeads.filter(f).length])
   );
 
+  // Whether the screen is showing a subset. It decides what "delete" means:
+  // deleting what you can see is the only reading that cannot surprise you.
+  const filtered = Boolean(q) || status !== 'all' || Boolean(view);
+
   const go = (key, value) => {
     const next = new URLSearchParams({ status, q, sort, view });
     if (!value || value === 'all') next.delete(key); else next.set(key, value);
@@ -178,6 +182,10 @@ export default async function leadsView(root, params, { refresh }) {
         <option value="contacted" ${sort === 'contacted' ? 'selected' : ''}>Last contacted</option>
       </select>
       <button class="primary" data-act="add">New lead</button>
+      ${leads.length ? html`
+        <button class="danger" data-act="wipe"
+          title="${filtered ? 'Delete the leads this filter is showing' : 'Delete every lead'}"
+          >${filtered ? `Delete these ${leads.length}` : 'Delete all'}</button>` : ''}
     </div>
 
     <div id="bulk" hidden class="bar" style="background:var(--green-lift);border:1px solid #bcd0c0;
@@ -193,6 +201,7 @@ export default async function leadsView(root, params, { refresh }) {
       <button data-act="bulk-site">Check websites</button>
       ${canQueue ? html`<button class="primary" data-act="bulk-queue">Queue emails</button>` : ''}
       <button data-act="bulk-find">Find contacts</button>
+      <button class="danger" data-act="bulk-del">Delete</button>
       <button class="mini ghost" data-act="bulk-clear">Clear</button>
     </div>
 
@@ -317,6 +326,68 @@ export default async function leadsView(root, params, { refresh }) {
     await api.leads.remove(el.dataset.id);
     toast('Deleted');
     refresh();
+  });
+
+  /**
+   * Delete a batch of leads.
+   *
+   * The two things that survive are the point of the dialog, not small print:
+   * an opt-out stays blocked, and a company already approached stays on the
+   * no-repeat list. What the tick changes is only the companies never
+   * contacted — those can be forgotten, so tomorrow's hunt is allowed to find
+   * them again. Without the tick, clearing the list quietly retires every
+   * business on it for good.
+   */
+  async function wipe({ ids, all, count }) {
+    const what = all ? `all ${count} leads` : `${count} lead${count === 1 ? '' : 's'}`;
+    const answer = await modal({
+      title: all ? 'Delete every lead' : `Delete ${count} lead${count === 1 ? '' : 's'}`,
+      body: html`
+        <p style="margin:0 0 10px">This deletes ${what}. It cannot be undone.</p>
+        <p class="tip" style="margin:0 0 12px">
+          Two records outlive the rows on purpose: anyone opted out stays blocked,
+          and any company already approached stays on the do-not-approach-again
+          list. Sent history is kept.
+        </p>
+        <div class="check">
+          <input id="f-forget" name="forget" type="checkbox">
+          <label for="f-forget">Let the hunt find these businesses again
+            <span class="tip" style="display:block;font-weight:400">
+              Clears the "already found" record for the ones you have never
+              contacted, so they can come back on a future run. Anyone you have
+              already messaged stays blocked either way.</span></label>
+        </div>`,
+      footer: html`
+        <button type="button" data-close>Cancel</button>
+        <button type="submit" class="danger">Delete ${count}</button>`,
+      // modal() focuses the first field, which here is the tick box — and
+      // Enter on a focused checkbox submits the form. On a dialog that empties
+      // the list, the key you press without thinking must not be the one that
+      // does it. The microtask runs after modal()'s own focus call.
+      onMount: (r) => queueMicrotask(() => r.querySelector('[data-close]')?.focus()),
+      onSubmit: (d) => ({ forget: Boolean(d.forget) }),
+    });
+    if (!answer) return;
+
+    const res = await api.leads.bulkDelete({
+      ...(all ? { all: true } : { ids }),
+      forget: answer.forget,
+    });
+    toast(`Deleted ${res.deleted}`
+      + (res.forgotten ? ` · ${res.forgotten} can be found again` : '')
+      + (res.kept ? ` · ${res.kept} stay blocked, already approached` : ''),
+      { ms: 6000 });
+    refresh();
+  }
+
+  on(root, 'click', '[data-act="wipe"]', () => wipe(filtered
+    ? { ids: leads.map((l) => l.id), count: leads.length }
+    : { all: true, count: stats.total }));
+
+  on(root, 'click', '[data-act="bulk-del"]', () => {
+    const ids = picked().map((c) => Number(c.value));
+    if (!ids.length) return toast('Pick some leads first', { error: true });
+    return wipe({ ids, count: ids.length });
   });
 
   on(root, 'click', '[data-act="write"]', (_e, el) => { location.hash = `/compose?lead=${el.dataset.id}`; });

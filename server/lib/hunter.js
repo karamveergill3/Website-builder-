@@ -55,9 +55,28 @@ export function huntConfig() {
     maxRegisterPages: num('hunt_max_register_pages', 80),
     maxPerTrade: num('hunt_max_per_trade', 3),
     requireNoWebsite: getSetting('hunt_require_no_website', '1') === '1',
-    requirePhone: getSetting('hunt_require_phone', '0') === '1',
+    // A mobile is a phone, so asking for one asks for the other. Left as two
+    // independent flags, ticking "must be a mobile" while "must have a phone"
+    // was off would skip the Places lookup entirely and then reject every
+    // company for having no number — a filter that finds nobody, for ever,
+    // and says nothing about why.
+    requirePhone: getSetting('hunt_require_phone', '0') === '1'
+      || getSetting('hunt_require_mobile', '0') === '1',
+    requireMobile: getSetting('hunt_require_mobile', '0') === '1',
     includeUnlisted: getSetting('hunt_include_unlisted', '1') === '1',
   };
+}
+
+/**
+ * Is this a number the free channels can actually reach?
+ *
+ * WhatsApp and SMS go to 07 mobiles and nowhere else. A landline is a phone
+ * call in office hours and nothing more, which is the one channel that costs
+ * the owner an hour of his day per twenty prospects.
+ */
+export function isMobileNumber(phone) {
+  const n = normalisePhone(phone);
+  return n.ok && n.mobile === true;
 }
 
 /**
@@ -352,7 +371,9 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
   if ((cfg.requireNoWebsite || cfg.requirePhone) && !placesConfigured()) {
     const wanted = [
       cfg.requireNoWebsite && 'only businesses with no website',
-      cfg.requirePhone && 'only businesses with a phone number',
+      cfg.requireMobile
+        ? 'only businesses with a mobile number'
+        : cfg.requirePhone && 'only businesses with a phone number',
     ].filter(Boolean).join(' and ');
     throw new Error(
       `The hunt is set to find ${wanted}, and Google is the only source for `
@@ -370,6 +391,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
   const counters = {
     found: 0, companies_seen: 0, already_known: 0, had_website: 0,
     no_contact: 0,
+    not_mobile: 0,
     wrong_town: 0,
     places_requests: 0, register_requests: 0,
     maxPlacesRequests: cfg.maxPlacesRequests,
@@ -382,7 +404,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
     db.prepare(
       `UPDATE hunt_runs SET found=@found, companies_seen=@companies_seen,
          already_known=@already_known, had_website=@had_website,
-         no_contact=@no_contact, wrong_town=@wrong_town,
+         no_contact=@no_contact, not_mobile=@not_mobile, wrong_town=@wrong_town,
          places_requests=@places_requests, register_requests=@register_requests,
          areas_covered=@areas, finished_at=@finished, error=@error
        WHERE id=@id`
@@ -392,6 +414,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
       already_known: counters.already_known,
       had_website: counters.had_website,
       no_contact: counters.no_contact,
+      not_mobile: counters.not_mobile,
       wrong_town: counters.wrong_town,
       places_requests: counters.places_requests,
       register_requests: counters.register_requests,
@@ -524,6 +547,14 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
         // so the run can say "found 6, skipped 40 with no phone" rather than
         // just coming up short and looking broken.
         if (cfg.requirePhone && !verdict.phone) { counters.no_contact++; continue; }
+
+        // A landline is a phone call and nothing else. WhatsApp and SMS —
+        // the two channels that cost nothing and get read — only reach 07
+        // numbers, so when those are the plan, an 0121 number is not a lead.
+        if (cfg.requireMobile && !isMobileNumber(verdict.phone)) {
+          counters.not_mobile++;
+          continue;
+        }
 
         try {
           importLead(company, verdict, t.trade);

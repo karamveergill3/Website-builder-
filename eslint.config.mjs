@@ -11,7 +11,7 @@ export default [
         document: 'readonly', window: 'readonly', location: 'readonly',
         navigator: 'readonly', FormData: 'readonly', localStorage: 'readonly',
         HTMLElement: 'readonly', Element: 'readonly', URL: 'readonly',
-        AbortController: 'readonly',
+        AbortController: 'readonly', queueMicrotask: 'readonly',
       },
     },
     rules: {

@@ -68,11 +68,11 @@ const company = (name, number, over = {}) => ({
   ...over,
 });
 
-const place = (name, { website } = {}) => ({
+const place = (name, { website, phone = '01943 000000' } = {}) => ({
   id: `place-${name.replace(/\W/g, '').toLowerCase()}`,
   displayName: { text: name },
   formattedAddress: '1 High St, Otley',
-  nationalPhoneNumber: '01943 000000',
+  ...(phone ? { nationalPhoneNumber: phone } : {}),
   ...(website ? { websiteUri: website } : {}),
 });
 
@@ -91,6 +91,8 @@ const configure = (over = {}) => put('/api/settings', {
   hunt_max_register_pages: '80',
   hunt_max_places_requests: '80',
   hunt_max_per_trade: '3',
+  hunt_require_phone: '0',
+  hunt_require_mobile: '0',
   ...over,
 });
 
@@ -804,6 +806,76 @@ test('require-phone without a Google key is refused, and says so plainly', async
     const res = await post('/api/hunt/run', {});
     assert.equal(res.status, 400);
     assert.match(res.body.error, /GOOGLE_MAPS_API_KEY/);
+    assert.equal(calls.register, 0, 'nothing spent finding out');
+  });
+});
+
+test('require-mobile keeps 07 numbers and drops landlines', async () => {
+  // WhatsApp and SMS reach 07 and nothing else, so when those are the plan an
+  // 0121 number is not a lead — and the run has to say that is why, or a
+  // short day looks like a broken hunt.
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_daily_target: '10',
+    hunt_require_mobile: '1',
+    hunt_require_no_website: '0',
+  });
+
+  register = [{ body: { hits: 3, items: [
+    company('MOBILE ROOFING LIMITED', '61000301'),
+    company('LANDLINE ROOFING LIMITED', '61000302'),
+    company('ALSO MOBILE LIMITED', '61000303'),
+  ] } }];
+  places = [{ places: [
+    place('Mobile Roofing', { phone: '07700 900123' }),
+    place('Landline Roofing', { phone: '0121 496 0000' }),
+    place('Also Mobile', { phone: '07700 900456' }),
+  ] }];
+
+  const run = await runAndWait();
+  assert.equal(run.error ?? null, null);
+  assert.equal(run.found, 2, 'only the two on a mobile');
+  assert.equal(run.not_mobile, 1, 'and it says the third was a landline');
+  assert.equal(run.no_contact, 0, 'which is not the same as having no number');
+
+  for (const l of (await get('/api/leads')).body.leads) {
+    assert.match(l.phone, /^07/, `${l.business_name} was filed on a landline`);
+  }
+});
+
+test('require-mobile asks Google even with the phone box unticked', async () => {
+  // A mobile is a phone. Treating the two flags as independent meant the
+  // Places lookup was skipped, every company arrived with no number, and the
+  // mobile filter then rejected the lot — a filter that finds nobody for ever
+  // and never says why.
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_daily_target: '2',
+    hunt_require_mobile: '1',
+    hunt_require_phone: '0',
+    hunt_require_no_website: '0',
+  });
+  register = [{ body: { hits: 1, items: [company('TEXTABLE LIMITED', '61000401')] } }];
+  places = [{ places: [place('Textable', { phone: '07700 900789' })] }];
+
+  const run = await runAndWait();
+  assert.equal(run.places_requests, 1, 'Google is asked for the number');
+  assert.equal(run.found, 1);
+  assert.match((await get('/api/leads')).body.leads[0].phone, /^07/);
+});
+
+test('require-mobile without a Google key is refused, naming the mobile filter', async () => {
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_require_mobile: '1', hunt_require_phone: '0', hunt_require_no_website: '0',
+  });
+  await withoutPlacesKey(async () => {
+    const res = await post('/api/hunt/run', {});
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /mobile number/);
     assert.equal(calls.register, 0, 'nothing spent finding out');
   });
 });

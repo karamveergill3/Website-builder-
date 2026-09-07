@@ -5,7 +5,7 @@ import {
 } from '../lib/http.js';
 import { ENTITY_TYPES, sendability, looksCorporate } from '../lib/pecr.js';
 import { isSuppressed, suppress } from '../lib/suppression.js';
-import { recordContact, recordFound, recontactCheck } from '../lib/recontact.js';
+import { recordContact, recordFound, recontactCheck, ledgerFor } from '../lib/recontact.js';
 
 export const STATUSES = ['new', 'sent', 'replied', 'won', 'lost'];
 
@@ -283,10 +283,95 @@ router.patch('/:id', wrap((req, res) => {
   res.json({ lead: toApi(db.prepare('SELECT * FROM leads WHERE id = ?').get(existing.id)) });
 }));
 
+/**
+ * The bookkeeping a lead needs before its row goes.
+ *
+ * An opt-out is recorded against the address, and the PATCH that sets the
+ * flag does that — but only with an address to record. Most no-website trades
+ * are phone-only when they opt out, so the flag gets set with nothing to
+ * suppress, and if an email turns up afterwards the opt-out has no way to
+ * follow it. Checking again on the way out is the last chance to catch that.
+ *
+ * Returns whether an address was suppressed, so a bulk caller can report it.
+ */
+function retire(lead) {
+  if (!lead || lead.opted_out !== 1 || !lead.email) return false;
+  return suppress(lead.email, {
+    businessName: lead.business_name,
+    reason: 'opted out, then the lead was deleted',
+  });
+}
+
 router.delete('/:id', wrap((req, res) => {
-  const info = db.prepare('DELETE FROM leads WHERE id = ?').run(req.params.id);
-  if (info.changes === 0) throw notFound('Lead not found');
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+  if (!lead) throw notFound('Lead not found');
+  retire(lead);
+  db.prepare('DELETE FROM leads WHERE id = ?').run(lead.id);
   res.status(204).end();
+}));
+
+/**
+ * POST /api/leads/bulk-delete — clear the list, or the part of it on screen.
+ *
+ * Two things deliberately outlive the rows:
+ *
+ *   suppression_list — an opted-out lead is suppressed on the way out, the
+ *     same as the single-lead path does, or the opt-out dies with the row and
+ *     the next import makes them contactable again.
+ *
+ *   company_ledger  — the record of who has already been approached. Wiping
+ *     the leads is how you say "this list is no good"; it is not a licence to
+ *     cold-message the same roofer a second time, which is what earns the
+ *     complaint that costs the mailbox.
+ *
+ * `forget` is the escape hatch, and it is deliberately narrow: it drops the
+ * ledger rows for companies that have never been contacted, so the hunt can
+ * find them again. A company with a contact date keeps its row whatever is
+ * asked, because the whole point of that date is that it cannot be argued
+ * away by deleting something.
+ */
+router.post('/bulk-delete', wrap((req, res) => {
+  const all = bool(req.body?.all);
+  const forget = bool(req.body?.forget);
+  const ids = Array.isArray(req.body?.ids)
+    ? req.body.ids.map(Number).filter(Number.isFinite)
+    : [];
+  if (!all && ids.length === 0) {
+    throw badRequest('Pass ids, or all: true to clear the whole list.');
+  }
+
+  // One row at a time rather than an IN list: SQLite caps a statement at 999
+  // parameters, and "delete all" on a list of a thousand-odd is exactly the
+  // case this exists for.
+  const one = db.prepare('SELECT * FROM leads WHERE id = ?');
+  const drop = db.prepare('DELETE FROM leads WHERE id = ?');
+  const unfile = db.prepare(
+    'DELETE FROM company_ledger WHERE company_key = ? AND contacted_at IS NULL'
+  );
+
+  const out = { deleted: 0, suppressed: 0, forgotten: 0, kept: 0 };
+
+  const run = db.transaction((rows) => {
+    for (const id of rows) {
+      const lead = one.get(id);
+      if (!lead) continue;
+
+      if (retire(lead)) out.suppressed += 1;
+
+      // Read the ledger row before the lead goes: ledgerFor() needs the
+      // lead's name and town to reach a row filed under the weaker key.
+      const filed = forget ? ledgerFor(lead) : null;
+      drop.run(id);
+      out.deleted += 1;
+
+      if (!filed) continue;
+      if (filed.contacted_at) { out.kept += 1; continue; }
+      out.forgotten += unfile.run(filed.company_key).changes;
+    }
+  });
+
+  run(all ? db.prepare('SELECT id FROM leads').all().map((r) => r.id) : ids);
+  res.json(out);
 }));
 
 /** POST /api/leads/bulk-status — for multi-select actions in the list. */

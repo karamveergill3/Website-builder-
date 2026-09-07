@@ -25,6 +25,30 @@ is retired, and re-opened a month later — new companies incorporate all the ti
 **It never sends anything.** It finds and files. Sending stays behind the
 confirmation in the Outbox.
 
+## Leads you can actually contact
+
+Neither source holds an email address:
+
+| | Phone | Email |
+|---|---|---|
+| Companies House | no | no |
+| Google Places | **yes** | no |
+
+So there is no "must have an email" option, and there cannot be — nothing
+could satisfy it. Emails are found afterwards, one lead at a time, with **Find
+contacts** on the Reach screen, which searches directory listings. For a
+business with no website that often comes back with a phone and nothing else.
+
+**"Only businesses with a phone number"** is the one that can be enforced, and
+it needs the Google key. Worth understanding why: Google used to be asked only
+for the website check, so with that off a lead arrived with no phone and no
+email — nothing to contact it by at all, short of posting a letter to a
+registered office that is frequently the accountant's. Google is now asked
+whenever we need something only it holds.
+
+Companies skipped for having no number are counted separately, so a short day
+reads "found 6, 40 with no phone" rather than just coming up short.
+
 ## A mixed list, not twenty roofers
 
 Targets are created trade-major — every town for roofers, then every town for

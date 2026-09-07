@@ -514,7 +514,7 @@ test('the no-website filter is refused without a Google key, by route AND by hun
       (err) => {
         assert.match(err.message, /no website/i);
         assert.match(err.message, /GOOGLE_MAPS_API_KEY/);
-        assert.match(err.message, /untick/i, 'and says what to do instead');
+        assert.match(err.message, /turn those options off/i, 'and says what to do instead');
         return true;
       },
       'the unattended path refuses too'
@@ -660,4 +660,92 @@ test('the cap lifts rather than starving a short trade list', async () => {
 
   const run = await runAndWait();
   assert.equal(run.found, 10, 'the target is still met');
+});
+
+/* ------------------------------------------------------- contactability */
+
+/*
+ * Company numbers must be unique across this whole file, not just within a
+ * test. clearLeads() empties the leads table but deliberately NOT
+ * company_ledger — that table exists to outlive a deleted lead — so a number
+ * an earlier test filed is rejected as already-seen, and the run under test
+ * quietly finds nothing.
+ */
+
+test('require-phone files only companies Google holds a number for', async () => {
+  // The whole point: a lead with no phone and no email cannot be contacted by
+  // any means this tool offers.
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_daily_target: '10',
+    hunt_require_phone: '1',
+    hunt_require_no_website: '0',
+  });
+
+  register = [{ body: { hits: 3, items: [
+    company('REACHABLE ROOFING LIMITED', '61000001'),
+    company('SILENT ROOFING LIMITED', '61000002'),
+    company('ALSO REACHABLE LIMITED', '61000003'),
+  ] } }];
+  places = [{ places: [
+    place('Reachable Roofing'),          // the stub gives every place a phone
+    place('Also Reachable'),
+  ] }];                                   // Silent Roofing is not listed
+
+  const run = await runAndWait();
+  assert.equal(run.error ?? null, null);
+  assert.equal(run.found, 2, 'only the two Google knows a number for');
+  assert.equal(run.no_contact, 1, 'and it says why the third was skipped');
+
+  const names = (await get('/api/leads')).body.leads.map((l) => l.business_name);
+  assert.ok(!names.includes('SILENT ROOFING LIMITED'));
+  for (const l of (await get('/api/leads')).body.leads) {
+    assert.ok(l.phone, `${l.business_name} was filed without a phone`);
+  }
+});
+
+test('require-phone asks Google even when the website filter is off', async () => {
+  // Places used to be consulted only for the website check, so with that off
+  // a lead arrived with no phone number at all — nothing to contact it by.
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_daily_target: '2', hunt_require_phone: '1', hunt_require_no_website: '0',
+  });
+  register = [{ body: { hits: 1, items: [company('PHONE ONLY LIMITED', '61000101')] } }];
+  places = [{ places: [place('Phone Only')] }];
+
+  const run = await runAndWait();
+  assert.equal(run.places_requests, 1, 'Google is asked for the number');
+  assert.equal(run.found, 1);
+  assert.ok((await get('/api/leads')).body.leads[0].phone);
+});
+
+test('require-phone does not reintroduce the website filter', async () => {
+  // judge() answers both questions from one page. Wanting the phone must not
+  // silently start discarding companies that have a website.
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_daily_target: '5', hunt_require_phone: '1', hunt_require_no_website: '0',
+  });
+  register = [{ body: { hits: 1, items: [company('HAS A SITE LIMITED', '61000201')] } }];
+  places = [{ places: [place('Has A Site', { website: 'https://hasasite.co.uk' })] }];
+
+  const run = await runAndWait();
+  assert.equal(run.found, 1, 'a website is irrelevant when only the phone was asked for');
+  assert.equal(run.had_website, 0);
+});
+
+test('require-phone without a Google key is refused, and says so plainly', async () => {
+  stub();
+  await clearLeads();
+  await configure({ hunt_require_phone: '1', hunt_require_no_website: '0' });
+  await withoutPlacesKey(async () => {
+    const res = await post('/api/hunt/run', {});
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /GOOGLE_MAPS_API_KEY/);
+    assert.equal(calls.register, 0, 'nothing spent finding out');
+  });
 });

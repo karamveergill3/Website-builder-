@@ -168,6 +168,20 @@ export default async function huntView(root, _p, { refresh }) {
               sifting.
             </p>` : ''}
           <div class="check" style="margin-top:8px">
+            <input id="h-phone" name="hunt_require_phone" type="checkbox"
+                   ${s.places_configured && c.requirePhone ? 'checked' : ''}
+                   ${s.places_configured ? '' : 'disabled'}>
+            <label for="h-phone">Only businesses with a phone number
+              ${!s.places_configured ? html`<span class="flag">needs a Google key</span>` : ''}</label>
+          </div>
+          <p class="tip" style="margin-top:4px">
+            Neither Companies House nor Google holds an email address, so there
+            is no "must have an email" to tick — nothing could satisfy it.
+            The phone number comes from the Google listing, which is also the
+            only reason a lead arrives contactable at all. Emails are found
+            afterwards, per lead, with <b>Find contacts</b> on the Reach screen.
+          </p>
+          <div class="check" style="margin-top:8px">
             <input id="h-unlisted" name="hunt_include_unlisted" type="checkbox" ${c.includeUnlisted ? 'checked' : ''}>
             <label for="h-unlisted">Include companies Google has never heard of
               <span class="tip" style="display:block;font-weight:400">
@@ -189,7 +203,9 @@ export default async function huntView(root, _p, { refresh }) {
         <div class="panel-hd"><h3 class="grow">Recent runs</h3></div>
         <div class="scroll-x"><table class="rows">
           <thead><tr><th class="nw">When</th><th>How</th><th class="num">Found</th>
-            <th class="num">Seen</th><th class="num">Had a site</th><th class="num">Requests</th>
+            <th class="num">Seen</th><th class="num">Had a site</th>
+            <th class="num" title="Skipped: Google held no phone number">No phone</th>
+            <th class="num">Requests</th>
             <th>Covered</th></tr></thead>
           <tbody>
             ${s.runs.map((r) => html`
@@ -199,6 +215,7 @@ export default async function huntView(root, _p, { refresh }) {
                 <td class="num"><b>${r.found}</b><span class="meta">/${r.target}</span></td>
                 <td class="meta num">${r.companies_seen}</td>
                 <td class="meta num">${r.had_website}</td>
+                <td class="meta num">${r.no_contact ?? 0}</td>
                 <td class="meta num">${r.register_requests + r.places_requests}</td>
                 <td class="meta">${r.error
                   ? html`<span style="color:var(--clay)">${r.error}</span>`

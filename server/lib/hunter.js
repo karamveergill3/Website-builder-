@@ -55,6 +55,7 @@ export function huntConfig() {
     maxRegisterPages: num('hunt_max_register_pages', 80),
     maxPerTrade: num('hunt_max_per_trade', 3),
     requireNoWebsite: getSetting('hunt_require_no_website', '1') === '1',
+    requirePhone: getSetting('hunt_require_phone', '0') === '1',
     includeUnlisted: getSetting('hunt_include_unlisted', '1') === '1',
   };
 }
@@ -198,8 +199,13 @@ export function judge(company, byName, { includeUnlisted = true } = {}) {
   const key = normaliseName(company.company_name);
   if (!key) return { prospect: false, reason: 'no usable name' };
 
+  // The phone is reported either way. It is a fact about the business, not a
+  // reward for lacking a website — and withholding it when a site exists made
+  // "only businesses with a phone number" silently reintroduce the website
+  // filter, because a listed company with a site arrived with no number and
+  // was dropped for having no way to reach it.
   const found = (info) => (info.has_website
-    ? { prospect: false, reason: 'has a website' }
+    ? { prospect: false, reason: 'has a website', phone: info.phone }
     : { prospect: true, has_website: 0, evidence: 'places-no-website', phone: info.phone });
 
   const exact = byName.get(key);
@@ -290,12 +296,16 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
   // whole filter, and it is answered by Google, so with no key the run reads
   // one register page, asks Places, and dies with NO_API_KEY — after paying
   // for the page and with nothing on screen to say why it found nobody.
-  if (cfg.requireNoWebsite && !placesConfigured()) {
+  if ((cfg.requireNoWebsite || cfg.requirePhone) && !placesConfigured()) {
+    const wanted = [
+      cfg.requireNoWebsite && 'only businesses with no website',
+      cfg.requirePhone && 'only businesses with a phone number',
+    ].filter(Boolean).join(' and ');
     throw new Error(
-      'The hunt is set to find only businesses with no website, and that '
-      + 'answer comes from Google — but GOOGLE_MAPS_API_KEY is not set. '
-      + 'Either add the key, or untick "Only businesses with no website" and '
-      + 'the hunt will file every company it finds for you to check yourself.'
+      `The hunt is set to find ${wanted}, and Google is the only source for `
+      + 'either — but GOOGLE_MAPS_API_KEY is not set. Add the key, or turn '
+      + 'those options off and the hunt will file every company it finds for '
+      + 'you to check yourself.'
     );
   }
   syncTargets(cfg);
@@ -306,6 +316,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
 
   const counters = {
     found: 0, companies_seen: 0, already_known: 0, had_website: 0,
+    no_contact: 0,
     places_requests: 0, register_requests: 0,
     maxPlacesRequests: cfg.maxPlacesRequests,
   };
@@ -317,6 +328,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
     db.prepare(
       `UPDATE hunt_runs SET found=@found, companies_seen=@companies_seen,
          already_known=@already_known, had_website=@had_website,
+         no_contact=@no_contact,
          places_requests=@places_requests, register_requests=@register_requests,
          areas_covered=@areas, finished_at=@finished, error=@error
        WHERE id=@id`
@@ -325,6 +337,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
       companies_seen: counters.companies_seen,
       already_known: counters.already_known,
       had_website: counters.had_website,
+      no_contact: counters.no_contact,
       places_requests: counters.places_requests,
       register_requests: counters.register_requests,
       id: runId,
@@ -426,17 +439,31 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
       }
       if (!fresh.length) { save(); continue; }
 
-      const byName = cfg.requireNoWebsite
+      // Google is asked whenever we need something only it holds. That used
+      // to be the website check alone, so with that off a lead arrived with
+      // no phone number and no email — nothing to contact it by at all,
+      // short of posting a letter to a registered office that is often the
+      // accountant's.
+      const needPlaces = cfg.requireNoWebsite || cfg.requirePhone;
+      const byName = needPlaces
         ? await websiteMap(t.trade, t.area, counters)
         : new Map();
 
       for (const company of fresh) {
         if (counters.found >= want) break;
         if (taken(t.trade) >= maxPerTrade) break;
-        const verdict = cfg.requireNoWebsite
+        // judge() answers both questions from the one page: whether Google
+        // shows a website, and what phone number it holds. When only the
+        // phone is wanted, its website verdict is ignored.
+        const verdict = needPlaces
           ? judge(company, byName, cfg)
           : { prospect: true };
-        if (!verdict.prospect) { counters.had_website++; continue; }
+        if (cfg.requireNoWebsite && !verdict.prospect) { counters.had_website++; continue; }
+
+        // A lead with no way to reach it is not a lead. Counted separately
+        // so the run can say "found 6, skipped 40 with no phone" rather than
+        // just coming up short and looking broken.
+        if (cfg.requirePhone && !verdict.phone) { counters.no_contact++; continue; }
 
         try {
           importLead(company, verdict, t.trade);

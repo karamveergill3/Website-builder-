@@ -24,7 +24,7 @@ export const ALLOWED_KEYS = new Set([
   // Daily hunt
   'hunt_enabled', 'hunt_trades', 'hunt_areas', 'hunt_daily_target', 'hunt_hour',
   'hunt_max_places_requests', 'hunt_max_register_pages', 'hunt_max_per_trade',
-  'hunt_require_no_website', 'hunt_include_unlisted',
+  'hunt_require_no_website', 'hunt_include_unlisted', 'hunt_require_phone',
   // Lead search defaults (Phase 2)
   'default_areas', 'default_region_code',
   // Places pricing, so Google's repricing does not need a code change
@@ -64,6 +64,9 @@ export const DEFAULTS = {
   // and it puts all the risk on one trade answering cold contact.
   hunt_max_per_trade: '3',
   hunt_require_no_website: '1',
+  // Off by default: it needs the Google key, and turning it on without one
+  // would make a fresh install refuse to run.
+  hunt_require_phone: '0',
   hunt_include_unlisted: '1',
   default_region_code: 'GB',
   optout_line: DEFAULT_OPTOUT_LINE,

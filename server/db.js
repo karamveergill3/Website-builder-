@@ -682,6 +682,15 @@ const MIGRATIONS = [
     `,
   },
   {
+    name: '020_hunt_runs_no_contact',
+    up: `
+      -- Companies skipped because Google held no phone number for them.
+      -- Counted separately so a short run can say "found 6, skipped 40 with
+      -- no phone" rather than just coming up short and looking broken.
+      ALTER TABLE hunt_runs ADD COLUMN no_contact INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
     name: '019_backfill_company_ledger',
     up: `
       -- Carry the leads that already exist into the ledger, so the guarantee

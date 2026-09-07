@@ -70,10 +70,15 @@ router.post('/run', wrap((req, res) => {
   if (!cfg.trades.length) {
     throw badRequest('Set at least one trade before running the hunt.');
   }
-  if (cfg.requireNoWebsite && !process.env.GOOGLE_MAPS_API_KEY) {
+  // Both options are answered by Google and neither can run without it.
+  if ((cfg.requireNoWebsite || cfg.requirePhone) && !placesConfigured()) {
+    const wanted = [
+      cfg.requireNoWebsite && '"only businesses with no website"',
+      cfg.requirePhone && '"only businesses with a phone number"',
+    ].filter(Boolean).join(' and ');
     throw badRequest(
-      'Checking for websites needs GOOGLE_MAPS_API_KEY. Set it, or turn off ' +
-      '"only businesses with no website" and take every qualified company.'
+      `${wanted} needs GOOGLE_MAPS_API_KEY — Google is the only source for `
+      + 'either. Set it, or turn those off and take every qualified company.'
     );
   }
 

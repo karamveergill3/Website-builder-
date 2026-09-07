@@ -819,6 +819,9 @@ const NAV = [
  * above the fold or one flick away, and there is no navigation to get lost
  * in on a phone.
  */
+/** Six links is the most a laptop header holds without wrapping. */
+const MAX_NAV = 6;
+
 const SECTION_LABELS = {
   prices: 'Prices',
   hours:  'Opening hours',
@@ -828,13 +831,25 @@ const SECTION_LABELS = {
 
 function anchorsFor(sections = []) {
   const extra = sections.map((k) => [`#${k}`, SECTION_LABELS[k]]).filter(([, l]) => l);
-  return [
-    ['#services', 'Services'],
+
+  // Contact is the whole point of the page and Services is what they came
+  // to check, so those two are never trimmed. Everything else competes for
+  // the middle — a blunt slice on the full list drops Contact off the end,
+  // which is the one link that must always be there.
+  // Ordered by how likely someone is to jump straight there. Prices and
+  // opening hours are what people arrive looking for; "how it works" is
+  // read on the way past, not navigated to, so it yields first.
+  const middle = [
     ...extra,
     ['#work', 'Our work'],
     ['#about', 'About'],
+    ['#process', 'How it works'],
+  ];
+  return [
+    ['#services', 'Services'],
+    ...middle.slice(0, MAX_NAV - 2),
     ['#contact', 'Contact'],
-  ].slice(0, 6);
+  ];
 }
 
 /**
@@ -1090,6 +1105,113 @@ function css(p, t) {
   .band .cta:hover{box-shadow:0 16px 44px -12px rgba(0,0,0,.6)}
   .band .cta.ghost{background:transparent;color:#fff;
     border:1px solid rgba(255,255,255,.3)}
+
+  /* ---------- section heads: title left, note right ---------- */
+  .sec-head{display:flex;gap:40px;align-items:flex-end;justify-content:space-between;
+    flex-wrap:wrap;padding-bottom:26px;border-bottom:1px solid var(--line)}
+  .sec-note{max-width:34ch;color:var(--muted);margin:0;font-size:.98rem}
+
+  /* ---------- bento: one feature cell, then the rest ----------
+     Equal cards in a neat row is the most template-looking thing a page
+     can do. Varying the weight is what an agency does instead. */
+  .bento{display:grid;gap:16px;margin-top:36px;
+    grid-template-columns:repeat(4,1fr)}
+  .bento-cell{grid-column:span 2;border:1px solid var(--line);
+    border-radius:var(--radius);padding:30px;background:#fff;position:relative;
+    overflow:hidden;transition:border-color .35s,transform .35s var(--ease),
+    box-shadow .35s var(--ease)}
+  .bento-cell:hover{transform:translateY(-4px);box-shadow:var(--shadow-2);
+    border-color:transparent}
+  .bento-cell.feature{grid-column:span 4;grid-row:span 2;
+    display:flex;flex-direction:column}
+  .bento-cell.feature h3{font-size:1.7rem;font-family:var(--display);
+    letter-spacing:-.02em}
+  .bento-cell.feature .plate{margin-top:auto;min-height:260px}
+  .cell-no{position:absolute;top:22px;right:24px;font-size:.72rem;font-weight:700;
+    letter-spacing:.14em;color:var(--muted);opacity:.5}
+  .bento-cell h3{margin-bottom:.45em}
+  .bento-cell p{color:var(--muted);margin:0;font-size:.96rem}
+  @media (max-width:900px){
+    .bento{grid-template-columns:repeat(2,1fr)}
+    .bento-cell,.bento-cell.feature{grid-column:span 2;grid-row:auto}
+  }
+  @media (max-width:560px){
+    .bento{grid-template-columns:1fr}
+    .bento-cell,.bento-cell.feature{grid-column:span 1}
+  }
+
+  /* ---------- photo plate ----------
+     A drawn composition rather than a dashed box. An empty rectangle reads
+     as unfinished, which is the one thing a pitch cannot afford. */
+  /* A treated-photograph stand-in: a deep duotone field with a soft figure
+     in it. The first version mixed the accent at 22% over cream and came
+     out as a beige rectangle — which reads as unfinished, the one thing a
+     pitch cannot afford. It has to look like a deliberate image. */
+  .plate{position:relative;border-radius:calc(var(--radius) - 2px);
+    min-height:220px;overflow:hidden;isolation:isolate;
+    background:
+      linear-gradient(var(--pa),
+        color-mix(in srgb, var(--accent) 92%, transparent) 0%,
+        color-mix(in srgb, var(--glow) 78%, transparent) 55%,
+        color-mix(in srgb, var(--ink) 88%, transparent) 100%)}
+  .plate-fig{position:absolute;inset:0;
+    background:
+      radial-gradient(circle var(--pr) at var(--px) var(--py),
+        rgba(255,255,255,.34), transparent 66%),
+      radial-gradient(circle 30% at calc(100% - var(--px)) calc(100% - var(--py)),
+        color-mix(in srgb, var(--ink) 55%, transparent), transparent 62%)}
+  /* A fine grid over the top, the way a duotone print carries a screen. */
+  .plate::after{content:"";position:absolute;inset:0;opacity:.14;
+    background-image:
+      linear-gradient(#fff 1px,transparent 1px),
+      linear-gradient(90deg,#fff 1px,transparent 1px);
+    background-size:34px 34px}
+  .plate-label{position:absolute;left:16px;bottom:14px;z-index:2;
+    font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--ink);background:rgba(255,255,255,.92);padding:7px 14px;
+    border-radius:100px;backdrop-filter:blur(6px)}
+
+  /* ---------- stats ---------- */
+  .stats{display:grid;gap:22px;grid-template-columns:repeat(4,1fr);
+    padding:14px 0}
+  .stat{display:flex;flex-direction:column;gap:8px;padding:26px 0;
+    border-top:2px solid var(--ink)}
+  .stat-val{font-family:var(--display);font-size:clamp(2.4rem,5vw,4rem);
+    font-weight:${t.weight};letter-spacing:-.04em;line-height:1}
+  .stat-label{font-size:.82rem;font-weight:600;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--muted)}
+  .tip-line{margin:22px 0 0;font-size:.9rem;color:var(--muted)}
+  @media (max-width:820px){.stats{grid-template-columns:repeat(2,1fr)}}
+
+  /* ---------- process ---------- */
+  .steps{list-style:none;padding:0;margin:44px 0 0;
+    display:grid;gap:2px;grid-template-columns:repeat(4,1fr);
+    background:var(--line);border:1px solid var(--line);
+    border-radius:var(--radius);overflow:hidden}
+  .step{background:#fff;padding:34px 28px;position:relative;
+    transition:background .3s}
+  .step:hover{background:var(--wash)}
+  .step-no{display:block;font-family:var(--display);font-size:2.2rem;
+    line-height:1;color:var(--accent);margin-bottom:16px;font-weight:${t.weight}}
+  .step h3{font-size:1.05rem;margin-bottom:.5em}
+  .step p{color:var(--muted);margin:0;font-size:.94rem}
+  @media (max-width:900px){.steps{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:520px){.steps{grid-template-columns:1fr}}
+
+  /* ---------- pull quote ----------
+     One sentence set as a graphic. In body copy a testimonial is a
+     paragraph nobody reads. */
+  .quote-wrap{padding:104px 0}
+  /* The measure goes in rem, not ch. A ch resolves against the element's
+     OWN font-size, and the blockquote sits at body size — 22ch there is
+     about 190px, which stacks a display quote one word per line. */
+  .pull{margin:0;max-width:46rem}
+  .pull p{font-family:var(--display);font-size:clamp(1.7rem,3.6vw,2.8rem);
+    line-height:1.2;letter-spacing:-.03em;margin:0 0 28px;
+    font-weight:${t.weight}}
+  .pull footer{color:var(--muted);font-size:.95rem;font-weight:600}
+  .quote-note{display:block;font-weight:400;opacity:.75;margin-top:6px;
+    font-size:.88rem}
 
   /* Price list — a dotted leader row, the way a real menu or salon list
      is set. A plain two-column table reads as a spreadsheet. */
@@ -1522,6 +1644,162 @@ function extraSections(b, wanted = []) {
   return out.join('\n');
 }
 
+/**
+ * The blocks that separate a designed site from a well-built template.
+ *
+ * A uniform grid of equal cards, a dashed box where a photo goes and a wall
+ * of paragraphs is what a template looks like however good the type is. What
+ * an agency does instead: vary the weight of things, put a number on the
+ * work, treat one sentence as a graphic, and make the empty photo slot look
+ * deliberately art-directed rather than unfinished.
+ */
+
+/**
+ * A generative stand-in for a photograph.
+ *
+ * A dashed rectangle saying "photo here" reads as unfinished, which is the
+ * one thing a pitch cannot afford. This draws a composition instead —
+ * layered gradient fields, a soft geometric figure, and the trade's own
+ * motif at low opacity — so the slot looks art-directed while still being
+ * honestly empty. The seed varies the composition so three slots on one
+ * page are not the same picture three times.
+ */
+function photoPlate(seed = 0, label = 'Your photo here') {
+  const angle = 120 + seed * 47;
+  const cx = 30 + ((seed * 37) % 45);
+  const cy = 25 + ((seed * 23) % 50);
+  const r  = 34 + ((seed * 13) % 26);
+  return `
+  <div class="plate" style="--pa:${angle}deg;--px:${cx}%;--py:${cy}%;--pr:${r}%">
+    <div class="plate-fig"></div>
+    <span class="plate-label">${esc(label)}</span>
+  </div>`;
+}
+
+/**
+ * Services as a bento grid: the first one is a feature cell twice the size
+ * of the rest. Equal cards in a neat row is the single most template-looking
+ * thing a page can do.
+ */
+function bentoServices(b) {
+  const services = (b.services ?? []).slice(0, 5);
+  if (!services.length) return '';
+  return `
+<section id="services">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div>
+        <p class="eyebrow">Services</p>
+        <h2>What we do</h2>
+      </div>
+      <p class="sec-note">${esc(
+        b.areas?.length
+          ? `Across ${b.areas.slice(0, 3).join(', ')} and nearby.`
+          : 'Across the local area.')}</p>
+    </div>
+    <div class="bento reveal">
+      ${services.map((sv, i) => `
+      <article class="bento-cell${i === 0 ? ' feature' : ''}">
+        <span class="cell-no">${String(i + 1).padStart(2, '0')}</span>
+        <h3>${esc(sv)}</h3>
+        <p>${esc(serviceBlurb(sv, b))}</p>
+        ${i === 0 ? photoPlate(1, 'A photo of this work') : ''}
+      </article>`).join('')}
+    </div>
+  </div>
+</section>`;
+}
+
+/**
+ * A band of large numbers. Blank, because inventing "500 jobs completed" for
+ * someone would be putting a lie on their own website — but the shape is
+ * what a prospect recognises as a proper site, and filling three numbers in
+ * is a two-minute job for them.
+ */
+function statsBand(b) {
+  const stats = [
+    ['Years doing this', '—'],
+    ['Jobs completed', '—'],
+    ['Towns covered', String(b.areas?.length || '—')],
+    ['Average rating', '—'],
+  ];
+  return `
+<section class="stats-wrap alt">
+  <div class="wrap">
+    <div class="stats reveal">
+      ${stats.map(([label, val]) => `
+      <div class="stat">
+        <span class="stat-val">${esc(val)}</span>
+        <span class="stat-label">${esc(label)}</span>
+      </div>`).join('')}
+    </div>
+    <p class="tip-line">Your numbers go here — they do more work than any
+      paragraph on the page.</p>
+  </div>
+</section>`;
+}
+
+/** How the job actually goes, numbered. Removes the "what happens next" doubt. */
+function processSteps(b) {
+  const first = {
+    call:    ['You ring us', 'Tell us what the job is and we will tell you straight.'],
+    quote:   ['You ask for a quote', 'Send over the details and we come back with a price.'],
+    book:    ['You book a slot', 'Pick a time that suits and we confirm it.'],
+    prices:  ['You check the price', 'Everything is listed, so there are no surprises.'],
+    gallery: ['You see the work', 'Have a look at what we have done nearby.'],
+    enquire: ['You get in touch', 'Send a message and we come back to you.'],
+  }[b.primary_cta] ?? ['You get in touch', 'Send a message and we come back to you.'];
+
+  const steps = [
+    first,
+    ['We take a look', 'A visit or a photo, whichever suits. No charge for looking.'],
+    ['You get a price', 'In writing, fixed, before anything starts.'],
+    ['We do the work', 'Tidy, on time, and cleared up after.'],
+  ];
+  return `
+<section id="process">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <div>
+        <p class="eyebrow">How it works</p>
+        <h2>From a call to a finished job</h2>
+      </div>
+      <p class="sec-note">Four steps, no surprises. Change any of this to
+        match how you actually work.</p>
+    </div>
+    <ol class="steps reveal">
+      ${steps.map(([title, body], i) => `
+      <li class="step" style="--i:${i}">
+        <span class="step-no">${String(i + 1).padStart(2, '0')}</span>
+        <h3>${esc(title)}</h3>
+        <p>${esc(body)}</p>
+      </li>`).join('')}
+    </ol>
+  </div>
+</section>`;
+}
+
+/**
+ * One sentence set as a graphic. A testimonial in body copy is a paragraph
+ * nobody reads; at display size it is the most persuasive thing on the page.
+ * Left as an obvious blank rather than a fabricated review.
+ */
+function pullQuote(b) {
+  const where = b.areas?.[0];
+  return `
+<section class="quote-wrap">
+  <div class="wrap">
+    <blockquote class="pull reveal">
+      <p>“A real review from a real customer goes here. One honest sentence
+         from someone local does more than a page of copy.”</p>
+      <footer>— Their name${where ? `, ${esc(where)}` : ''}
+        <span class="quote-note">send me two or three and they go straight in</span>
+      </footer>
+    </blockquote>
+  </div>
+</section>`;
+}
+
 /* --------------------------------------------------------------- build */
 
 export const PAGES = ['index.html', 'services.html', 'about.html', 'contact.html'];
@@ -1578,39 +1856,33 @@ function singleBody(b, family = 'pro', sections = []) {
   </div>
 </div>
 
-<section id="services">
-  <div class="wrap">
-    <div class="reveal">
-      <p class="eyebrow">Services</p>
-      <h2>What we do</h2>
-    </div>
-    <div class="grid reveal" data-n="${Math.min(services.length, 6)}" style="margin-top:44px">
-      ${services.slice(0, 6).map((sv) => `<div class="card">
-        <h3>${esc(sv)}</h3>
-        <p>${esc(serviceBlurb(sv, b))}</p>
-      </div>`).join('\n      ')}
-    </div>
-  </div>
-</section>
+${bentoServices(b)}
+
+${statsBand(b)}
 
 ${extraSections(b, sections)}
 
-<section id="work">
+<section id="work" class="alt">
   <div class="wrap">
-    <div class="reveal">
-      <p class="eyebrow">Portfolio</p>
-      <h2>Recent work</h2>
-      <p style="max-width:56ch;color:var(--muted)">${
+    <div class="sec-head reveal">
+      <div>
+        <p class="eyebrow">Portfolio</p>
+        <h2>Recent work</h2>
+      </div>
+      <p class="sec-note">${
         b.has_photos
-          ? 'Photos of your recent jobs go here — send them over and I will drop them in.'
-          : 'A few photos of finished jobs go here. Phone photos are fine — real work sells '
-            + 'far better than stock images.'}</p>
+          ? 'Send your photos over and they drop straight into these slots.'
+          : 'Phone photos of finished jobs are fine — real work sells far better than stock images.'}</p>
     </div>
     <div class="grid reveal" data-n="3" style="margin-top:36px">
-      ${[1, 2, 3].map((n) => `<div class="shot">Job photo ${n}<br>(placeholder)</div>`).join('\n      ')}
+      ${[2, 3, 4].map((n) => photoPlate(n, `Job ${n - 1}`)).join('\n      ')}
     </div>
   </div>
 </section>
+
+${processSteps(b)}
+
+${pullQuote(b)}
 
 <section id="about">
   <div class="wrap split reveal">

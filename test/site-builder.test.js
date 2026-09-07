@@ -32,10 +32,11 @@ test('one page by default, carrying every section', () => {
   const html = files['index.html'];
   assert.match(html, /^<!doctype html>/i);
   assert.match(html, /<\/html>\s*$/i);
-  // Every section must be present and anchored, since the nav links to them.
-  for (const id of ['services', 'work', 'about', 'contact']) {
+  // Every core section is on the page. The nav is capped at six, so which
+  // of them it links to depends on what else that trade needs — a separate
+  // test covers the two links that can never be dropped.
+  for (const id of ['services', 'work', 'about', 'contact', 'process']) {
     assert.ok(html.includes(`id="${id}"`), `missing section #${id}`);
-    assert.ok(html.includes(`href="#${id}"`), `nav does not link to #${id}`);
   }
 });
 
@@ -580,4 +581,52 @@ test('the mobile nav stays on one line instead of stacking', () => {
   // Six links wrap to two rows on a 390px screen and push the hero down.
   const html = renderSite({ ...brief, trade: 'Hairdressing and beauty' })['index.html'];
   assert.match(html, /nav\{width:100%;margin-left:0;order:3;gap:20px;\s*flex-wrap:nowrap;overflow-x:auto/);
+});
+
+test('the contact link is never trimmed out of the nav', () => {
+  // A blunt slice on the full list drops Contact off the end — the one
+  // link the whole page exists to offer.
+  for (const trade of ['Hairdressing and beauty', 'Vehicle maintenance and repair',
+                       'Roofing', 'Landscaping', 'Bakeries', 'Florists',
+                       'Cleaning of buildings', 'Architecture']) {
+    const html = renderSite({ ...brief, trade })['index.html'];
+    const nav = html.match(/<nav>([\s\S]*?)<\/nav>/)[1];
+    assert.ok(nav.includes('href="#contact"'), `${trade} lost its contact link`);
+    assert.ok(nav.includes('href="#services"'), `${trade} lost its services link`);
+  }
+});
+
+test('no template expression leaks into the stylesheet as literal text', () => {
+  // A nested ${'${...}'} evaluates to the literal text, which is invalid CSS
+  // and silently ignored — the declaration just quietly stops working.
+  for (const trade of ['Hairdressing and beauty', 'Roofing', 'Bakeries', 'Architecture']) {
+    const html = renderSite({ ...brief, trade })['index.html'];
+    assert.ok(!/\$\{[a-z]/i.test(html),
+      `${trade}: an unevaluated template expression reached the output`);
+  }
+});
+
+test('the pull quote is measured in rem, not ch', () => {
+  // ch resolves against the element's own font-size. On a blockquote sitting
+  // at body size, 22ch is ~190px and stacks a display quote one word per line.
+  const html = renderSite(brief)['index.html'];
+  const measure = html.match(/\.pull\{[^}]*max-width:([^;}]+)/)?.[1];
+  assert.ok(measure && measure.endsWith('rem'), `pull measure is "${measure}"`);
+});
+
+test('the upgraded blocks all render', () => {
+  const html = renderSite(brief)['index.html'];
+  for (const cls of ['bento', 'plate', 'stats', 'steps', 'pull']) {
+    assert.ok(html.includes(`class="${cls}`) || html.includes(` ${cls}"`),
+      `missing .${cls}`);
+  }
+  // The first service is the feature cell, the rest are not.
+  assert.equal((html.match(/bento-cell feature/g) ?? []).length, 1);
+});
+
+test('stats and testimonials are left blank rather than invented', () => {
+  const html = renderSite(brief)['index.html'];
+  assert.match(html, /<span class="stat-val">—<\/span>/);
+  assert.ok(!/\d+\+? (?:jobs|years|customers) /i.test(html),
+    'must not fabricate a track record');
 });

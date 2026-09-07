@@ -25,6 +25,30 @@ is retired, and re-opened a month later — new companies incorporate all the ti
 **It never sends anything.** It finds and files. Sending stays behind the
 confirmation in the Outbox.
 
+## Picking towns
+
+The Towns box has a button per region — Staffordshire, West Midlands,
+Shropshire and so on — that appends that region's towns to whatever is already
+there, dropping duplicates.
+
+**There is deliberately no "every town" button.** The hunt works through every
+trade in every town, so the two multiply: eighty trades against a thousand
+towns is eighty thousand combinations, which is not coverage, it is a queue
+nobody reaches the end of. The screen shows the running total under the box so
+the cost of another region is visible before you click it.
+
+The spellings matter more than they look. Each name is sent as the
+`location` filter, which partial-matches the **locality line of a registered
+office address** — so it has to be written the way an envelope writes it:
+`Stoke-on-Trent`, not `Stoke on Trent`.
+
+For the same reason a place only earns an entry if post is actually addressed
+to it. Wellington has 25,000 people and is not listed, because its addresses
+say Telford; an entry for it would be a target that returns nothing for ever,
+with no error to tell you. Aldridge and Bloxwich are addressed as Walsall,
+Wednesfield as Wolverhampton, Hanley and Burslem as Stoke-on-Trent. The parent
+town reaches all of them.
+
 ## No repeats
 
 New day, new companies. A business the hunt has already filed is never filed

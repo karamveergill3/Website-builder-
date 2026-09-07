@@ -7,6 +7,7 @@ import {
 import { configured as chConfigured } from '../lib/companies-house.js';
 import { resolveTrade, allTradeKeywords } from '../lib/sic.js';
 import { ledgerStats } from '../lib/recontact.js';
+import { REGIONS } from '../lib/towns.js';
 
 const router = Router();
 
@@ -81,6 +82,14 @@ router.post('/run', wrap((req, res) => {
 /** Every trade keyword the picker recognises, for the UI's "add all" preset. */
 router.get('/trades', wrap((_req, res) => {
   res.json({ trades: allTradeKeywords() });
+}));
+
+/**
+ * Town presets, towns and all. The whole payload is a couple of hundred short
+ * strings, so sending it once beats a round trip per button press.
+ */
+router.get('/towns', wrap((_req, res) => {
+  res.json({ regions: REGIONS });
 }));
 
 router.post('/sync-targets', wrap((_req, res) => {

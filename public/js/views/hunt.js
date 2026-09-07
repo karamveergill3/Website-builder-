@@ -98,7 +98,13 @@ export default async function huntView(root, _p, { refresh }) {
               <label for="h-areas">Towns <span class="opt">one per line</span></label>
               <textarea id="h-areas" name="hunt_areas" rows="6"
                         placeholder="Otley&#10;Ilkley&#10;Skipton">${c.areas.join('\n')}</textarea>
-              <p class="tip">More towns means more days before it runs out of ground.</p>
+              <div class="bar" style="flex-wrap:wrap;gap:6px;margin-top:8px" id="town-presets">
+                <span class="meta">Add a region:</span>
+              </div>
+              <p class="tip">Existing lines are kept; duplicates are dropped.
+                There is no "every town" button on purpose — the hunt works
+                through every trade in every town, so the two multiply.
+                <b id="combo-note"></b></p>
             </div>
           </div>
           ${s.plan.trades.filter((t) => t.codes.length).length ? html`
@@ -250,6 +256,69 @@ export default async function huntView(root, _p, { refresh }) {
       btn.disabled = false;
     }
   });
+
+  /**
+   * Region buttons. Fetched rather than hard-coded in the view so the town
+   * lists have one home, on the server, next to the note explaining why the
+   * spellings are what they are.
+   */
+  (async () => {
+    const bar = $('#town-presets', root);
+    if (!bar) return;
+    let regions = [];
+    try {
+      ({ regions } = await api.get('/api/hunt/towns'));
+    } catch {
+      bar.remove();
+      return;
+    }
+    for (const r of regions) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'mini';
+      b.dataset.act = 'add-towns';
+      b.dataset.key = r.key;
+      b.title = `${r.note} ${r.towns.length} towns.`;
+      b.textContent = `${r.label} (${r.towns.length})`;
+      bar.appendChild(b);
+    }
+
+    // How much work the current pair actually implies. A number beats a
+    // warning: 80 trades across 40 towns is 3,200 combinations, and seeing
+    // that is what stops someone pasting in the whole country.
+    const combos = () => {
+      const n = (sel) => ($(sel, root)?.value ?? '')
+        .split(/\n/).map((x) => x.trim()).filter(Boolean).length;
+      const t = n('#h-trades');
+      const a = n('#h-areas');
+      const note = $('#combo-note', root);
+      if (!note) return;
+      note.textContent = (t && a)
+        ? `Right now: ${t} × ${a} = ${(t * a).toLocaleString()} combinations to work through.`
+        : '';
+    };
+    combos();
+    for (const sel of ['#h-trades', '#h-areas']) {
+      $(sel, root)?.addEventListener('input', combos);
+    }
+
+    on(root, 'click', '[data-act="add-towns"]', (_e, btn) => {
+      const region = regions.find((x) => x.key === btn.dataset.key);
+      if (!region) return;
+      const ta = $('#h-areas', root);
+      const norm = (x) => x.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const existing = (ta.value ?? '').split(/\n/).map((x) => x.trim()).filter(Boolean);
+      const seen = new Set(existing.map(norm));
+      const added = region.towns.filter((t) => !seen.has(norm(t)));
+      if (!added.length) {
+        toast(`Every ${region.label} town is already listed`);
+        return;
+      }
+      ta.value = existing.concat(added).join('\n');
+      combos();
+      toast(`Added ${added.length} town${added.length === 1 ? '' : 's'} — Save to apply`);
+    });
+  })();
 
   on(root, 'click', '[data-act="run"]', async (_e, btn) => {
     btn.disabled = true;

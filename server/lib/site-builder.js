@@ -69,7 +69,7 @@ const THEMES = {
     font: 'Archivo:wght@600;800',
     display: "'Archivo', 'Helvetica Neue', Arial, sans-serif",
     weight: 800, tracking: '-.04em', transform: 'none',
-    size: 'clamp(2.7rem,7.4vw,5.2rem)',
+    size: 'clamp(2.4rem,4.9vw,4.1rem)',
     eyebrowTracking: '.16em',
     radius: '6px', btnRadius: '6px',
     motion: 'drive', ornament: 'stripes',
@@ -78,7 +78,7 @@ const THEMES = {
     font: 'Chakra+Petch:wght@600;700',
     display: "'Chakra Petch', 'Helvetica Neue', Arial, sans-serif",
     weight: 700, tracking: '-.02em', transform: 'uppercase',
-    size: 'clamp(2.3rem,6vw,4.4rem)',
+    size: 'clamp(2.1rem,4.2vw,3.5rem)',
     eyebrowTracking: '.22em',
     radius: '2px', btnRadius: '2px',
     motion: 'sweep', ornament: 'grid',
@@ -87,7 +87,7 @@ const THEMES = {
     font: 'Fraunces:opsz,wght@9..144,500;9..144,700',
     display: "'Fraunces', Georgia, 'Times New Roman', serif",
     weight: 700, tracking: '-.025em', transform: 'none',
-    size: 'clamp(2.7rem,7vw,5rem)',
+    size: 'clamp(2.4rem,4.8vw,4rem)',
     eyebrowTracking: '.18em',
     radius: '22px', btnRadius: '100px',
     motion: 'grow', ornament: 'organic',
@@ -96,7 +96,7 @@ const THEMES = {
     font: 'Cormorant+Garamond:wght@300;400;600',
     display: "'Cormorant Garamond', Georgia, 'Times New Roman', serif",
     weight: 300, tracking: '-.005em', transform: 'none',
-    size: 'clamp(3rem,8.5vw,6.4rem)',
+    size: 'clamp(2.7rem,5.6vw,4.8rem)',
     eyebrowTracking: '.34em',
     radius: '2px', btnRadius: '2px',
     motion: 'unveil', ornament: 'orbs',
@@ -105,7 +105,7 @@ const THEMES = {
     font: 'Playfair+Display:wght@500;700',
     display: "'Playfair Display', Georgia, 'Times New Roman', serif",
     weight: 700, tracking: '-.025em', transform: 'none',
-    size: 'clamp(2.7rem,7.2vw,5.2rem)',
+    size: 'clamp(2.4rem,4.8vw,4.1rem)',
     eyebrowTracking: '.2em',
     radius: '14px', btnRadius: '100px',
     motion: 'rise', ornament: 'warm',
@@ -114,7 +114,7 @@ const THEMES = {
     font: 'DM+Serif+Display:ital@0;1',
     display: "'DM Serif Display', Georgia, 'Times New Roman', serif",
     weight: 400, tracking: '-.02em', transform: 'none',
-    size: 'clamp(2.8rem,7.4vw,5.4rem)',
+    size: 'clamp(2.5rem,5vw,4.2rem)',
     eyebrowTracking: '.24em',
     radius: '3px', btnRadius: '3px',
     motion: 'stagger', ornament: 'rules',
@@ -123,7 +123,7 @@ const THEMES = {
     font: 'Outfit:wght@500;700',
     display: "'Outfit', 'Helvetica Neue', Arial, sans-serif",
     weight: 700, tracking: '-.035em', transform: 'none',
-    size: 'clamp(2.6rem,7vw,4.9rem)',
+    size: 'clamp(2.3rem,4.6vw,3.9rem)',
     eyebrowTracking: '.18em',
     radius: '18px', btnRadius: '100px',
     motion: 'shimmer', ornament: 'bubbles',
@@ -132,14 +132,17 @@ const THEMES = {
     font: 'Inter:wght@600;800',
     display: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     weight: 800, tracking: '-.045em', transform: 'none',
-    size: 'clamp(2.6rem,6.8vw,4.9rem)',
+    size: 'clamp(2.3rem,4.5vw,3.9rem)',
     eyebrowTracking: '.16em',
     radius: '10px', btnRadius: '8px',
     motion: 'settle', ornament: 'dots',
   },
 };
 
-export const themeFor = (trade) => THEMES[tradeFamily(trade)] ?? THEMES.pro;
+export function themeFor(trade) {
+  const family = tradeFamily(trade);
+  return { ...(THEMES[family] ?? THEMES.pro), family };
+}
 
 /**
  * Which family a trade belongs to. First match wins, so the order is the
@@ -468,6 +471,255 @@ function primaryAction(b, { single = false } = {}) {
   }
 }
 
+
+/* ------------------------------------------------------------- hero art */
+
+/**
+ * A piece of line art per sector, animated on load.
+ *
+ * Inline SVG with CSS animation: no request, no JavaScript (the preview CSP
+ * forbids one anyway), and it scales to any size without going fuzzy. Line
+ * art rather than illustration because a stroke drawing reads as considered
+ * where a cartoon reads as clip art — and it inherits the palette, so a
+ * salon's scissors are pink and a garage's wheel is red without a second
+ * asset existing.
+ *
+ * Each returns markup for a 320x320 viewBox that sits in the hero's right
+ * half. On a phone the hero is text-only: the art is decorative and the
+ * screen is better spent on the phone number.
+ */
+function heroArt(family) {
+  const svg = (inner) =>
+    `<svg class="art" viewBox="0 0 320 320" fill="none" aria-hidden="true" focusable="false">${inner}</svg>`;
+
+  switch (family) {
+    case 'beauty':
+      // Scissors that open and close, slowly, over a comb.
+      return svg(`
+        <g class="a-scissors" stroke="currentColor" stroke-width="2.2"
+           stroke-linecap="round" stroke-linejoin="round">
+          <!-- Each half is one stroke: blade above the pivot, handle below,
+               crossing at it. Loops sit at the BOTTOM, where fingers go. -->
+          <g class="blade-a">
+            <path d="M198 40 L150 150 L124 214"/>
+            <circle cx="112" cy="236" r="19"/>
+          </g>
+          <g class="blade-b">
+            <path d="M122 40 L170 150 L196 214"/>
+            <circle cx="208" cy="236" r="19"/>
+          </g>
+          <circle cx="160" cy="152" r="6"/>
+        </g>
+        <g class="a-comb" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <path d="M66 288 H254"/>
+          ${Array.from({ length: 15 }, (_, i) =>
+            `<path class="tooth" style="--i:${i}" d="M${74 + i * 12.6} 290 V310"/>`).join('')}
+        </g>`);
+
+    case 'motor':
+      // An alloy wheel turning. The tread is a dashed ring so it reads as a
+      // tyre rather than a gear.
+      return svg(`
+        <g class="a-wheel" stroke="currentColor" stroke-linecap="round">
+          <circle cx="160" cy="160" r="118" stroke-width="2" opacity=".35"
+                  stroke-dasharray="10 12"/>
+          <circle cx="160" cy="160" r="100" stroke-width="2.4"/>
+          <circle cx="160" cy="160" r="30" stroke-width="2.4"/>
+          <circle cx="160" cy="160" r="9" stroke-width="2.4"/>
+          ${Array.from({ length: 5 }, (_, i) => {
+            const a = (i * 72 - 90) * Math.PI / 180;
+            const x1 = 160 + Math.cos(a) * 32, y1 = 160 + Math.sin(a) * 32;
+            const x2 = 160 + Math.cos(a) * 96, y2 = 160 + Math.sin(a) * 96;
+            const ca = a + 0.30;
+            const cx = 160 + Math.cos(ca) * 70, cy = 160 + Math.sin(ca) * 70;
+            return `<path stroke-width="2.6" d="M${x1.toFixed(1)} ${y1.toFixed(1)} Q${cx.toFixed(1)} ${cy.toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}"/>`;
+          }).join('')}
+        </g>
+        <g class="a-motion" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" opacity=".55">
+          <path class="dash" style="--i:0" d="M12 118 H60"/>
+          <path class="dash" style="--i:1" d="M0 160 H40"/>
+          <path class="dash" style="--i:2" d="M12 202 H60"/>
+        </g>`);
+
+    case 'building':
+      // Courses of roof tiles dropping into place, bottom row first.
+      return svg(`
+        <g class="a-roof" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round">
+          ${[0, 1, 2, 3].map((row) => {
+            const y = 250 - row * 26;
+            const inset = row * 22;
+            const count = 5 - row;
+            return Array.from({ length: count }, (_, i) => {
+              const w = (240 - inset * 2) / count;
+              const x = 40 + inset + i * w;
+              return `<rect class="tile" style="--i:${row * 5 + i}" x="${x.toFixed(1)}" y="${y}" `
+                   + `width="${(w - 4).toFixed(1)}" height="22" rx="3"/>`;
+            }).join('');
+          }).join('')}
+        </g>`);
+
+    case 'green':
+      // Stems growing up out of the ground, then swaying.
+      return svg(`
+        <g class="a-garden" stroke="currentColor" stroke-width="2.4"
+           stroke-linecap="round" stroke-linejoin="round">
+          <path d="M46 272 H274" opacity=".4"/>
+          ${[
+            { x: 96,  h: 116, i: 0 },
+            { x: 160, h: 160, i: 1 },
+            { x: 224, h: 128, i: 2 },
+          ].map(({ x, h, i }) => `
+            <g class="stem" style="--i:${i}">
+              <path d="M${x} 270 V${270 - h}"/>
+              <path d="M${x} ${270 - h * 0.55} Q${x - 34} ${270 - h * 0.72} ${x - 8} ${270 - h * 0.86}"/>
+              <path d="M${x} ${270 - h * 0.34} Q${x + 34} ${270 - h * 0.5} ${x + 8} ${270 - h * 0.64}"/>
+              <circle cx="${x}" cy="${270 - h - 8}" r="9"/>
+            </g>`).join('')}
+        </g>`);
+
+    case 'food':
+      // Steam rising off a cup.
+      return svg(`
+        <g class="a-cup" stroke="currentColor" stroke-width="2.4"
+           stroke-linecap="round" stroke-linejoin="round">
+          <path d="M92 190 H212 V236 A32 32 0 0 1 180 268 H124 A32 32 0 0 1 92 236 Z"/>
+          <path d="M212 200 H236 A22 22 0 0 1 236 244 H212" opacity=".7"/>
+          <path d="M74 284 H238" opacity=".4"/>
+        </g>
+        <g class="a-steam" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+          ${[0, 1, 2].map((i) => {
+            const x = 124 + i * 28;
+            return `<path class="wisp" style="--i:${i}" `
+                 + `d="M${x} 168 q-13 -22 0 -42 q13 -20 0 -40"/>`;
+          }).join('')}
+        </g>`);
+
+    case 'clean':
+      // Bubbles drifting up past a highlight.
+      return svg(`
+        <g class="a-bubbles" stroke="currentColor" stroke-width="2.2">
+          ${[
+            { x: 108, r: 26, i: 0 }, { x: 176, r: 17, i: 1 }, { x: 226, r: 32, i: 2 },
+            { x: 138, r: 12, i: 3 }, { x: 200, r: 22, i: 4 }, { x: 88,  r: 15, i: 5 },
+          ].map(({ x, r, i }) => `
+            <g class="bub" style="--i:${i}">
+              <circle cx="${x}" cy="272" r="${r}"/>
+              <path d="M${x - r * 0.42} ${272 - r * 0.42} a${r * 0.5} ${r * 0.5} 0 0 1 ${r * 0.34} ${-r * 0.2}"
+                    stroke-width="1.8" opacity=".8" stroke-linecap="round"/>
+            </g>`).join('')}
+        </g>`);
+
+    case 'retail':
+      // A price tag on a hook, swinging.
+      return svg(`
+        <g stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M160 44 V92" opacity=".5"/>
+          <g class="a-tag">
+            <path d="M160 92 L236 168 L168 236 L92 160 Z"/>
+            <circle cx="160" cy="126" r="11"/>
+            <path d="M150 196 H196" opacity=".6"/>
+            <path d="M138 178 H176" opacity=".4"/>
+          </g>
+        </g>`);
+
+    default:
+      // Professional: a mark that draws itself, then holds.
+      return svg(`
+        <g class="a-draw" stroke="currentColor" stroke-width="2.4"
+           stroke-linecap="round" stroke-linejoin="round">
+          <rect class="ln" style="--i:0" x="60" y="60" width="200" height="200" rx="18"/>
+          <path class="ln" style="--i:1" d="M60 160 H260"/>
+          <path class="ln" style="--i:2" d="M160 60 V260"/>
+          <circle class="ln" style="--i:3" cx="160" cy="160" r="58"/>
+        </g>`);
+  }
+}
+
+/** The keyframes each piece of art needs. Only the active sector's are emitted. */
+function heroArtCss(family) {
+  const shared = `
+  .art{width:min(46vw,460px);aspect-ratio:1;color:var(--accent);
+    opacity:.9;overflow:visible}
+  @media (max-width:900px){.art{display:none}}`;
+
+  switch (family) {
+    case 'beauty': return `${shared}
+  .blade-a,.blade-b{transform-box:view-box;transform-origin:160px 152px}
+  .blade-a{animation:snip-a 3.4s ease-in-out .6s infinite}
+  .blade-b{animation:snip-b 3.4s ease-in-out .6s infinite}
+  @keyframes snip-a{0%,58%,100%{transform:rotate(0deg)}30%{transform:rotate(-7deg)}}
+  @keyframes snip-b{0%,58%,100%{transform:rotate(0deg)}30%{transform:rotate(7deg)}}
+  .a-comb .tooth{opacity:0;animation:tooth .5s ease-out forwards;
+    animation-delay:calc(.9s + var(--i) * .045s)}
+  @keyframes tooth{to{opacity:.75}}
+  .a-scissors{opacity:0;animation:art-in 1s cubic-bezier(.16,1,.3,1) .25s forwards}`;
+
+    case 'motor': return `${shared}
+  .a-wheel{transform-box:fill-box;transform-origin:50% 50%;
+    animation:art-in .9s cubic-bezier(.16,1,.3,1) .2s backwards,
+              spin 9s linear .2s infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .a-motion .dash{opacity:0;animation:whoosh 2.4s ease-out infinite;
+    animation-delay:calc(1s + var(--i) * .14s)}
+  @keyframes whoosh{
+    0%{opacity:0;transform:translateX(26px)}
+    35%{opacity:.6}
+    100%{opacity:0;transform:translateX(-14px)}}`;
+
+    case 'building': return `${shared}
+  .a-roof{opacity:0;animation:art-in .5s ease-out .15s forwards}
+  .tile{opacity:0;transform-box:fill-box;transform-origin:50% 50%;
+    animation:lay .55s cubic-bezier(.2,.8,.2,1) forwards;
+    animation-delay:calc(.35s + var(--i) * .055s)}
+  @keyframes lay{
+    from{opacity:0;transform:translateY(-22px)}
+    to{opacity:.85;transform:none}}`;
+
+    case 'green': return `${shared}
+  .a-garden{opacity:0;animation:art-in .6s ease-out .15s forwards}
+  .stem{transform-box:fill-box;transform-origin:50% 100%;
+    animation:sprout 1.1s cubic-bezier(.22,1,.36,1) backwards,
+              sway 5.5s ease-in-out infinite;
+    animation-delay:calc(.4s + var(--i) * .22s),
+                    calc(1.6s + var(--i) * .35s)}
+  @keyframes sprout{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+  @keyframes sway{0%,100%{transform:rotate(-1.6deg)}50%{transform:rotate(1.6deg)}}`;
+
+    case 'food': return `${shared}
+  .a-cup{opacity:0;animation:art-in .8s cubic-bezier(.16,1,.3,1) .25s forwards}
+  .wisp{opacity:0;stroke-dasharray:120;
+    animation:steam 3.6s ease-in-out infinite;
+    animation-delay:calc(.9s + var(--i) * .5s)}
+  @keyframes steam{
+    0%{opacity:0;transform:translateY(14px) scaleX(.9)}
+    30%{opacity:.65}
+    100%{opacity:0;transform:translateY(-34px) scaleX(1.1)}}`;
+
+    case 'clean': return `${shared}
+  .bub{opacity:0;transform-box:fill-box;transform-origin:50% 50%;
+    animation:float 6s ease-in-out infinite;
+    animation-delay:calc(var(--i) * .8s)}
+  @keyframes float{
+    0%{opacity:0;transform:translateY(0) scale(.7)}
+    18%{opacity:.85}
+    75%{opacity:.5}
+    100%{opacity:0;transform:translateY(-220px) scale(1.05)}}`;
+
+    case 'retail': return `${shared}
+  .a-tag{transform-box:fill-box;transform-origin:50% 0;
+    animation:art-in .8s cubic-bezier(.16,1,.3,1) .2s backwards,
+              swing 4.5s ease-in-out 1s infinite}
+  @keyframes swing{
+    0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}`;
+
+    default: return `${shared}
+  .a-draw .ln{stroke-dasharray:900;stroke-dashoffset:900;
+    animation:draw 1.6s cubic-bezier(.22,1,.36,1) forwards;
+    animation-delay:calc(.3s + var(--i) * .18s)}
+  @keyframes draw{to{stroke-dashoffset:0}}`;
+  }
+}
+
 /* --------------------------------------------------------------- chrome */
 
 /** Multi-page nav (kept for the four-file build). */
@@ -564,6 +816,7 @@ function css(p, t) {
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E")}
 
   ${ornamentCss(t.ornament)}
+  ${heroArtCss(t.family)}
 
   /* ---------- header ---------- */
   header{position:sticky;top:0;z-index:50;
@@ -626,7 +879,19 @@ function css(p, t) {
   .hero{position:relative;isolation:isolate;overflow:hidden;
     background:var(--ink);color:#fff;padding:120px 0 118px;margin-top:-1px}
   .hero .wrap{position:relative;z-index:2}
-  .hero h1{max-width:15ch;
+  .hero-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,auto);
+    gap:48px;align-items:center}
+  .hero-art{display:flex;justify-content:center;align-items:center}
+  @media (max-width:900px){
+    .hero-grid{grid-template-columns:1fr}
+    .hero-art{display:none}
+    .hero h1{max-width:18ch}
+  }
+  /* Shared entrance for every piece of art. */
+  @keyframes art-in{
+    from{opacity:0;transform:translateY(16px) scale(.97)}
+    to{opacity:.9;transform:none}}
+  .hero h1{max-width:14ch;overflow-wrap:break-word;
     background:linear-gradient(170deg,#fff 30%,rgba(255,255,255,.80));
     -webkit-background-clip:text;background-clip:text;color:transparent}
   .hero p.lede{font-size:clamp(1.05rem,2vw,1.3rem);color:rgba(255,255,255,.72);
@@ -1008,7 +1273,7 @@ export const newToken = () => randomBytes(16).toString('hex');
  * nothing they asked for. It also reviews faster — one screenshot and the
  * prospect has seen everything.
  */
-function singleBody(b) {
+function singleBody(b, family = 'pro') {
   const action = primaryAction(b, { single: true });
   const services = b.services ?? [];
   const where = b.areas?.length ? b.areas.join(', ') : 'the local area';
@@ -1031,12 +1296,17 @@ function singleBody(b) {
   <div class="orn"></div>
   <div class="grain"></div>
   <div class="wrap">
-    <p class="eyebrow">${esc(eyebrow)}</p>
-    <h1>${esc(headline(b))}</h1>
-    <p class="lede">${esc(subhead(b))}</p>
-    <a class="cta" href="${action.href}">${esc(action.label)}</a>
-    ${b.primary_cta !== 'call' && tel
-      ? `<a class="cta ghost" href="${tel}">Or call ${esc(b.phone)}</a>` : ''}
+    <div class="hero-grid">
+      <div>
+        <p class="eyebrow">${esc(eyebrow)}</p>
+        <h1>${esc(headline(b))}</h1>
+        <p class="lede">${esc(subhead(b))}</p>
+        <a class="cta" href="${action.href}">${esc(action.label)}</a>
+        ${b.primary_cta !== 'call' && tel
+          ? `<a class="cta ghost" href="${tel}">Or call ${esc(b.phone)}</a>` : ''}
+      </div>
+      <div class="hero-art">${heroArt(family)}</div>
+    </div>
     ${tickerItems.length > 1 ? `
     <div class="ticker"><div class="ticker-track">${ticker}</div></div>` : ''}
   </div>
@@ -1150,7 +1420,8 @@ export function renderSite(brief, { draftNote = null, pages = 'single' } = {}) {
   if (pages === 'single') {
     return {
       'index.html': page({
-        ...common, title: 'Home', current: '#services', single: true, body: singleBody(brief),
+        ...common, title: 'Home', current: '#services', single: true,
+        body: singleBody(brief, theme.family),
       }),
     };
   }

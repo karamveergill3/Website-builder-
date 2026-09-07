@@ -361,3 +361,55 @@ test('two different sectors produce visibly different markup, not just CSS vars'
   assert.equal(headingCase(garage), 'uppercase', 'garage headlines are set uppercase');
   assert.equal(headingCase(salon), 'none', 'a salon headline is not shouted');
 });
+
+/* --------------------------------------------------------- hero artwork */
+
+test('every sector gets its own piece of hero art', () => {
+  const trades = ['Roofing', 'Vehicle maintenance and repair', 'Landscaping',
+                  'Hairdressing and beauty', 'Bakeries', 'Florists',
+                  'Cleaning of buildings', 'Architecture'];
+  const marks = trades.map((t) => {
+    const html = renderSite({ ...brief, trade: t })['index.html'];
+    return html.match(/<svg class="art"[\s\S]*?<\/svg>/)?.[0] ?? null;
+  });
+  assert.ok(marks.every(Boolean), 'every sector needs art');
+  assert.equal(new Set(marks).size, trades.length, 'no two sectors share a drawing');
+});
+
+test('the art is inline SVG — no request, and nothing to block', () => {
+  const html = renderSite({ ...brief, trade: 'Hairdressing and beauty' })['index.html'];
+  assert.match(html, /<svg class="art"/);
+  // An <img> would need img-src and could fail; the point of inline is that
+  // it cannot.
+  assert.ok(!/<img/i.test(html), 'art must not be an external image');
+  assert.ok(!/<script/i.test(html), 'and must not need a script to animate');
+});
+
+test('the art is hidden from assistive tech — it carries no information', () => {
+  const html = renderSite(brief)['index.html'];
+  assert.match(html, /<svg class="art"[^>]*aria-hidden="true"/);
+  assert.match(html, /<svg class="art"[^>]*focusable="false"/);
+});
+
+test('the art is dropped on a phone, where the screen is worth more', () => {
+  const html = renderSite(brief)['index.html'];
+  assert.match(html, /@media \(max-width:900px\)\{[\s\S]*?\.hero-art\{display:none\}/);
+});
+
+test('the art inherits the palette rather than shipping a second asset', () => {
+  const html = renderSite({ ...brief, trade: 'Vehicle maintenance and repair' })['index.html'];
+  const art = html.match(/<svg class="art"[\s\S]*?<\/svg>/)[0];
+  assert.match(art, /stroke="currentColor"/, 'strokes must inherit');
+  assert.match(html, /\.art\{[^}]*color:var\(--accent\)/);
+});
+
+test('a long headline still fits beside the art', () => {
+  // The art column halves the space the headline has. Sizes calibrated for
+  // a full-width hero overflow instead of wrapping.
+  const html = renderSite({
+    ...brief, trade: 'Hairdressing and beauty', areas: ['Wolverhampton'],
+  })['index.html'];
+  assert.match(html, /\.hero h1\{max-width:14ch;overflow-wrap:break-word/);
+  const size = html.match(/h1\{font-size:clamp\([^,]+,([\d.]+)vw/)?.[1];
+  assert.ok(Number(size) <= 6, `headline scales too fast for a half column: ${size}vw`);
+});

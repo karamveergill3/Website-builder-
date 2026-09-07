@@ -186,6 +186,34 @@ the web. Every theme falls back to a real system face (Georgia, Helvetica,
 system-ui), so a blocked or slow load leaves a page that still looks
 deliberate.
 
+### Hero artwork
+
+Each sector opens with a piece of line art that animates in:
+
+| Sector | What it is | What it does |
+|---|---|---|
+| Hair & beauty | Scissors over a comb | Blades open and close, comb teeth draw in |
+| Motor         | Alloy wheel with a dashed tyre | Turns continuously, speed lines pass |
+| Building      | Courses of roof tiles | Lay themselves bottom row up |
+| Landscaping   | Stems with leaves | Grow up out of the ground, then sway |
+| Food          | Cup | Steam rises in wisps |
+| Cleaning      | Bubbles | Drift upward at different speeds |
+| Retail        | Price tag on a hook | Swings gently |
+| Professional  | Geometric mark | Draws itself, stroke by stroke |
+
+**Inline SVG animated with CSS.** No image request, no JavaScript, nothing
+that can fail to load — and it scales to any screen without going soft. It
+uses `currentColor`, so a salon's scissors come out pink and a garage's
+wheel red without a second asset existing anywhere.
+
+Line art rather than illustration on purpose: a stroke drawing reads as
+considered where a cartoon reads as clip art. The whole page including the
+artwork is about 20 KB.
+
+The art is `aria-hidden` — it carries no information a screen reader needs —
+and it is dropped entirely below 900px, where the screen is better spent on
+the phone number.
+
 ### The headline
 
 Companies House calls a garage "Vehicle maintenance and repair" and a salon

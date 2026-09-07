@@ -132,11 +132,31 @@ The extractor works out which numbered answer is which rather than assuming
 positions, so a reply in the old three-question format still parses — it
 just reports the name as missing.
 
-**Palette follows the trade.** Roofers get slate and high-vis orange; a
-salon gets soft pink; a bakery gets warm brown; a landscaper gets green.
-This is the single cheapest thing that stops every generated site looking
-like the same template. A colour the prospect actually named always beats
-the trade default.
+## How it looks
+
+The page opens on a dark hero with a slow-drifting gradient mesh behind it,
+a film-grain overlay, a large gradient headline, a pill call-to-action, and
+a ticker of their services. Sections rise into view as you scroll. Cards
+lift on hover.
+
+**All of it is CSS.** The preview is served under `default-src 'none'`, so
+there is no JavaScript available — and none is needed. Reveals use
+`animation-timeline: view()` and the header's colour change uses
+`animation-timeline: scroll()`; both are native CSS and both are wrapped in
+`@supports`, so a browser without them shows a static page with identical
+content rather than a broken one.
+
+`prefers-reduced-motion` stops every animation. All of them are decorative,
+so the page is complete either way — that is the test for whether an effect
+earns its place.
+
+**Palette follows the trade.** Roofers get slate and hot orange; a salon
+gets pink over plum; a bakery gets warm rust; a landscaper gets green. Each
+palette carries a second, lighter hue so the mesh has depth across the whole
+hero instead of one lit corner. This is the single cheapest thing that stops
+every generated site looking like the same template. A colour the prospect
+named beats the trade default, and its companion hue is derived from it so
+the two always belong together.
 
 **Placeholders are honest.** Where their photos go, the page says so.
 A dashed empty box reads better than a stock photo of someone else's van,

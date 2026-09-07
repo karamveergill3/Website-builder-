@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  renderSite, resolvePalette, tradeFamily, esc, telHref, mailtoHref, newToken, PAGES,
+  renderSite, resolvePalette, tradeFamily, esc, telHref, mailtoHref, newToken, PAGES, shade,
 } from '../server/lib/site-builder.js';
 
 const brief = {
@@ -207,4 +207,76 @@ test('the trading name is what appears, with the legal name in the footer', () =
 test('no legal-name line when the names are the same', () => {
   const html = renderSite({ ...brief, registered_name: brief.business_name })['index.html'];
   assert.ok(!html.includes('A trading name of'));
+});
+
+/* ------------------------------------------------------- the visual layer */
+
+test('the page carries no script — the preview CSP forbids one', () => {
+  // Served under default-src 'none'. A <script> would silently not run, so
+  // anything relying on one is a bug that only shows up in production.
+  const html = renderSite(brief)['index.html'];
+  assert.ok(!/<script/i.test(html), 'a script tag would be dead on arrival');
+  assert.ok(!/\son[a-z]+\s*=/i.test(html), 'inline event handlers are equally dead');
+});
+
+test('animation is decorative only — reduced motion still gets the content', () => {
+  const html = renderSite(brief)['index.html'];
+  assert.match(html, /@media \(prefers-reduced-motion: reduce\)/,
+    'a reader who asked for less motion must be honoured');
+  // The reveal must not leave content invisible when animation is disabled.
+  assert.match(html, /\.reveal\{opacity:1 !important/);
+});
+
+test('scroll-driven effects are feature-gated, so an old browser still reads', () => {
+  const html = renderSite(brief)['index.html'];
+  for (const feature of ['animation-timeline: view()', 'animation-timeline: scroll()']) {
+    assert.ok(html.includes(`@supports (${feature})`), `${feature} must be gated`);
+  }
+});
+
+test('the mesh gets a second hue, so it is not one lit corner', () => {
+  for (const t of ['Roofing', 'Bakeries', 'Landscaping', 'Architecture']) {
+    const p = resolvePalette(t, []);
+    assert.ok(p.glow, `${t} has no glow`);
+    assert.notEqual(p.glow, p.accent, `${t} glow must differ from accent`);
+  }
+});
+
+test('a brand colour derives a lighter companion, not a darker one', () => {
+  // The mesh sits on a dark ink. A darker second hue disappears into it.
+  const p = resolvePalette('Roofing', ['#1e3a5f']);
+  assert.equal(p.accent, '#1e3a5f');
+  const lum = (hex) => {
+    const n = Number.parseInt(hex.slice(1), 16);
+    return ((n >> 16) & 255) + ((n >> 8) & 255) + (n & 255);
+  };
+  assert.ok(lum(p.glow) > lum(p.accent), 'glow should be lighter than the brand colour');
+});
+
+test('shade lightens and darkens without producing invalid colours', () => {
+  assert.match(shade('#f97316', 0.4), /^#[0-9a-f]{6}$/);
+  assert.match(shade('#f97316', -0.4), /^#[0-9a-f]{6}$/);
+  assert.equal(shade('#000000', 1), '#ffffff');
+  assert.equal(shade('#ffffff', -1), '#000000');
+  assert.equal(shade('not-a-colour', 0.5), 'not-a-colour', 'bad input passes through');
+});
+
+test('four services lay out as 2x2 rather than orphaning the last card', () => {
+  const html = renderSite({ ...brief, services: ['A', 'B', 'C', 'D'] })['index.html'];
+  assert.ok(html.includes('data-n="4"'), 'the grid must declare its count');
+  assert.match(html, /\.grid\[data-n="2"\],\.grid\[data-n="4"\]\{grid-template-columns:repeat\(2/);
+});
+
+test('the ticker repeats its items so the loop has no gap', () => {
+  // The track translates by -50%; without a second copy the second half of
+  // each cycle is empty.
+  const html = renderSite({ ...brief, services: ['Roofing', 'Guttering'] })['index.html'];
+  const track = html.match(/<div class="ticker-track">([\s\S]*?)<\/div>/)?.[1] ?? '';
+  const roofing = (track.match(/>Roofing</g) ?? []).length;
+  assert.equal(roofing, 2, 'each item must appear exactly twice');
+});
+
+test('the print stylesheet drops the decoration', () => {
+  const html = renderSite(brief)['index.html'];
+  assert.match(html, /@media print\{[\s\S]*?\.mesh,\.grain,\.ticker\{display:none\}/);
 });

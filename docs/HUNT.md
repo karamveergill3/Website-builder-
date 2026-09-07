@@ -68,6 +68,13 @@ Two things fix it:
   lifts automatically when there are too few trades listed to reach the
   target, so a two-trade setup still gets its twenty.
 
+Each trade also starts at a **different town**. Dealing index 0 from every
+trade's queue looks like a spread and is not — index 0 of every queue is the
+same town, because within a trade the towns are in list order. The first live
+run proved it: twenty leads, seven trades, every one of them in
+Stoke-on-Trent. Offsetting each trade's start by its position gives roofers
+from the first town, electricians from the second, plumbers from the third.
+
 A mixed list is a better morning's calling, and it spreads the risk if one
 trade turns out to be deaf to cold contact.
 

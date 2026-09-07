@@ -146,9 +146,23 @@ export function spreadByTrade(targets) {
   const queues = [...byTrade.values()]
     .sort((a, b) => lastUsed(a).localeCompare(lastUsed(b)));
 
+  // Each trade starts at a different town.
+  //
+  // Taking q[i] from every queue looks like a spread and is not: index 0 of
+  // every trade's queue is the SAME town, because within a trade the towns
+  // are in list order. So the first pass is "every trade in Stoke-on-Trent",
+  // the day's twenty leads all come from one town, and — since those targets
+  // are then stamped and sink to the back of their queues — tomorrow is
+  // twenty from Tamworth. Trade variety with none of the geography.
+  //
+  // Offsetting each trade's start by its position deals roofers from town 1,
+  // electricians from town 2, plumbers from town 3. Modulo the queue length,
+  // so every target is still dealt exactly once.
   const out = [];
   for (let i = 0; out.length < targets.length; i += 1) {
-    for (const q of queues) if (i < q.length) out.push(q[i]);
+    queues.forEach((q, trade) => {
+      if (i < q.length) out.push(q[(i + trade) % q.length]);
+    });
   }
   return out;
 }

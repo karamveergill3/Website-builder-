@@ -599,6 +599,49 @@ test('the trade that has waited longest is dealt first', () => {
     'never run, then longest ago, then most recent');
 });
 
+test('each trade starts at a different town', () => {
+  // Taking index 0 from every trade's queue looks like a spread and is not:
+  // index 0 of every queue is the SAME town, because within a trade the towns
+  // are in list order. The first real run filed twenty leads across seven
+  // trades and every single one in Stoke-on-Trent.
+  const TOWNS = ['Stoke-on-Trent', 'Tamworth', 'Stafford', 'Lichfield'];
+  const rows = [];
+  for (const trade of ['roofer', 'electrician', 'plumber', 'plasterer']) {
+    for (const area of TOWNS) rows.push({ trade, area, last_run_at: null });
+  }
+
+  const spread = spreadByTrade(rows);
+  assert.equal(spread.length, rows.length, 'nothing is lost or repeated');
+
+  // The opening round — one target per trade — must not be one town.
+  const firstRound = spread.slice(0, 4);
+  assert.equal(new Set(firstRound.map((t) => t.trade)).size, 4, 'four trades');
+  assert.equal(new Set(firstRound.map((t) => t.area)).size, 4,
+    `four towns, got ${JSON.stringify(firstRound.map((t) => t.area))}`);
+
+  // And every trade/town pair is still dealt exactly once.
+  const keys = spread.map((t) => `${t.trade}|${t.area}`);
+  assert.equal(new Set(keys).size, rows.length, 'no target dealt twice');
+});
+
+test('the town spread survives uneven town lists', () => {
+  // A trade whose towns have mostly been worked has a shorter queue. The
+  // offset is taken modulo that length, so it still lands on a real target.
+  const rows = [
+    { trade: 'roofer', area: 'A', last_run_at: null },
+    { trade: 'roofer', area: 'B', last_run_at: null },
+    { trade: 'roofer', area: 'C', last_run_at: null },
+    { trade: 'electrician', area: 'A', last_run_at: null },
+    { trade: 'plumber', area: 'A', last_run_at: null },
+    { trade: 'plumber', area: 'B', last_run_at: null },
+  ];
+  const spread = spreadByTrade(rows);
+  assert.equal(spread.length, rows.length);
+  const keys = spread.map((t) => `${t.trade}|${t.area}`);
+  assert.equal(new Set(keys).size, rows.length, 'every target exactly once');
+  for (const t of spread) assert.ok(t.area, 'no undefined slot');
+});
+
 test('spreadByTrade copes with one trade and with nothing', () => {
   assert.deepEqual(spreadByTrade([]), []);
   const one = [{ trade: 'roofer', area: 'A', last_run_at: null },

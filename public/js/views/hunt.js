@@ -257,9 +257,18 @@ export default async function huntView(root, _p, { refresh }) {
   $('#cfg', root).addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const form = Object.fromEntries(new FormData(ev.target));
-    // Unchecked boxes are absent from FormData.
-    for (const k of ['hunt_enabled', 'hunt_require_no_website', 'hunt_include_unlisted']) {
-      form[k] = form[k] === 'on' ? '1' : '0';
+
+    // Normalise every checkbox, found from the form itself rather than a
+    // list someone has to remember to extend.
+    //
+    // FormData omits an unchecked box entirely and gives a checked one the
+    // string "on", so both directions need fixing: without this an unticked
+    // box stays ticked, and a box missing from the list saves "on" — which
+    // is not "1", so it reads back as off and appears to untick itself on
+    // save. That is exactly what happened when the phone filter was added
+    // and the list was not updated with it.
+    for (const box of ev.target.querySelectorAll('input[type="checkbox"]')) {
+      if (box.name) form[box.name] = box.checked ? '1' : '0';
     }
     try {
       await api.settings.save(form);

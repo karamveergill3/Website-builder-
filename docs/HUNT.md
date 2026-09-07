@@ -46,7 +46,9 @@ stops rather than spending more.
 - **Trades** — one per line, in the words you would say. "roofers" resolves to
   SIC 43910; the chips under the box show what each one resolved to. A trade
   with no SIC code is listed as unrecognised rather than quietly dropped, and
-  you can type a raw code instead.
+  you can type a raw code instead. **Add every trade** fills the list from
+  the 80-plus preset — building, home services, motor, beauty, food, retail,
+  personal services — existing lines kept, duplicates dropped.
 - **Towns** — one per line. Matched against the registered office as whole
   words, so a town name or a full postcode, not a partial one.
 - **Find per day** — the target. It stops as soon as it hits it.
@@ -54,7 +56,14 @@ stops rather than spending more.
 
 More towns is the main lever. Four trades across five towns is twenty
 combinations; at a hundred companies read per page that is a lot of days before
-anything runs out.
+anything runs out. Add every trade (80+) across ten towns and you have 800
+combinations — enough to keep the hunt fed for months without repeating
+ground.
+
+**Default caps** — 20 leads per day, 80 register pages, 80 Places requests.
+Every one of those can be raised (up to 500) but 20/day is the point where
+the manual step (finding contact details on the leads it files) starts to
+become the bottleneck rather than the hunt itself.
 
 ## Running it when the server is not up
 

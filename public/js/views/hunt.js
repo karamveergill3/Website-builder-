@@ -78,6 +78,11 @@ export default async function huntView(root, _p, { refresh }) {
               <label for="h-trades">Trades <span class="opt">one per line</span></label>
               <textarea id="h-trades" name="hunt_trades" rows="6"
                         placeholder="roofers&#10;plasterers&#10;electricians">${c.trades.join('\n')}</textarea>
+              <p class="tip">
+                <button type="button" class="mini" data-act="add-all-trades">Add every trade</button>
+                — 80+ trades covering building, home services, motor, beauty, food, retail.
+                Existing lines are kept; duplicates are dropped.
+              </p>
               ${s.plan.unrecognised_trades.length ? html`
                 <p class="tip" style="color:var(--clay)">
                   No SIC code for: ${s.plan.unrecognised_trades.join(', ')} — reword, or use a code.
@@ -104,7 +109,7 @@ export default async function huntView(root, _p, { refresh }) {
           <div class="cols-3">
             <div class="f">
               <label for="h-target">Find per day</label>
-              <input id="h-target" name="hunt_daily_target" type="number" min="1" max="200" value="${c.target}">
+              <input id="h-target" name="hunt_daily_target" type="number" min="1" max="500" value="${c.target}">
             </div>
             <div class="f">
               <label for="h-hour">Run at</label>
@@ -112,7 +117,7 @@ export default async function huntView(root, _p, { refresh }) {
             </div>
             <div class="f">
               <label for="h-pages">Register pages, max</label>
-              <input id="h-pages" name="hunt_max_register_pages" type="number" min="1" max="200"
+              <input id="h-pages" name="hunt_max_register_pages" type="number" min="1" max="500"
                      value="${c.maxRegisterPages}">
             </div>
             <div class="f">
@@ -214,6 +219,29 @@ export default async function huntView(root, _p, { refresh }) {
       refresh();
     } catch (err) {
       toast(err.message, { error: true, ms: 7000 });
+    }
+  });
+
+  on(root, 'click', '[data-act="add-all-trades"]', async (_e, btn) => {
+    btn.disabled = true;
+    try {
+      const { trades } = await api.get('/api/hunt/trades');
+      const ta = $('#h-trades', root);
+      const existing = new Set(
+        (ta.value ?? '').split(/\n/).map((s) => s.trim().toLowerCase()).filter(Boolean)
+      );
+      const added = trades.filter((t) => !existing.has(t.toLowerCase()));
+      if (!added.length) {
+        toast('Every recognised trade is already listed');
+        return;
+      }
+      const lines = (ta.value ? [ta.value.replace(/\s+$/, ''), ''] : []).concat(added);
+      ta.value = lines.join('\n');
+      toast(`Added ${added.length} trade${added.length === 1 ? '' : 's'} — Save to apply`);
+    } catch (err) {
+      toast(err.message ?? 'Could not load trades', { error: true });
+    } finally {
+      btn.disabled = false;
     }
   });
 

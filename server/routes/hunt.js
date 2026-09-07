@@ -5,7 +5,7 @@ import {
   hunt, huntConfig, activeHunt, recentRuns, targetProgress, foundToday, syncTargets,
 } from '../lib/hunter.js';
 import { configured as chConfigured } from '../lib/companies-house.js';
-import { resolveTrade } from '../lib/sic.js';
+import { resolveTrade, allTradeKeywords } from '../lib/sic.js';
 
 const router = Router();
 
@@ -75,6 +75,11 @@ router.post('/run', wrap((req, res) => {
   hunt({ trigger: 'manual', target }).catch(() => { /* recorded on the run row */ });
 
   res.status(202).json({ started: true, target });
+}));
+
+/** Every trade keyword the picker recognises, for the UI's "add all" preset. */
+router.get('/trades', wrap((_req, res) => {
+  res.json({ trades: allTradeKeywords() });
 }));
 
 router.post('/sync-targets', wrap((_req, res) => {

@@ -381,6 +381,22 @@ test('a hunt cannot start while one is running', async () => {
   }
 });
 
+test('GET /api/hunt/trades returns the full recognised trade list', async () => {
+  const r = await get('/api/hunt/trades');
+  assert.equal(r.status, 200);
+  const list = r.body.trades;
+  assert.ok(Array.isArray(list));
+  assert.ok(list.length >= 50, `expected 50+ trades, got ${list.length}`);
+  // A handful of essentials the preset must include.
+  // Each row contributes one canonical keyword — the first term. So
+  // "landscaper" covers gardening; "hairdresser" covers salons; and so on.
+  for (const t of ['roofer', 'plumber', 'electrician', 'landscaper', 'hairdresser', 'tattoo']) {
+    assert.ok(list.some((x) => x.toLowerCase() === t), `${t} missing from preset`);
+  }
+  // No duplicates.
+  assert.equal(list.length, new Set(list).size);
+});
+
 test('only the derived website flag is stored, never listing content', async () => {
   stub();
   await clearLeads();

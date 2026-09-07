@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 
 import {
   renderSite, resolvePalette, tradeFamily, esc, telHref, mailtoHref, newToken, PAGES, shade,
+  themeFor, shortTrade,
 } from '../server/lib/site-builder.js';
 
 const brief = {
@@ -279,4 +280,84 @@ test('the ticker repeats its items so the loop has no gap', () => {
 test('the print stylesheet drops the decoration', () => {
   const html = renderSite(brief)['index.html'];
   assert.match(html, /@media print\{[\s\S]*?\.mesh,\.grain,\.ticker\{display:none\}/);
+});
+
+/* ----------------------------------------------------------- sector themes */
+
+test('each sector gets its own type, shape and motion — not just a colour', () => {
+  const trades = ['Roofing', 'Vehicle maintenance and repair', 'Landscaping',
+                  'Hairdressing and beauty', 'Bakeries', 'Florists',
+                  'Cleaning of buildings', 'Architecture'];
+  const themes = trades.map((t) => themeFor(t));
+
+  // If these collapse, every generated site is one template recoloured —
+  // which is exactly what a prospect recognises as generic.
+  assert.equal(new Set(themes.map((t) => t.display)).size, trades.length,
+    'every sector needs a distinct display face');
+  assert.ok(new Set(themes.map((t) => t.motion)).size >= 6,
+    'sectors should not all move the same way');
+  assert.ok(new Set(themes.map((t) => t.ornament)).size >= 6,
+    'sectors should not all share one backdrop');
+  assert.ok(new Set(themes.map((t) => t.radius)).size >= 4,
+    'shape language should vary');
+});
+
+test('every display stack ends in a font that is actually on the device', () => {
+  // The font load can be blocked or slow. The fallback is what a real
+  // viewer may well see, so it has to be a deliberate choice rather than
+  // whatever the browser defaults to.
+  for (const trade of ['Roofing', 'Hairdressing and beauty', 'Bakeries', 'Architecture']) {
+    const { display } = themeFor(trade);
+    assert.match(display, /(serif|sans-serif)$/, `${trade}: ${display}`);
+    assert.ok(/Georgia|Helvetica|Arial|-apple-system/.test(display),
+      `${trade} needs a real system fallback, got: ${display}`);
+  }
+});
+
+test('the headline uses the word a customer would say, not the register\'s', () => {
+  assert.equal(shortTrade('Vehicle maintenance and repair'), 'Servicing & MOT');
+  assert.equal(shortTrade('Hairdressing and beauty'), 'Hair & beauty');
+  assert.equal(shortTrade('Plumbing, heating and air conditioning'), 'Plumbing & heating');
+  // Already short ones are left alone.
+  assert.equal(shortTrade('Roofing'), 'Roofing');
+  assert.equal(shortTrade('Landscaping'), 'Landscaping');
+});
+
+test('an unmapped trade is still shortened enough to fit a headline', () => {
+  const out = shortTrade('Some Extremely Long Unmapped Trade Description Here');
+  assert.ok(out.split(/\s+/).length <= 4, `too long for an H1: "${out}"`);
+  assert.equal(shortTrade(''), null);
+  assert.equal(shortTrade(null), null);
+});
+
+test('a long register label does not run the headline past two lines', () => {
+  const html = renderSite({
+    ...brief,
+    trade: 'Vehicle maintenance and repair',
+    areas: ['Dudley'],
+  })['index.html'];
+  const h1 = html.match(/<h1>([^<]*)<\/h1>/)?.[1] ?? '';
+  assert.equal(h1, 'Servicing &amp; MOT in Dudley');
+  assert.ok(!html.includes('<h1>Vehicle maintenance and repair'),
+    'the raw register label must not reach the headline');
+});
+
+test('the font stylesheet is requested from the origin the CSP allows', () => {
+  const html = renderSite(brief)['index.html'];
+  assert.match(html, /<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com\/css2/);
+  assert.match(html, /rel="preconnect" href="https:\/\/fonts\.gstatic\.com"/);
+});
+
+test('two different sectors produce visibly different markup, not just CSS vars', () => {
+  const salon  = renderSite({ ...brief, trade: 'Hairdressing and beauty' })['index.html'];
+  const garage = renderSite({ ...brief, trade: 'Vehicle maintenance and repair' })['index.html'];
+  assert.notEqual(salon, garage);
+  assert.ok(salon.includes('Cormorant'), 'salon should ask for its serif');
+  assert.ok(garage.includes('Chakra'), 'garage should ask for its technical face');
+  // Check the HEADING rule, not the page: .eyebrow is uppercase in every
+  // theme, so a bare substring search says nothing.
+  const headingCase = (html) =>
+    html.match(/h1,h2\{[^}]*text-transform:([a-z]+)/)?.[1] ?? null;
+  assert.equal(headingCase(garage), 'uppercase', 'garage headlines are set uppercase');
+  assert.equal(headingCase(salon), 'none', 'a salon headline is not shouted');
 });

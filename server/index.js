@@ -90,14 +90,29 @@ app.use('/api', mockups);
  *
  * These pages contain text a prospect emailed us. It is escaped at render
  * time (see site-builder.js), and served under a CSP that would neuter any
- * script that did slip through: no scripts at all, styles inline-only,
- * images from this origin or data: URIs, and no framing.
+ * script that did slip through.
+ *
+ * `default-src 'none'` and the total absence of a script-src are what
+ * matter: no script can run here by any route, so the XSS posture does not
+ * depend on the escaping being perfect. Google Fonts is allowed for
+ * stylesheets and font files only, because typography is most of what makes
+ * a mockup read as worth paying for and the system stack cannot carry eight
+ * distinct sector themes. It widens nothing that can execute — the cost is
+ * that the viewer's IP reaches Google, which is true of most of the web and
+ * is a fair trade for a page shown to one prospect. Every theme falls back
+ * to a real system face if the load is blocked.
  */
+const FONT_CSS = 'https://fonts.googleapis.com';
+const FONT_FILES = 'https://fonts.gstatic.com';
+
 app.use('/m', (_req, res, next) => {
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "
-    + "font-src 'self' data:; form-action 'none'; frame-ancestors 'none'; base-uri 'none'"
+    "default-src 'none'; "
+    + `style-src 'unsafe-inline' ${FONT_CSS}; `
+    + `font-src 'self' data: ${FONT_FILES}; `
+    + "img-src 'self' data:; "
+    + "form-action 'none'; frame-ancestors 'none'; base-uri 'none'"
   );
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');

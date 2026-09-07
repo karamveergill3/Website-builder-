@@ -150,13 +150,53 @@ content rather than a broken one.
 so the page is complete either way — that is the test for whether an effect
 earns its place.
 
-**Palette follows the trade.** Roofers get slate and hot orange; a salon
-gets pink over plum; a bakery gets warm rust; a landscaper gets green. Each
-palette carries a second, lighter hue so the mesh has depth across the whole
-hero instead of one lit corner. This is the single cheapest thing that stops
-every generated site looking like the same template. A colour the prospect
-named beats the trade default, and its companion hue is derived from it so
-the two always belong together.
+### Sector themes
+
+Colour is the weakest differentiator. Swapping only the accent produces
+eight versions of one template, which is exactly what a prospect recognises
+as generic. So each trade family gets its own **type, shape and motion**:
+
+| Sector | Display face | Shape | How it moves | Backdrop |
+|---|---|---|---|---|
+| Building  | Archivo, heavy    | Blunt 6px  | Arrives fast from the left | Hazard diagonals |
+| Motor     | Chakra Petch, caps| Sharp 2px  | Sweeps sideways, slight skew | Technical grid |
+| Landscaping | Fraunces        | Round 22px | Grows up out of the ground | Organic curves |
+| Hair & beauty | Cormorant Garamond, light | Editorial 2px | Slow unveil, weightless | Soft bloom + hairline rule |
+| Food      | Playfair Display  | Warm 14px  | Gentle rise | Warm glow from below |
+| Retail    | DM Serif Display  | Editorial 3px | Staggered | Column rules |
+| Cleaning  | Outfit            | Soft 18px  | Light lift | Floating bubbles |
+| Professional | Inter, tight   | Precise 10px | Minimal settle | Fine dot grid |
+
+A salon gets a high-contrast serif at 300 weight, wide-tracked small caps,
+square edges and a slow fade. A garage gets uppercase technical type, sharp
+corners, a measuring grid and motion that passes sideways. They do not read
+as the same site.
+
+**Palette still follows the trade**, and each one carries a second, lighter
+hue so the mesh has depth across the whole hero instead of one lit corner. A
+colour the prospect named beats the default, and its companion is derived
+from it by lightening so the two always belong together.
+
+**Fonts come from Google Fonts**, which is the one thing the preview CSP
+allows beyond its own origin. `default-src 'none'` and the total absence of
+`script-src` are what carry the security here — no script can run by any
+route — so allowing a stylesheet and a font file widens nothing executable.
+The cost is that the viewer's IP reaches Google, which is true of most of
+the web. Every theme falls back to a real system face (Georgia, Helvetica,
+system-ui), so a blocked or slow load leaves a page that still looks
+deliberate.
+
+### The headline
+
+Companies House calls a garage "Vehicle maintenance and repair" and a salon
+"Hairdressing and beauty". Set as an H1 at display size those run to four
+lines, push the phone number off the screen, and read as a database dump.
+Nobody searches for them either.
+
+So each register label maps to the words a customer would actually use —
+**Servicing & MOT**, **Hair & beauty**, **Plumbing & heating** — and
+anything unmapped is trimmed generically to fit. The fuller label still
+appears in the eyebrow above, where small caps have room for it.
 
 **Placeholders are honest.** Where their photos go, the page says so.
 A dashed empty box reads better than a stock photo of someone else's van,

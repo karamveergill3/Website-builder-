@@ -45,6 +45,103 @@ const PALETTES = {
 };
 
 /**
+ * The theme per trade family.
+ *
+ * Colour is the weakest differentiator. What makes a salon site read as a
+ * salon and a roofer's read as a roofer is TYPE, SHAPE and MOTION:
+ *
+ *   - a salon wants a high-contrast display serif, wide letter-spacing,
+ *     sharp editorial edges and slow fades
+ *   - a roofer wants a heavy grotesque, tight tracking, blunt corners and
+ *     motion that arrives fast
+ *   - a garage wants something technical and angular that sweeps sideways
+ *   - a landscaper wants organic curves and things that grow upward
+ *
+ * Swapping only the accent colour produces eight versions of one template,
+ * which is exactly what a prospect recognises as generic.
+ *
+ * `font` is the Google Fonts family; `display` always ends in a system
+ * fallback that is genuinely on the device, so a blocked or slow font load
+ * leaves a page that still looks deliberate rather than broken.
+ */
+const THEMES = {
+  building: {
+    font: 'Archivo:wght@600;800',
+    display: "'Archivo', 'Helvetica Neue', Arial, sans-serif",
+    weight: 800, tracking: '-.04em', transform: 'none',
+    size: 'clamp(2.7rem,7.4vw,5.2rem)',
+    eyebrowTracking: '.16em',
+    radius: '6px', btnRadius: '6px',
+    motion: 'drive', ornament: 'stripes',
+  },
+  motor: {
+    font: 'Chakra+Petch:wght@600;700',
+    display: "'Chakra Petch', 'Helvetica Neue', Arial, sans-serif",
+    weight: 700, tracking: '-.02em', transform: 'uppercase',
+    size: 'clamp(2.3rem,6vw,4.4rem)',
+    eyebrowTracking: '.22em',
+    radius: '2px', btnRadius: '2px',
+    motion: 'sweep', ornament: 'grid',
+  },
+  green: {
+    font: 'Fraunces:opsz,wght@9..144,500;9..144,700',
+    display: "'Fraunces', Georgia, 'Times New Roman', serif",
+    weight: 700, tracking: '-.025em', transform: 'none',
+    size: 'clamp(2.7rem,7vw,5rem)',
+    eyebrowTracking: '.18em',
+    radius: '22px', btnRadius: '100px',
+    motion: 'grow', ornament: 'organic',
+  },
+  beauty: {
+    font: 'Cormorant+Garamond:wght@300;400;600',
+    display: "'Cormorant Garamond', Georgia, 'Times New Roman', serif",
+    weight: 300, tracking: '-.005em', transform: 'none',
+    size: 'clamp(3rem,8.5vw,6.4rem)',
+    eyebrowTracking: '.34em',
+    radius: '2px', btnRadius: '2px',
+    motion: 'unveil', ornament: 'orbs',
+  },
+  food: {
+    font: 'Playfair+Display:wght@500;700',
+    display: "'Playfair Display', Georgia, 'Times New Roman', serif",
+    weight: 700, tracking: '-.025em', transform: 'none',
+    size: 'clamp(2.7rem,7.2vw,5.2rem)',
+    eyebrowTracking: '.2em',
+    radius: '14px', btnRadius: '100px',
+    motion: 'rise', ornament: 'warm',
+  },
+  retail: {
+    font: 'DM+Serif+Display:ital@0;1',
+    display: "'DM Serif Display', Georgia, 'Times New Roman', serif",
+    weight: 400, tracking: '-.02em', transform: 'none',
+    size: 'clamp(2.8rem,7.4vw,5.4rem)',
+    eyebrowTracking: '.24em',
+    radius: '3px', btnRadius: '3px',
+    motion: 'stagger', ornament: 'rules',
+  },
+  clean: {
+    font: 'Outfit:wght@500;700',
+    display: "'Outfit', 'Helvetica Neue', Arial, sans-serif",
+    weight: 700, tracking: '-.035em', transform: 'none',
+    size: 'clamp(2.6rem,7vw,4.9rem)',
+    eyebrowTracking: '.18em',
+    radius: '18px', btnRadius: '100px',
+    motion: 'shimmer', ornament: 'bubbles',
+  },
+  pro: {
+    font: 'Inter:wght@600;800',
+    display: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    weight: 800, tracking: '-.045em', transform: 'none',
+    size: 'clamp(2.6rem,6.8vw,4.9rem)',
+    eyebrowTracking: '.16em',
+    radius: '10px', btnRadius: '8px',
+    motion: 'settle', ornament: 'dots',
+  },
+};
+
+export const themeFor = (trade) => THEMES[tradeFamily(trade)] ?? THEMES.pro;
+
+/**
  * Which family a trade belongs to. First match wins, so the order is the
  * rule: the narrow patterns must come before the broad ones. "Cleaning of
  * buildings" contains "build" and would otherwise be filed as a builder.
@@ -118,6 +215,85 @@ export function shade(hex, amount) {
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
 }
 
+/**
+ * How a section arrives. Each is a keyframe pair used by `.reveal` — the
+ * character of the movement is doing as much sector work as the palette.
+ */
+const MOTION = {
+  // Heavy trades: it arrives, it does not float. Short, from the side.
+  drive:   { from: 'opacity:0;transform:translate3d(-26px,0,0)', dur: '.55s',
+             ease: 'cubic-bezier(.2,.8,.2,1)' },
+  // Garage: a horizontal pass, slightly skewed, like something going by.
+  sweep:   { from: 'opacity:0;transform:translate3d(-40px,0,0) skewX(-3deg)', dur: '.6s',
+             ease: 'cubic-bezier(.16,1,.3,1)' },
+  // Landscaping: grows up out of the ground.
+  grow:    { from: 'opacity:0;transform:translate3d(0,30px,0) scaleY(.94)', dur: '.8s',
+             ease: 'cubic-bezier(.22,1,.36,1)' },
+  // Salon: slow, weightless, a touch of scale. Nothing hurried.
+  unveil:  { from: 'opacity:0;transform:translate3d(0,14px,0) scale(.985)', dur: '1.15s',
+             ease: 'cubic-bezier(.16,1,.3,1)' },
+  rise:    { from: 'opacity:0;transform:translate3d(0,26px,0)', dur: '.85s',
+             ease: 'cubic-bezier(.22,1,.36,1)' },
+  stagger: { from: 'opacity:0;transform:translate3d(0,22px,0)', dur: '.75s',
+             ease: 'cubic-bezier(.22,1,.36,1)' },
+  shimmer: { from: 'opacity:0;transform:translate3d(0,18px,0)', dur: '.7s',
+             ease: 'cubic-bezier(.22,1,.36,1)' },
+  settle:  { from: 'opacity:0;transform:translate3d(0,12px,0)', dur: '.5s',
+             ease: 'cubic-bezier(.3,.9,.3,1)' },
+};
+
+/**
+ * The hero backdrop, beyond the drifting mesh every theme shares. These are
+ * pure CSS — repeating gradients and masks, no images to load.
+ */
+function ornamentCss(kind) {
+  switch (kind) {
+    case 'stripes':  // hazard diagonals, very low contrast
+      return `.orn{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.055;
+        background:repeating-linear-gradient(135deg,#fff 0 2px,transparent 2px 22px)}`;
+    case 'grid':     // technical measuring grid
+      return `.orn{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.09;
+        background-image:linear-gradient(#fff 1px,transparent 1px),
+          linear-gradient(90deg,#fff 1px,transparent 1px);
+        background-size:64px 64px;
+        -webkit-mask-image:radial-gradient(ellipse at 30% 40%,#000,transparent 72%);
+        mask-image:radial-gradient(ellipse at 30% 40%,#000,transparent 72%)}`;
+    case 'organic':  // soft overlapping leaf-ish curves
+      return `.orn{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.1;
+        background:
+          radial-gradient(60% 80% at 88% 12%,#fff,transparent 60%),
+          radial-gradient(50% 70% at 8% 92%,#fff,transparent 62%)}`;
+    case 'orbs':     // fine editorial rule plus a soft bloom
+      return `.orn{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.14;
+        background:radial-gradient(40% 55% at 78% 30%,#fff,transparent 70%)}
+      .hero .wrap::before{content:"";position:absolute;left:-28px;top:6px;bottom:6px;
+        width:1px;background:linear-gradient(180deg,transparent,var(--accent),transparent);
+        opacity:.6}`;
+    case 'warm':
+      return `.orn{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.16;
+        background:radial-gradient(70% 60% at 50% 105%,var(--accent),transparent 68%)}`;
+    case 'rules':    // editorial column rules
+      return `.orn{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.07;
+        background-image:linear-gradient(90deg,#fff 1px,transparent 1px);
+        background-size:calc(100%/6) 100%}`;
+    case 'bubbles':
+      return `.orn{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.13;
+        background:
+          radial-gradient(circle 8px at 12% 74%,#fff,transparent 60%),
+          radial-gradient(circle 14px at 84% 22%,#fff,transparent 60%),
+          radial-gradient(circle 5px at 66% 82%,#fff,transparent 60%),
+          radial-gradient(circle 10px at 32% 18%,#fff,transparent 60%),
+          radial-gradient(circle 6px at 92% 66%,#fff,transparent 60%)}`;
+    case 'dots':
+    default:
+      return `.orn{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.16;
+        background-image:radial-gradient(#fff 1px,transparent 1px);
+        background-size:26px 26px;
+        -webkit-mask-image:radial-gradient(ellipse at 26% 34%,#000,transparent 68%);
+        mask-image:radial-gradient(ellipse at 26% 34%,#000,transparent 68%)}`;
+  }
+}
+
 /* ------------------------------------------------------------ escaping */
 
 /**
@@ -166,10 +342,102 @@ export function mailtoHref(email) {
 
 /* --------------------------------------------------------------- copy */
 
+/**
+ * The trade word a customer would use, not the one the register uses.
+ *
+ * Companies House calls a garage "Vehicle maintenance and repair" and a
+ * salon "Hairdressing and beauty". Set as an H1 those read as a database
+ * dump, and at display size they run to four lines and push the phone
+ * number off the screen. Nobody searches for them either.
+ */
+const SHORT_TRADE = {
+  'Electrical installation': 'Electricians',
+  'Plumbing, heating and air conditioning': 'Plumbing & heating',
+  'Joinery installation': 'Joinery',
+  'Floor and wall covering': 'Flooring & tiling',
+  'Painting': 'Painting & decorating',
+  'Glazing': 'Windows & glazing',
+  'Building completion and finishing': 'Kitchens & bathrooms',
+  'Site preparation': 'Groundworks',
+  'Scaffold erection': 'Scaffolding',
+  'Other specialised construction': 'Specialist building',
+  'Building contractors': 'Builders',
+  'Other construction installation': 'Installations',
+  'Solar installation': 'Solar & EV charging',
+  'Renewable heating': 'Heat pumps',
+  'Fencing and paving': 'Fencing & paving',
+  'Turf and grass': 'Lawns & turf',
+  'Garden buildings': 'Garden rooms',
+  'Cleaning of buildings': 'Cleaning',
+  'Other cleaning': 'Specialist cleaning',
+  'Locksmith and security': 'Locksmiths',
+  'Appliance and equipment repair': 'Appliance repair',
+  'Electronics repair': 'Device repair',
+  'Shoe and leather repair': 'Shoe repair',
+  'Upholstery repair': 'Upholstery',
+  'Handyman services': 'Handyman',
+  'Vehicle maintenance and repair': 'Servicing & MOT',
+  'Vehicle parts and accessories': 'Parts & tyres',
+  'Valeting and cleaning': 'Valeting',
+  'Driving instruction': 'Driving lessons',
+  'Hairdressing and beauty': 'Hair & beauty',
+  'Nail and beauty': 'Nails & beauty',
+  'Personal care': 'Tattoo & piercing',
+  'Wellbeing': 'Massage & wellbeing',
+  'Complementary therapy': 'Therapy',
+  'Pet services': 'Dog grooming',
+  'Restaurants and cafes (licensed)': 'Restaurant',
+  'Cafes and unlicensed restaurants': 'Coffee & food',
+  'Takeaways': 'Takeaway',
+  'Catering and food services': 'Catering',
+  'Bakeries': 'Bakery',
+  'Delis and food shops': 'Deli',
+  'Florists': 'Florist',
+  'Bookshops': 'Bookshop',
+  'Sports and cycle shops': 'Bikes & sport',
+  'Health and beauty shops': 'Health & beauty',
+  'Independent retail': 'Independent shop',
+  'Clothing shops': 'Clothing',
+  'Furniture and homeware': 'Furniture',
+  'Market stalls': 'Street food',
+  'Event services': 'Weddings & events',
+  'Entertainment': 'DJs & entertainment',
+  'Sports coaching': 'Coaching',
+  'Design': 'Interior design',
+  'Machinery repair': 'Fabrication & welding',
+  'Bespoke joinery and carpentry': 'Bespoke joinery',
+  'Bespoke furniture': 'Furniture making',
+  'Road freight': 'Haulage',
+  'Taxi and private hire': 'Taxi & private hire',
+  'Freight forwarding': 'Logistics',
+  'Print and signs': 'Print & signage',
+  'Small manufacturing': 'Bespoke making',
+};
+
+/**
+ * Shorten any trade to something that fits a headline. Mapped values win;
+ * anything unmapped is trimmed generically — cut at a comma or bracket,
+ * then drop a trailing "and X" clause if that still leaves it too long.
+ */
+export function shortTrade(trade) {
+  const raw = String(trade ?? '').trim();
+  if (!raw) return null;
+  if (SHORT_TRADE[raw]) return SHORT_TRADE[raw];
+
+  let out = raw.split(/[,(]/)[0].trim();
+  if (out.split(/\s+/).length > 3) {
+    out = out.replace(/\s+and\s+.*$/i, '').trim();
+  }
+  if (out.split(/\s+/).length > 4) {
+    out = out.split(/\s+/).slice(0, 3).join(' ');
+  }
+  return out || raw;
+}
+
 /** The hero line. Trade plus town is what a local search actually wants. */
 function headline(b) {
   const where = b.areas?.[0];
-  const trade = b.trade ?? b.services?.[0] ?? 'Local specialists';
+  const trade = shortTrade(b.trade) ?? b.services?.[0] ?? 'Local specialists';
   return where ? `${trade} in ${where}` : String(trade);
 }
 
@@ -237,13 +505,16 @@ const ANCHORS = [
  * responds to the reader rather than looping at them. The mesh drifts
  * slowly enough to notice only if you look.
  */
-function css(p) {
+function css(p, t) {
+  const m = MOTION[t.motion] ?? MOTION.rise;
   return `
   *,*::before,*::after{box-sizing:border-box}
   :root{
     --ink:${p.ink}; --accent:${p.accent}; --glow:${p.glow ?? p.accent};
     --wash:${p.wash}; --line:${p.line}; --muted:${p.muted};
-    --radius:14px;
+    --radius:${t.radius};
+    --btn-radius:${t.btnRadius};
+    --display:${t.display};
     --shadow-1:0 1px 2px rgba(15,23,42,.04), 0 4px 12px rgba(15,23,42,.05);
     --shadow-2:0 2px 4px rgba(15,23,42,.05), 0 12px 32px rgba(15,23,42,.09);
     --ease:cubic-bezier(.22,1,.36,1);
@@ -254,15 +525,18 @@ function css(p) {
     -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 
   /* Type scale — premium sites are not shy with headline size. */
-  h1,h2,h3{line-height:1.05;margin:0 0 .4em;font-weight:800;letter-spacing:-.035em}
-  h1{font-size:clamp(2.6rem,7vw,5rem)}
-  h2{font-size:clamp(1.9rem,4vw,3rem);letter-spacing:-.03em}
-  h3{font-size:1.15rem;letter-spacing:-.015em;font-weight:700}
+  h1,h2{font-family:var(--display);line-height:1.04;margin:0 0 .4em;
+    font-weight:${t.weight};letter-spacing:${t.tracking};
+    text-transform:${t.transform}}
+  h3{line-height:1.2;margin:0 0 .4em;font-weight:700;letter-spacing:-.015em}
+  h1{font-size:${t.size}}
+  h2{font-size:clamp(1.9rem,4.2vw,3.1rem)}
+  h3{font-size:1.14rem}
   p{margin:0 0 1.1em}
   a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:3px}
   .wrap{max-width:1140px;margin:0 auto;padding:0 28px}
-  .eyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:.74rem;
-    font-weight:700;color:var(--accent);margin:0 0 18px}
+  .eyebrow{text-transform:uppercase;letter-spacing:${t.eyebrowTracking};
+    font-size:.72rem;font-weight:700;color:var(--accent);margin:0 0 20px}
 
   /* ---------- the animated backdrop ----------
      Three radial gradients on one layer, drifting on long offset cycles so
@@ -288,6 +562,8 @@ function css(p) {
   .grain{position:absolute;inset:0;pointer-events:none;z-index:1;opacity:.42;
     mix-blend-mode:overlay;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E")}
+
+  ${ornamentCss(t.ornament)}
 
   /* ---------- header ---------- */
   header{position:sticky;top:0;z-index:50;
@@ -327,8 +603,9 @@ function css(p) {
       to  {background-color:var(--ink)}}
   }
   .bar{display:flex;align-items:center;gap:26px;min-height:74px;flex-wrap:wrap}
-  .brand{font-weight:800;font-size:1.2rem;letter-spacing:-.03em;
-    text-decoration:none;color:var(--ink)}
+  .brand{font-family:var(--display);font-weight:${t.weight};font-size:1.28rem;
+    letter-spacing:${t.tracking};text-decoration:none;color:var(--ink);
+    text-transform:${t.transform}}
   .brand span{background:linear-gradient(100deg,var(--accent),var(--glow));
     -webkit-background-clip:text;background-clip:text;color:transparent}
   nav{margin-left:auto;display:flex;gap:26px;flex-wrap:wrap}
@@ -340,7 +617,7 @@ function css(p) {
   nav a:hover{color:var(--ink)}
   nav a:hover::after,nav a[aria-current]::after{transform:scaleX(1)}
   nav a[aria-current]{color:var(--ink)}
-  .tel{background:var(--ink);color:#fff;padding:11px 20px;border-radius:100px;
+  .tel{background:var(--ink);color:#fff;padding:11px 20px;border-radius:var(--btn-radius);
     text-decoration:none;font-weight:700;white-space:nowrap;font-size:.92rem;
     transition:transform .25s var(--ease),box-shadow .25s var(--ease)}
   .tel:hover{transform:translateY(-2px);box-shadow:var(--shadow-2)}
@@ -357,7 +634,7 @@ function css(p) {
   .hero .eyebrow{color:var(--accent)}
 
   .cta{display:inline-flex;align-items:center;gap:10px;
-    background:var(--accent);color:#0b0b0b;padding:17px 32px;border-radius:100px;
+    background:var(--accent);color:#0b0b0b;padding:17px 32px;border-radius:var(--btn-radius);
     text-decoration:none;font-weight:700;font-size:1.02rem;letter-spacing:-.01em;
     transition:transform .25s var(--ease),box-shadow .25s var(--ease);
     box-shadow:0 8px 30px -8px var(--accent)}
@@ -387,11 +664,11 @@ function css(p) {
   /* Reveal on scroll. Native CSS scroll-driven animation: no JS, and where
      it is unsupported the element is simply already visible. */
   @supports (animation-timeline: view()) {
-    .reveal{opacity:0;transform:translateY(26px);
-      animation:rise .8s var(--ease) forwards;
-      animation-timeline:view();animation-range:entry 5% cover 26%}
+    .reveal{${m.from};
+      animation:reveal ${m.dur} ${m.ease} forwards;
+      animation-timeline:view();animation-range:entry 4% cover 24%}
   }
-  @keyframes rise{to{opacity:1;transform:none}}
+  @keyframes reveal{to{opacity:1;transform:none}}
 
   .grid{display:grid;gap:22px;grid-template-columns:repeat(auto-fit,minmax(268px,1fr))}
   /* Four cards on a three-column grid leaves one stranded on its own row.
@@ -478,8 +755,9 @@ function css(p) {
   }`;
 }
 
-function page({ title, brief, palette, current, body, draftNote, single = false }) {
+function page({ title, brief, palette, theme, current, body, draftNote, single = false }) {
   const b = brief;
+  const t = theme;
   const tel = telHref(b.phone);
   const mail = mailtoHref(b.email);
   const links = single ? ANCHORS : NAV;
@@ -497,7 +775,10 @@ function page({ title, brief, palette, current, body, draftNote, single = false 
 <title>${single ? esc(b.business_name) : `${esc(title)} — ${esc(b.business_name)}`}</title>
 <meta name="description" content="${esc(subhead(b)).slice(0, 155)}">
 <meta name="robots" content="noindex,nofollow">
-<style>${css(palette)}</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${t.font}&family=Inter:wght@400;500;600;700&display=swap">
+<style>${css(palette, t)}</style>
 </head>
 <body id="top">
 ${draftNote ? `<div class="draft">${esc(draftNote)}</div>` : ''}
@@ -734,8 +1015,8 @@ function singleBody(b) {
   const tel = telHref(b.phone);
   const mail = mailtoHref(b.email);
   const eyebrow = b.areas?.length
-    ? `${b.trade ?? 'Local trade'} · ${b.areas[0]}`
-    : (b.trade ?? 'Local trade');
+    ? `${shortTrade(b.trade) ?? 'Local trade'} · ${b.areas[0]}`
+    : (shortTrade(b.trade) ?? 'Local trade');
 
   // The ticker needs its items twice: the track translates by -50%, so the
   // second copy is what is on screen as the first scrolls away.
@@ -747,6 +1028,7 @@ function singleBody(b) {
   return `
 <div class="hero">
   <div class="mesh"></div>
+  <div class="orn"></div>
   <div class="grain"></div>
   <div class="wrap">
     <p class="eyebrow">${esc(eyebrow)}</p>
@@ -817,6 +1099,7 @@ function singleBody(b) {
 
 <div class="band" id="contact">
   <div class="mesh"></div>
+  <div class="orn"></div>
   <div class="grain"></div>
   <div class="wrap">
     <h2>${esc(bandHeading(b))}</h2>
@@ -859,8 +1142,10 @@ function singleBody(b) {
  * section. `pages: 'multi'` produces the four-file version.
  */
 export function renderSite(brief, { draftNote = null, pages = 'single' } = {}) {
-  const palette = resolvePalette(brief.trade ?? (brief.services ?? [])[0], brief.brand_colours ?? []);
-  const common = { brief, palette, draftNote };
+  const trade = brief.trade ?? (brief.services ?? [])[0];
+  const palette = resolvePalette(trade, brief.brand_colours ?? []);
+  const theme = themeFor(trade);
+  const common = { brief, palette, theme, draftNote };
 
   if (pages === 'single') {
     return {

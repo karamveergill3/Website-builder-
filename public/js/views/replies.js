@@ -159,6 +159,15 @@ export default async function repliesView(root, _p, { refresh }) {
       wide: true,
       body: html`
         <div class="f">
+          <label for="eb-name">Name to put on the site</label>
+          <input id="eb-name" name="trading_name" type="text"
+                 value="${b.trading_name ?? ''}"
+                 placeholder="${reply.business_name ?? ''}" autocomplete="off">
+          <p class="tip">What goes on the masthead. Usually shorter than the registered
+            name — "Hillside Roofing" rather than "HILLSIDE ROOFING LIMITED".
+            Left blank, the registered name is tidied and used.</p>
+        </div>
+        <div class="f">
           <label for="eb-services">Services <span class="opt">one per line</span></label>
           <textarea id="eb-services" name="services" rows="5">${(b.services ?? []).join('\n')}</textarea>
         </div>
@@ -196,6 +205,7 @@ export default async function repliesView(root, _p, { refresh }) {
         <button data-submit class="primary">Save brief</button>`,
       onSubmit: async (form) => {
         await api.patch(`/api/replies/${reply.id}/brief`, {
+          trading_name: form.trading_name,
           services: form.services,
           primary_cta: form.primary_cta,
           areas: form.areas,
@@ -291,6 +301,10 @@ function briefPanel(r, b) {
         <b class="num" style="font-size:1rem">${b.confidence}%</b><span>Confidence</span></div>
       <div><b class="num" style="font-size:1rem">${b.source === 'rules' ? 'Rules' : 'Rules + model'}</b><span>Read by</span></div>
     </div>
+
+    ${b.trading_name && b.trading_name !== r.business_name ? html`
+      <p class="tip">Site will be titled <b>${b.trading_name}</b>
+        <span class="meta">(registered as ${r.business_name})</span></p>` : ''}
 
     ${b.services?.length ? html`
       <p class="tip">

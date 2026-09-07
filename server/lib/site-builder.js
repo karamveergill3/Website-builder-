@@ -1,10 +1,13 @@
 /**
- * Generate a four-page mockup site from a brief.
+ * Generate a mockup site from a brief.
  *
- *   index.html     home — hero, the CTA their answer picked, services, area
- *   services.html  each service as its own block
- *   about.html     who they are, area covered, why use them
- *   contact.html   phone, email, hours, area — the page that closes the job
+ * ONE PAGE by default — hero, services, work, about, contact, as anchored
+ * sections down a single scroll. That is the shape that closes small-trade
+ * work: a caller wants the number, proof the work is decent, and the area
+ * covered. More pages give them more chances to get lost on a phone.
+ *
+ * `pages: 'multi'` still produces the four-file version for a job that
+ * genuinely warrants it.
  *
  * Design intent: this has to look like a real small-business site a local
  * designer made, not a template with the name swapped. The things that do
@@ -14,7 +17,7 @@
  * empty photo slot reads better than a stock image of someone else's van.
  *
  * Everything is inlined: one CSS block per page, no build step, no external
- * fonts or scripts. The result is four files that open from disk.
+ * fonts or scripts. The result opens straight from disk.
  */
 
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -155,28 +158,43 @@ function subhead(b) {
 }
 
 /** The primary action, rendered as a real link where we can. */
-function primaryAction(b) {
+function primaryAction(b, { single = false } = {}) {
   const label = CTA_LABEL[b.primary_cta] ?? 'Get in touch';
+  const to = (anchor, page) => (single ? anchor : page);
   switch (b.primary_cta) {
     case 'call': {
       const href = telHref(b.phone);
       return href
         ? { label: `Call ${b.phone}`, href }
-        : { label, href: 'contact.html' };
+        : { label, href: to('#contact', 'contact.html') };
     }
-    case 'prices':   return { label, href: 'services.html' };
-    case 'gallery':  return { label, href: 'about.html' };
-    default:         return { label, href: 'contact.html' };
+    case 'prices':   return { label, href: to('#services', 'services.html') };
+    case 'gallery':  return { label, href: to('#work', 'about.html') };
+    default:         return { label, href: to('#contact', 'contact.html') };
   }
 }
 
 /* --------------------------------------------------------------- chrome */
 
+/** Multi-page nav (kept for the four-file build). */
 const NAV = [
   ['index.html', 'Home'],
   ['services.html', 'Services'],
   ['about.html', 'About'],
   ['contact.html', 'Contact'],
+];
+
+/**
+ * Single-page nav. The whole site is one scroll, so these are anchors.
+ * A one-pager is what actually closes small-trade work: everything a
+ * caller needs is above the fold or one flick away, and there is no
+ * navigation for someone to get lost in on a phone.
+ */
+const ANCHORS = [
+  ['#services', 'Services'],
+  ['#work', 'Our work'],
+  ['#about', 'About'],
+  ['#contact', 'Contact'],
 ];
 
 function css(p) {
@@ -235,6 +253,8 @@ function css(p) {
   .band h2{color:#fff}
   .band p{color:rgba(255,255,255,.75);max-width:50ch;margin:0 auto 24px}
   .band .cta{background:#fff;color:var(--ink)}
+  .band .cta.ghost{background:transparent;color:#fff;
+    box-shadow:inset 0 0 0 2px rgba(255,255,255,.55)}
 
   footer{border-top:1px solid var(--line);padding:32px 0;color:var(--muted);font-size:.9rem}
   footer .bar{min-height:0;gap:16px}
@@ -248,10 +268,12 @@ function css(p) {
   }`;
 }
 
-function page({ title, brief, palette, current, body, draftNote }) {
+function page({ title, brief, palette, current, body, draftNote, single = false }) {
   const b = brief;
   const tel = telHref(b.phone);
   const mail = mailtoHref(b.email);
+  const links = single ? ANCHORS : NAV;
+  const home = single ? '#top' : 'index.html';
   const brandParts = String(b.business_name).trim().split(/\s+/);
   const brandHtml = brandParts.length > 1
     ? `${esc(brandParts.slice(0, -1).join(' '))} <span>${esc(brandParts.at(-1))}</span>`
@@ -262,18 +284,18 @@ function page({ title, brief, palette, current, body, draftNote }) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} — ${esc(b.business_name)}</title>
+<title>${single ? esc(b.business_name) : `${esc(title)} — ${esc(b.business_name)}`}</title>
 <meta name="description" content="${esc(subhead(b)).slice(0, 155)}">
 <meta name="robots" content="noindex,nofollow">
 <style>${css(palette)}</style>
 </head>
-<body>
+<body id="top">
 ${draftNote ? `<div class="draft">${esc(draftNote)}</div>` : ''}
 <header>
   <div class="wrap bar">
-    <a class="brand" href="index.html">${brandHtml}</a>
+    <a class="brand" href="${home}">${brandHtml}</a>
     <nav>
-      ${NAV.map(([href, label]) =>
+      ${links.map(([href, label]) =>
         `<a href="${href}"${href === current ? ' aria-current="page"' : ''}>${label}</a>`).join('\n      ')}
     </nav>
     ${tel ? `<a class="tel" href="${tel}">${esc(b.phone)}</a>` : ''}
@@ -282,7 +304,10 @@ ${draftNote ? `<div class="draft">${esc(draftNote)}</div>` : ''}
 ${body}
 <footer>
   <div class="wrap bar">
-    <div><strong>${esc(b.business_name)}</strong>${b.areas?.length ? ` — ${esc(b.areas.join(', '))}` : ''}</div>
+    <div><strong>${esc(b.business_name)}</strong>${b.areas?.length ? ` — ${esc(b.areas.join(', '))}` : ''}
+      ${b.registered_name && b.registered_name !== b.business_name
+        ? `<div style="font-size:.85em;opacity:.75">A trading name of ${esc(b.registered_name)}</div>` : ''}
+    </div>
     <div style="margin-left:auto">
       ${tel ? `<a href="${tel}">${esc(b.phone)}</a>` : esc(b.phone ?? '')}
       ${mail ? ` · <a href="${mail}">${esc(b.email)}</a>` : ''}
@@ -478,18 +503,137 @@ const bandCopy    = (b) => (BAND[b.primary_cta] ?? BAND.enquire)[1];
 /* --------------------------------------------------------------- build */
 
 export const PAGES = ['index.html', 'services.html', 'about.html', 'contact.html'];
+export const SINGLE_PAGE = ['index.html'];
 
 /** A 32-character token. This is the only thing protecting the preview URL. */
 export const newToken = () => randomBytes(16).toString('hex');
 
 /**
- * Render the four pages. Pure — returns a map of filename to HTML, writes
- * nothing. Kept separate from the disk write so tests can assert on output
- * without a filesystem.
+ * The whole site as one scrolling page.
+ *
+ * This is the default, and for small-trade work it is the right shape: a
+ * caller wants the number, proof the work is decent, and the area covered.
+ * Four pages gives them three chances to get lost on a phone and adds
+ * nothing they asked for. It also reviews faster — one screenshot and the
+ * prospect has seen everything.
  */
-export function renderSite(brief, { draftNote = null } = {}) {
+function singleBody(b) {
+  const action = primaryAction(b, { single: true });
+  const services = b.services ?? [];
+  const where = b.areas?.length ? b.areas.join(', ') : 'the local area';
+  const tel = telHref(b.phone);
+  const mail = mailtoHref(b.email);
+
+  return `
+<div class="hero">
+  <div class="wrap">
+    <h1>${esc(headline(b))}</h1>
+    <p class="lede">${esc(subhead(b))}</p>
+    <a class="cta" href="${action.href}">${esc(action.label)}</a>
+    ${b.primary_cta !== 'call' && tel
+      ? `<a class="cta ghost" href="${tel}">Or call ${esc(b.phone)}</a>` : ''}
+  </div>
+</div>
+
+<section id="services">
+  <div class="wrap">
+    <h2>What we do</h2>
+    <div class="grid">
+      ${services.slice(0, 6).map((sv) => `<div class="card">
+        <h3>${esc(sv)}</h3>
+        <p>${esc(serviceBlurb(sv, b))}</p>
+      </div>`).join('\n      ')}
+    </div>
+  </div>
+</section>
+
+<section id="work" class="alt">
+  <div class="wrap">
+    <h2>Recent work</h2>
+    <p style="max-width:60ch;color:var(--muted)">${
+      b.has_photos
+        ? 'Photos of your recent jobs go here — send them over and I will drop them in.'
+        : 'A few photos of finished jobs go here. Phone photos are fine — real work sells '
+          + 'far better than stock images.'}</p>
+    <div class="grid" style="margin-top:20px">
+      ${[1, 2, 3].map((n) => `<div class="shot">Job photo ${n}<br>(placeholder)</div>`).join('\n      ')}
+    </div>
+  </div>
+</section>
+
+<section id="about">
+  <div class="wrap split">
+    <div>
+      <h2>About ${esc(b.business_name)}</h2>
+      <p>Your own words go here — how long you have been going, what you are
+         known for locally, who you usually work for. A short honest paragraph
+         beats a page of marketing copy.</p>
+      <p>${esc(`We cover ${where}.`)}</p>
+      ${b.notes ? `<p>${esc(b.notes)}</p>` : ''}
+    </div>
+    <div>
+      <h2>At a glance</h2>
+      <ul class="facts">
+        <li><b>Trade</b> <span>${esc(b.trade ?? services[0] ?? '—')}</span></li>
+        <li><b>Area</b> <span>${esc(where)}</span></li>
+        ${tel ? `<li><b>Phone</b> <span>${esc(b.phone)}</span></li>` : ''}
+        ${mail ? `<li><b>Email</b> <span>${esc(b.email)}</span></li>` : ''}
+      </ul>
+    </div>
+  </div>
+</section>
+
+<div class="band" id="contact">
+  <div class="wrap">
+    <h2>${esc(bandHeading(b))}</h2>
+    <p>${esc(bandCopy(b))}</p>
+    ${tel ? `<a class="cta" href="${tel}">Call ${esc(b.phone)}</a>` : ''}
+    ${mail ? `<a class="cta ghost" href="${mail}">Email us</a>` : ''}
+  </div>
+</div>
+
+<section>
+  <div class="wrap split">
+    <div>
+      <h2>Get in touch</h2>
+      <ul class="facts">
+        ${tel ? `<li><b>Phone</b> <span><a href="${tel}">${esc(b.phone)}</a></span></li>` : ''}
+        ${mail ? `<li><b>Email</b> <span><a href="${mail}">${esc(b.email)}</a></span></li>` : ''}
+        <li><b>Area</b> <span>${esc(where)}</span></li>
+        <li><b>Hours</b> <span>Your opening hours go here</span></li>
+      </ul>
+    </div>
+    <div>
+      <h2>Send a message</h2>
+      <p style="color:var(--muted);font-size:.95rem">
+        A working enquiry form goes here on the real site — it emails straight
+        to you, no logins, no dashboard to check.
+      </p>
+      <div class="shot" style="min-height:200px">Enquiry form<br>(placeholder)</div>
+    </div>
+  </div>
+</section>`;
+}
+
+/**
+ * Render the site. Pure — returns a map of filename to HTML and writes
+ * nothing, so tests can assert on output without a filesystem.
+ *
+ * `pages: 'single'` (the default) produces one index.html carrying every
+ * section. `pages: 'multi'` produces the four-file version.
+ */
+export function renderSite(brief, { draftNote = null, pages = 'single' } = {}) {
   const palette = resolvePalette(brief.trade ?? (brief.services ?? [])[0], brief.brand_colours ?? []);
   const common = { brief, palette, draftNote };
+
+  if (pages === 'single') {
+    return {
+      'index.html': page({
+        ...common, title: 'Home', current: '#services', single: true, body: singleBody(brief),
+      }),
+    };
+  }
+
   return {
     'index.html':    page({ ...common, title: 'Home',     current: 'index.html',    body: homeBody(brief) }),
     'services.html': page({ ...common, title: 'Services', current: 'services.html', body: servicesBody(brief) }),

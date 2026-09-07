@@ -420,6 +420,15 @@ const MIGRATIONS = [
       CREATE INDEX idx_mockups_lead ON mockups(lead_id, generated_at DESC);
     `,
   },
+  {
+    name: '014_trading_name',
+    up: `
+      -- The name they actually trade under, which is routinely not the name
+      -- on the register. Companies House gives "HILLSIDE ROOFING LTD"; the
+      -- van says "Hillside Roofing". The site should say what the van says.
+      ALTER TABLE briefs ADD COLUMN trading_name TEXT;
+    `,
+  },
 ];
 
 function migrate() {

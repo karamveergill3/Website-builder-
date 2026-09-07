@@ -18,7 +18,7 @@ npm start                 # http://localhost:3000
 
 ```bash
 npm run hunt              # find today's prospects now, without the server
-npm test                  # 245 tests
+npm test                  # 256 tests
 npm run lint
 ```
 
@@ -42,7 +42,7 @@ Sending is deliberately blocked until you do — see [Compliance](#compliance--r
 | **Reach**  | WhatsApp / SMS / call any lead — one tap per send  | A UK phone number |
 | **Contact finder** | Scrapes the lead's website + public directories | Nothing (free)  |
 | **Replies** | Reads what came back and pulls out a brief | Nothing (free)  |
-| **Mockups** | Builds a four-page site from that brief, on a private link | Nothing (free) |
+| **Mockups** | Builds a one-page site from that brief, on a private link | Nothing (free) |
 
 The tracker works on its own with no keys at all.
 

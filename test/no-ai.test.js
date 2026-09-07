@@ -177,9 +177,10 @@ test('a reply still extracts with no model available at all', async () => {
   try {
     const { buildBrief } = await import('../server/lib/brief.js');
     const brief = await buildBrief(
-      '1. Roofing and guttering\n2. No logo\n3. People ringing us',
+      '1. Test Roofing\n2. Roofing and guttering\n3. No logo\n4. People ringing us',
       { business_name: 'Test Ltd', location: 'Leeds' }
     );
+    assert.equal(brief.trading_name, 'Test Roofing');
     assert.deepEqual(brief.services, ['Roofing', 'Guttering']);
     assert.equal(brief.primary_cta, 'call');
     assert.equal(brief.source, 'rules');

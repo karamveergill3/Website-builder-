@@ -145,15 +145,50 @@ test('a mockup builds from a reply and serves on its token', async () => {
 
   assert.match(m.token, /^[0-9a-f]{32}$/);
   assert.equal(m.url, `/m/${m.token}/`);
-  assert.deepEqual(m.pages, ['index.html', 'services.html', 'about.html', 'contact.html']);
+  assert.deepEqual(m.pages, ['index.html'], 'one page by default');
+  assert.equal(m.layout, 'single');
 
-  // Every page must actually be reachable.
-  for (const page of ['', 'services.html', 'about.html', 'contact.html']) {
-    const res = await fetch(`${base}/m/${m.token}/${page}`);
-    assert.equal(res.status, 200, `/m/${m.token}/${page}`);
-    const html = await res.text();
-    assert.ok(html.includes('Hillside Roofing Ltd'), page);
+  const res = await fetch(`${base}/m/${m.token}/`);
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  assert.ok(html.includes('Hillside Roofing Ltd'));
+  // Every section is on the one page.
+  for (const id of ['services', 'work', 'about', 'contact']) {
+    assert.ok(html.includes(`id="${id}"`), `missing #${id}`);
   }
+});
+
+test('the four-page build can still be asked for', async () => {
+  const lead = await makeLead();
+  const made = await post('/api/replies/manual', { lead_id: lead.id, body: GOOD_REPLY });
+  const r = await post('/api/mockups', { reply_id: made.body.reply_id, pages: 'multi' });
+  assert.equal(r.status, 201);
+  built.push(r.body.mockup.token);
+  assert.equal(r.body.mockup.layout, 'multi');
+  assert.equal(r.body.mockup.pages.length, 4);
+
+  for (const page of ['', 'services.html', 'about.html', 'contact.html']) {
+    const res = await fetch(`${base}/m/${r.body.mockup.token}/${page}`);
+    assert.equal(res.status, 200, page);
+  }
+});
+
+test('the name they asked for is the name on the mockup', async () => {
+  const lead = await makeLead({ business_name: 'HILLSIDE ROOFING LIMITED' });
+  const made = await post('/api/replies/manual', {
+    lead_id: lead.id,
+    body: '1. Hillside Roofing\n2. Roofing and guttering\n3. No logo\n4. People ringing us',
+  });
+  assert.equal(made.body.brief.trading_name, 'Hillside Roofing');
+
+  const r = await post('/api/mockups', { reply_id: made.body.reply_id });
+  built.push(r.body.mockup.token);
+  assert.equal(r.body.mockup.business_name, 'Hillside Roofing');
+
+  const html = await (await fetch(`${base}/m/${r.body.mockup.token}/`)).text();
+  assert.ok(html.includes('Hillside Roofing'));
+  assert.match(html, /A trading name of HILLSIDE ROOFING LIMITED/,
+    'the legal name still has to appear — Companies Act 2006 s.1202');
 });
 
 test('the served mockup carries a restrictive CSP and noindex', async () => {

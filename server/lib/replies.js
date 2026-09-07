@@ -171,11 +171,12 @@ export async function extractBriefFor(replyId, leadRow = null) {
 
   db.prepare(
     `INSERT INTO briefs
-       (reply_id, lead_id, services, primary_cta, areas, has_logo, has_photos,
+       (reply_id, lead_id, trading_name, services, primary_cta, areas, has_logo, has_photos,
         brand_colours, tone, notes, source, confidence, created_at, updated_at)
-     VALUES (@reply_id, @lead_id, @services, @primary_cta, @areas, @has_logo, @has_photos,
-             @brand_colours, @tone, @notes, @source, @confidence, @now, @now)
+     VALUES (@reply_id, @lead_id, @trading_name, @services, @primary_cta, @areas, @has_logo,
+             @has_photos, @brand_colours, @tone, @notes, @source, @confidence, @now, @now)
      ON CONFLICT(reply_id) DO UPDATE SET
+       trading_name=excluded.trading_name,
        services=excluded.services, primary_cta=excluded.primary_cta, areas=excluded.areas,
        has_logo=excluded.has_logo, has_photos=excluded.has_photos,
        brand_colours=excluded.brand_colours, tone=excluded.tone, notes=excluded.notes,
@@ -184,6 +185,7 @@ export async function extractBriefFor(replyId, leadRow = null) {
   ).run({
     reply_id: replyId,
     lead_id: reply.lead_id,
+    trading_name: b.trading_name ?? null,
     services: JSON.stringify(b.services ?? []),
     primary_cta: b.primary_cta,
     areas: JSON.stringify(b.areas ?? []),
@@ -228,7 +230,8 @@ export function listReplies({ limit = 50, leadId = null, unreadOnly = false } = 
 
   const rows = db.prepare(
     `SELECT r.*, l.business_name, l.category, l.location, l.phone, l.status AS lead_status,
-            b.id AS brief_id, b.services, b.primary_cta, b.areas, b.has_logo, b.has_photos,
+            b.id AS brief_id, b.trading_name, b.services, b.primary_cta, b.areas,
+            b.has_logo, b.has_photos,
             b.brand_colours, b.tone, b.notes, b.source AS brief_source,
             b.confidence AS brief_confidence, b.edited_by_user,
             m.token AS mockup_token, m.generated_at AS mockup_generated_at
@@ -256,7 +259,8 @@ export function listReplies({ limit = 50, leadId = null, unreadOnly = false } = 
     received_at: r.received_at,
     read_at: r.read_at,
     brief: r.brief_id ? briefToApi({
-      id: r.brief_id, services: r.services, primary_cta: r.primary_cta, areas: r.areas,
+      id: r.brief_id, trading_name: r.trading_name,
+      services: r.services, primary_cta: r.primary_cta, areas: r.areas,
       has_logo: r.has_logo, has_photos: r.has_photos, brand_colours: r.brand_colours,
       tone: r.tone, notes: r.notes, source: r.brief_source, confidence: r.brief_confidence,
       edited_by_user: r.edited_by_user,

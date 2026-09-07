@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 
 import {
   extractByRules, stripQuoted, numberedAnswers, splitServices, briefForBuild, CTAS,
+  looksLikeAName, tidyRegisteredName,
 } from '../server/lib/brief.js';
 
 const lead = {
@@ -89,19 +90,46 @@ test('splitServices does not cut "specialists in X" at the in', () => {
 
 /* --------------------------------------------------- the full rules pass */
 
-test('a fully structured reply parses with no gaps', () => {
+test('the four-question reply parses with no gaps at all', () => {
+  const r = extractByRules(`
+1. Hillside Roofing
+2. We do roofing, guttering and flat roofs. Mainly want more domestic work.
+3. No logo yet but I've got loads of photos of past jobs I can send over.
+4. Mainly people ringing us, that's how we get most work.
+`, lead);
+
+  assert.equal(r.trading_name, 'Hillside Roofing');
+  assert.deepEqual(r.services, ['Roofing', 'Guttering', 'Flat roofs']);
+  assert.equal(r.primary_cta, 'call');
+  assert.equal(r.has_logo, false);
+  assert.equal(r.has_photos, true, 'photos are a yes even though the same sentence denies a logo');
+  assert.deepEqual(r.missing, []);
+});
+
+test('a three-question reply still parses, minus the name', () => {
+  // Replies sent before the name question was added must keep working.
   const r = extractByRules(`
 1. We do roofing, guttering and flat roofs. Mainly want more domestic work.
 2. No logo yet but I've got loads of photos of past jobs I can send over.
 3. Mainly people ringing us, that's how we get most work.
 `, lead);
 
+  assert.equal(r.trading_name, null);
   assert.deepEqual(r.services, ['Roofing', 'Guttering', 'Flat roofs']);
   assert.equal(r.primary_cta, 'call');
-  assert.equal(r.has_logo, false);
-  assert.equal(r.has_photos, true, 'photos are a yes even though the same sentence denies a logo');
-  assert.deepEqual(r.missing, []);
-  assert.equal(r.confidence, 100);
+  assert.equal(r.has_photos, true);
+  assert.deepEqual(r.missing, ['trading_name'], 'only the name should be missing');
+});
+
+test('a long first answer is not mistaken for a business name', () => {
+  const r = extractByRules('1. We do roofing, guttering and flat roofs across the West Midlands', lead);
+  assert.equal(r.trading_name, null);
+  assert.ok(r.services.includes('Roofing'), JSON.stringify(r.services));
+});
+
+test('"we trade as X" beats the slot position', () => {
+  const r = extractByRules('We trade as Hillside Roofing. We do roofs and guttering.', lead);
+  assert.equal(r.trading_name, 'Hillside Roofing');
 });
 
 test('"ringing us" is read as wanting phone calls', () => {
@@ -164,6 +192,7 @@ test('an unparseable reply reports its gaps rather than inventing answers', () =
   assert.equal(r.primary_cta, null);
   assert.ok(r.missing.includes('services'));
   assert.ok(r.missing.includes('primary_cta'));
+  assert.ok(r.missing.includes('trading_name'));
 });
 
 /* ----------------------------------------------------------- build shape */
@@ -175,4 +204,36 @@ test('briefForBuild fills defaults so a thin brief still builds a site', () => {
   assert.ok(b.services.length, 'must fall back to something buildable');
   assert.equal(b.primary_cta, 'call', 'call is the safe default for a trade');
   assert.equal(b.phone, '07123456789');
+});
+
+/* ---------------------------------------------------------- trading name */
+
+test('looksLikeAName separates a name from prose', () => {
+  for (const yes of ['Hillside Roofing', 'Dave Smith Plastering', 'MJ Electrical Ltd']) {
+    assert.equal(looksLikeAName(yes), true, yes);
+  }
+  for (const no of [
+    'We do roofing, guttering and flat roofs',
+    'Roofing. Guttering. Flat roofs.',
+    'we mostly cover the west midlands and staffordshire area these days',
+    '',
+  ]) {
+    assert.equal(looksLikeAName(no), false, no);
+  }
+});
+
+test('an all-caps registered name is title-cased for the masthead', () => {
+  assert.equal(tidyRegisteredName('HILLSIDE ROOFING LIMITED'), 'Hillside Roofing Limited');
+  assert.equal(tidyRegisteredName('MJ ELECTRICAL LTD'), 'Mj Electrical LTD');
+  // A name someone deliberately styled is left alone.
+  assert.equal(tidyRegisteredName('McKinnon Roofing Ltd'), 'McKinnon Roofing Ltd');
+  assert.equal(tidyRegisteredName(''), 'Your Business');
+});
+
+test('briefForBuild prefers the trading name and keeps the legal one', () => {
+  const r = extractByRules('1. Hillside Roofing\n2. Roofing\n3. No logo\n4. Ringing us',
+    { ...lead, business_name: 'HILLSIDE ROOFING LIMITED' });
+  const b = briefForBuild(r, { ...lead, business_name: 'HILLSIDE ROOFING LIMITED' });
+  assert.equal(b.business_name, 'Hillside Roofing');
+  assert.equal(b.registered_name, 'HILLSIDE ROOFING LIMITED');
 });

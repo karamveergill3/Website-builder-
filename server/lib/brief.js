@@ -57,6 +57,18 @@ const CTA_PATTERNS = [
 const YES = /\b(yes|yeah|yep|aye|got|have|i do|we do|sure|can do|will send|i'?ll send|attached)\b/i;
 const NO  = /\b(no|nope|none|haven'?t|dont|don'?t have|not got|nothing|n\/a)\b/i;
 
+/**
+ * How people tell you the name they trade under. Companies House holds the
+ * registered name ("HILLSIDE ROOFING LTD"); the van, the invoices and the
+ * site should carry what they actually call themselves.
+ */
+const TRADING_NAME_PATTERNS = [
+  /\b(?:we (?:trade|go) (?:as|by)|trading as|t\/a)\s+["'“]?([^\n."'”]{2,60})/i,
+  /\b(?:the (?:business|company|firm) name is|business name is|company name is)\s+["'“]?([^\n."'”]{2,60})/i,
+  /\b(?:(?:put|use|call it|call us|it'?s|its|name'?s)\s+)["'“]([^\n"'”]{2,60})["'”]/i,
+  /\b(?:we'?re called|we are called|known as)\s+["'“]?([^\n."'”]{2,60})/i,
+];
+
 const HEX = /#[0-9a-f]{3,8}\b/gi;
 const COLOUR_WORDS = new RegExp(
   '\\b(red|blue|navy|green|dark green|black|white|grey|gray|silver|gold|yellow|orange|' +
@@ -121,11 +133,31 @@ export function extractByRules(replyBody, lead = {}) {
   const answers = numberedAnswers(text);
   const missing = [];
 
+  // --- which question is which ----------------------------------------
+  // The template asks four questions: name, services, assets, action. An
+  // older three-question reply (no name) still has to parse, so the slot
+  // map is worked out from the answers rather than assumed: if answer 1
+  // reads as a business name, everything after it shifts by one.
+  const named = answers.has(1) && looksLikeAName(answers.get(1));
+  const slot = named
+    ? { name: 1, services: 2, assets: 3, cta: 4 }
+    : { name: 0, services: 1, assets: 2, cta: 3 };
+
+  // --- trading name ---------------------------------------------------
+  // An explicit "we trade as X" anywhere in the reply beats the slot, since
+  // people often answer out of order or in prose.
+  let tradingName = null;
+  for (const re of TRADING_NAME_PATTERNS) {
+    const m = text.match(re);
+    if (m?.[1]) { tradingName = cleanName(m[1]); break; }
+  }
+  if (!tradingName && slot.name) tradingName = cleanName(answers.get(slot.name));
+  if (!tradingName) missing.push('trading_name');
+
   // --- services -------------------------------------------------------
-  // Answer 1 is the services question in our template. Failing that, look
-  // for the lead's own trade and any list-shaped sentence.
   let services = [];
-  if (answers.has(1)) services = splitServices(answers.get(1));
+  const servicesAnswer = answers.get(slot.services);
+  if (servicesAnswer) services = splitServices(servicesAnswer);
   if (!services.length) {
     // Adverbs sit between the pronoun and the verb far more often than not:
     // "we mostly do roofs", "we mainly cover". Allow for them.
@@ -138,8 +170,7 @@ export function extractByRules(replyBody, lead = {}) {
   if (!services.length) missing.push('services');
 
   // --- brand assets ---------------------------------------------------
-  // Answer 2 is the logo/colours/photos question.
-  const assetText = answers.get(2) ?? text;
+  const assetText = answers.get(slot.assets) ?? text;
   const hasLogo   = ternary(assetText, /\blogo\b/i);
   const hasPhotos = ternary(assetText, /\b(photo|photos|pictures|pics|images|gallery)\b/i);
   if (hasLogo === null || hasPhotos === null) missing.push('assets');
@@ -152,11 +183,10 @@ export function extractByRules(replyBody, lead = {}) {
   const brandColours = [...new Set(colours)].slice(0, 4);
 
   // --- primary call to action ----------------------------------------
-  // Answer 3 is the "what should someone do first" question, and it is the
-  // field that shapes the whole site, so it is checked in isolation before
-  // falling back to the whole reply.
+  // This is the field that shapes the whole site, so its own answer is
+  // checked in isolation before falling back to scanning the whole reply.
   let cta = null;
-  for (const source of [answers.get(3), text]) {
+  for (const source of [answers.get(slot.cta), text]) {
     if (!source) continue;
     for (const [re, value] of CTA_PATTERNS) {
       if (re.test(source)) { cta = value; break; }
@@ -178,6 +208,7 @@ export function extractByRules(replyBody, lead = {}) {
   }
 
   return {
+    trading_name: tradingName,
     services,
     primary_cta: cta,
     areas,
@@ -248,6 +279,30 @@ export function splitServices(s) {
   )].slice(0, 12);
 }
 
+/**
+ * A business name is short, has few words, and is not a sentence. This is
+ * what stops "we do roofing, guttering and flat roofs" being taken as the
+ * name when someone answers the questions out of order.
+ */
+export function looksLikeAName(s) {
+  const t = String(s ?? '').trim();
+  if (!t || t.length > 60) return false;
+  const words = t.split(/\s+/);
+  if (words.length > 6) return false;
+  if (/[.!?]\s/.test(t)) return false;                     // more than one sentence
+  if (/\b(we|our|us|they|i)\b/i.test(t)) return false;      // prose, not a name
+  if (/,/.test(t) && words.length > 3) return false;        // a list
+  return true;
+}
+
+/** Strip stray quotes and trailing punctuation from a name. */
+const cleanName = (s) =>
+  String(s ?? '').trim()
+    .replace(/^["'“”]+|["'“”]+$/g, '')
+    .replace(/[.,;:]+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim() || null;
+
 const titleCase = (s) =>
   String(s).replace(/\s+/g, ' ').trim().replace(/^./, (c) => c.toUpperCase());
 
@@ -284,6 +339,10 @@ function ternary(text, topic) {
 const SYSTEM = `You extract structured facts from a reply sent by a UK tradesperson or small business owner to a web designer who offered to build them a website.
 
 Return ONLY a JSON object with these keys:
+  "trading_name":  string or null — the name they want ON THE WEBSITE. This is
+                   often shorter than the registered company name: "Hillside
+                   Roofing" rather than "HILLSIDE ROOFING LIMITED". Null if
+                   they did not say.
   "services":      array of strings — the specific work this business does
   "primary_cta":   one of "call", "quote", "book", "prices", "gallery", "enquire" — what the business wants a visitor to do first
   "areas":         array of strings — towns or regions they cover
@@ -313,6 +372,7 @@ export async function extractByModel(cleanText, lead = {}) {
     system: SYSTEM,
     prompt: `${context ? `${context}\n\n` : ''}The reply:\n\n"""\n${cleanText}\n"""\n\nExtract the JSON object.`,
     coerce: (raw) => ({
+      trading_name:  asText(raw.trading_name),
       services:      asList(raw.services, { max: 12 }),
       primary_cta:   asOneOf(raw.primary_cta, CTAS, null),
       areas:         asList(raw.areas, { max: 8 }),
@@ -352,6 +412,7 @@ export async function buildBrief(replyBody, lead = {}, { useModel = true } = {})
   const m = model.data;
   const merged = {
     ...rules,
+    trading_name:  rules.trading_name         ?? m.trading_name,
     services:      rules.services.length      ? rules.services      : m.services,
     primary_cta:   rules.primary_cta          ?? m.primary_cta,
     areas:         rules.areas.length         ? rules.areas         : m.areas,
@@ -385,7 +446,11 @@ function remainingGaps(b) {
 export function briefForBuild(brief, lead = {}) {
   const trade = resolveTrade(lead.category ?? '')?.label ?? lead.category ?? null;
   return {
-    business_name: lead.business_name ?? 'Your Business',
+    // What they asked to be called wins over the register's version. The
+    // registered name is kept alongside for the footer, where the legal
+    // name is the correct one to show.
+    business_name: brief.trading_name || tidyRegisteredName(lead.business_name),
+    registered_name: lead.business_name ?? null,
     trade,
     services: brief.services?.length ? brief.services : defaultServices(trade, lead),
     primary_cta: brief.primary_cta ?? 'call',
@@ -398,6 +463,20 @@ export function briefForBuild(brief, lead = {}) {
     tone: brief.tone ?? null,
     notes: brief.notes ?? null,
   };
+}
+
+/**
+ * Companies House stores names in capitals. Rendered raw as a site's
+ * masthead that reads as SHOUTING, so it is title-cased when we have
+ * nothing better — but only when it IS all-caps, so a name someone
+ * deliberately styled is left alone.
+ */
+export function tidyRegisteredName(name) {
+  const s = String(name ?? '').trim();
+  if (!s) return 'Your Business';
+  if (s !== s.toUpperCase()) return s;
+  return s.toLowerCase().replace(/\b([a-z])/g, (c) => c.toUpperCase())
+    .replace(/\b(Ltd|Llp|Plc|Cic)\b/gi, (m) => m.toUpperCase());
 }
 
 function defaultServices(trade, lead) {

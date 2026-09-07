@@ -22,7 +22,7 @@ import {
   syncReplies, extractBriefFor, listReplies, markRead, recordManualReply,
   readiness, briefToApi,
 } from '../lib/replies.js';
-import { renderSite, writeSite, newToken, PAGES } from '../lib/site-builder.js';
+import { renderSite, writeSite, newToken, PAGES, SINGLE_PAGE } from '../lib/site-builder.js';
 import { briefForBuild, CTAS } from '../lib/brief.js';
 import { available as ollamaAvailable, model as ollamaModel } from '../lib/ollama.js';
 import { getSetting } from '../db.js';
@@ -114,12 +114,14 @@ router.patch('/replies/:id/brief', wrap((req, res) => {
 
   db.prepare(
     `UPDATE briefs SET
+       trading_name=@trading_name,
        services=@services, primary_cta=@cta, areas=@areas,
        has_logo=@has_logo, has_photos=@has_photos, brand_colours=@colours,
        notes=@notes, edited_by_user=1, updated_at=@now
      WHERE reply_id=@id`
   ).run({
     id,
+    trading_name: b.trading_name === undefined ? existing.trading_name : str(b.trading_name),
     services: asJson(b.services, existing.services),
     cta,
     areas: asJson(b.areas, existing.areas),
@@ -157,8 +159,11 @@ router.post('/mockups', wrap((req, res) => {
 
   const token = newToken();
   const studio = getSetting('biz_name', 'this studio');
+  // One page unless the caller explicitly asks for the four-file build.
+  const layout = req.body?.pages === 'multi' ? 'multi' : 'single';
   const files = renderSite(brief, {
-    draftNote: `Draft mockup for ${lead.business_name} — prepared by ${studio}`,
+    draftNote: `Draft mockup for ${brief.business_name} — prepared by ${studio}`,
+    pages: layout,
   });
 
   let error = null;
@@ -176,7 +181,8 @@ router.post('/mockups', wrap((req, res) => {
   ).run(
     lead.id, briefRow?.id ?? null, token, lead.business_name,
     brief.trade ?? lead.category ?? null,
-    JSON.stringify(PAGES), JSON.stringify(brief.brand_colours ?? []), nowIso()
+    JSON.stringify(layout === 'multi' ? PAGES : SINGLE_PAGE),
+    JSON.stringify(brief.brand_colours ?? []), nowIso()
   );
 
   res.status(201).json({
@@ -184,8 +190,9 @@ router.post('/mockups', wrap((req, res) => {
       id: Number(info.lastInsertRowid),
       token,
       url: `/m/${token}/`,
-      pages: PAGES,
-      business_name: lead.business_name,
+      pages: layout === 'multi' ? PAGES : SINGLE_PAGE,
+      layout,
+      business_name: brief.business_name,
     },
     brief,
   });

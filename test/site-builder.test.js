@@ -25,12 +25,24 @@ const brief = {
 
 /* ------------------------------------------------------------- output */
 
-test('renders all four pages', () => {
+test('one page by default, carrying every section', () => {
   const files = renderSite(brief);
+  assert.deepEqual(Object.keys(files), ['index.html']);
+  const html = files['index.html'];
+  assert.match(html, /^<!doctype html>/i);
+  assert.match(html, /<\/html>\s*$/i);
+  // Every section must be present and anchored, since the nav links to them.
+  for (const id of ['services', 'work', 'about', 'contact']) {
+    assert.ok(html.includes(`id="${id}"`), `missing section #${id}`);
+    assert.ok(html.includes(`href="#${id}"`), `nav does not link to #${id}`);
+  }
+});
+
+test('the four-page build is still available on request', () => {
+  const files = renderSite(brief, { pages: 'multi' });
   assert.deepEqual(Object.keys(files).sort(), [...PAGES].sort());
   for (const [name, html] of Object.entries(files)) {
     assert.match(html, /^<!doctype html>/i, name);
-    assert.match(html, /<\/html>\s*$/i, name);
     assert.ok(html.length > 1500, `${name} is suspiciously short`);
   }
 });
@@ -48,6 +60,7 @@ test('the primary CTA changes the page, not just a label', () => {
   const quote = renderSite({ ...brief, primary_cta: 'quote' })['index.html'];
   assert.ok(call.includes('href="tel:07123456789"'), 'call CTA should dial');
   assert.ok(quote.includes('Get a quote'), 'quote CTA should say so');
+  assert.ok(quote.includes('href="#contact"'), 'a non-call CTA should jump to contact');
   assert.notEqual(call, quote, 'the CTA must change the page');
 });
 
@@ -163,15 +176,35 @@ test('tokens are long, random and hex', () => {
 
 /* ------------------------------------------------------- thin briefs */
 
-test('a brief with almost nothing in it still builds four usable pages', () => {
-  const files = renderSite({
+test('a brief with almost nothing in it still builds a usable page', () => {
+  const thin = {
     business_name: 'Some Trade Ltd',
     services: [], areas: [], primary_cta: null, phone: null, email: null,
-  });
-  assert.equal(Object.keys(files).length, 4);
-  for (const [name, html] of Object.entries(files)) {
-    assert.ok(html.includes('Some Trade Ltd'), name);
-    assert.ok(!html.includes('undefined'), `${name} leaked undefined`);
-    assert.ok(!html.includes('null'), `${name} leaked null`);
+  };
+  for (const pages of ['single', 'multi']) {
+    const files = renderSite(thin, { pages });
+    assert.equal(Object.keys(files).length, pages === 'single' ? 1 : 4);
+    for (const [name, html] of Object.entries(files)) {
+      assert.ok(html.includes('Some Trade Ltd'), `${pages}/${name}`);
+      assert.ok(!html.includes('undefined'), `${pages}/${name} leaked undefined`);
+      assert.ok(!html.includes('null'), `${pages}/${name} leaked null`);
+    }
   }
+});
+
+test('the trading name is what appears, with the legal name in the footer', () => {
+  const html = renderSite({
+    ...brief,
+    business_name: 'Hillside Roofing',
+    registered_name: 'HILLSIDE ROOFING LIMITED',
+  })['index.html'];
+  assert.ok(html.includes('Hillside Roofing'), 'trading name should be the masthead');
+  // Companies Act 2006 s.1202: a limited company trading under another name
+  // must disclose the registered one.
+  assert.match(html, /A trading name of HILLSIDE ROOFING LIMITED/);
+});
+
+test('no legal-name line when the names are the same', () => {
+  const html = renderSite({ ...brief, registered_name: brief.business_name })['index.html'];
+  assert.ok(!html.includes('A trading name of'));
 });

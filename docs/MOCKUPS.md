@@ -1,30 +1,32 @@
 # Reading replies and building mockups
 
 A prospect replies. The tool reads what they asked for and builds them a
-four-page site on a private link. You check it, paste the link into your
+one-page site on a private link. You check it, paste the link into your
 answer, and that is the pitch.
 
 ## The flow
 
 1. **A reply arrives.** Either the tool reads it from Gmail, or you paste it
    in by hand (a WhatsApp message, notes from a phone call — same pipeline).
-2. **A brief is extracted** — services, what they want visitors to do,
-   whether they have a logo and photos, brand colours, areas covered.
+2. **A brief is extracted** — the name to put on the site, services, what
+   they want visitors to do, whether they have a logo and photos, brand
+   colours, areas covered.
 3. **You check the brief** and correct anything wrong. Twenty seconds.
-4. **Build mockup** generates `index`, `services`, `about` and `contact`,
-   writes them to disk, and gives you a link.
+4. **Build mockup** generates the page, writes it to disk, and gives you a
+   link.
 5. **You send the link.** Nobody finds it without the token.
 
 ## How replies are read
 
 Two passes, in this order.
 
-**The rules.** The follow-up template asks three numbered questions, so most
-replies come back as "1. … 2. … 3. …" and split deterministically. Keyword
+**The rules.** The follow-up template asks four numbered questions — name,
+services, assets, action — so most replies come back as "1. … 2. … 3. … 4. …"
+and split deterministically. Keyword
 matching then pins down the field that decides the whole layout: what a
 visitor should be able to do first.
 
-That third answer is the important one, and its answer space is closed —
+The last answer is the important one, and its answer space is closed —
 call, quote, book, prices, gallery, enquire. A roofer who says "people
 ringing us" gets a site built around a phone number. Someone who says
 "request a quote" gets a site built around a form. It is one word in their
@@ -92,15 +94,43 @@ extraction, same mockup, nothing to authorise.
 
 ## What gets built
 
-Four pages, no build step, no external fonts or scripts — everything inlined
-so the files open straight from disk.
+**One page**, as anchored sections down a single scroll. No build step, no
+external fonts or scripts — everything inlined so it opens straight from disk.
 
-| Page | What it does |
+| Section | What it does |
 |---|---|
-| `index.html`   | Hero with trade + town, the CTA their answer picked, services, photo slot |
-| `services.html`| Each service as its own block with a photo slot |
-| `about.html`   | Who they are, area covered, facts panel |
-| `contact.html` | Phone, email, hours, area, enquiry-form placeholder |
+| Hero      | Trade + town as the headline, the CTA their answer picked |
+| Services  | One card per service, in their own words |
+| Our work  | Photo slots — honest placeholders, not stock images |
+| About     | Who they are, area covered, facts panel |
+| Contact   | Phone, email, hours, area, enquiry-form placeholder |
+
+A one-pager is the right shape for this market. A caller wants the number,
+proof the work is decent, and the area covered — all of which fit on one
+screen and a flick. Four pages give them three more chances to get lost on a
+phone, and reviewing it takes you one screenshot instead of four.
+
+`POST /api/mockups` with `{"pages":"multi"}` still produces the four-file
+version for a job that warrants it.
+
+## The name on the site
+
+Companies House holds the **registered** name — `HILLSIDE ROOFING LIMITED`.
+The van says `Hillside Roofing`. The site should say what the van says, so
+the first question in the follow-up asks for it.
+
+- Given a name, that is the masthead.
+- Given nothing, the registered name is title-cased rather than left
+  shouting — but only when it *is* all-caps, so `McKinnon Roofing Ltd` is
+  left alone.
+- Where the two differ, the footer carries **"A trading name of
+  HILLSIDE ROOFING LIMITED"**. That is not decoration: Companies Act 2006
+  s.1202 requires a limited company trading under another name to disclose
+  the registered one.
+
+The extractor works out which numbered answer is which rather than assuming
+positions, so a reply in the old three-question format still parses — it
+just reports the name as missing.
 
 **Palette follows the trade.** Roofers get slate and high-vis orange; a
 salon gets soft pink; a bakery gets warm brown; a landscaper gets green.

@@ -18,7 +18,7 @@ npm start                 # http://localhost:3000
 
 ```bash
 npm run hunt              # find today's prospects now, without the server
-npm test                  # 143 tests
+npm test                  # 245 tests
 npm run lint
 ```
 
@@ -41,14 +41,19 @@ Sending is deliberately blocked until you do — see [Compliance](#compliance--r
 | **Outbox** | Review-then-send through your own Gmail | A Google OAuth client |
 | **Reach**  | WhatsApp / SMS / call any lead — one tap per send  | A UK phone number |
 | **Contact finder** | Scrapes the lead's website + public directories | Nothing (free)  |
+| **Replies** | Reads what came back and pulls out a brief | Nothing (free)  |
+| **Mockups** | Builds a four-page site from that brief, on a private link | Nothing (free) |
 
 The tracker works on its own with no keys at all.
 
-**Nothing here uses AI.** Three runtime dependencies — `express`,
-`better-sqlite3`, `dotenv` — and the only services it talks to are Companies
-House, Google Places and Gmail. There is a test (`test/no-ai.test.js`) that
-fails if a model provider is ever introduced, so running this costs nothing on
-any AI account.
+**Nothing here is billed to an AI account.** Three runtime dependencies —
+`express`, `better-sqlite3`, `dotenv` — and no AI SDK of any kind. Reply
+reading can optionally use a model, but only one running on *your* machine
+via Ollama: no key, no account, no bill, and nothing about a prospect ever
+leaves the box. `test/no-ai.test.js` fails the build if a hosted provider is
+ever introduced or if an inference endpoint stops being loopback. Everything
+works without a model at all — the rules-based extractor handles a numbered
+reply on its own.
 
 ---
 

@@ -10,6 +10,7 @@ import emails from './routes/emails.js';
 import settings from './routes/settings.js';
 import suppression from './routes/suppression.js';
 import outreach from './routes/outreach.js';
+import mockups, { MOCKUP_ROOT } from './routes/mockups.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, '..', 'public');
@@ -77,6 +78,38 @@ app.use('/api/suppression', suppression);
 // mounted AT /api and after the leads router — Express matches most-specific
 // first only within one Router.
 app.use('/api', outreach);
+app.use('/api', mockups);
+
+/**
+ * Generated mockup sites, served read-only from data/mockups/<token>/.
+ *
+ * The token is the only thing protecting a preview, so it is 128 bits of
+ * randomness and the directory listing is off — without the exact token
+ * there is nothing to find. `dotfiles: 'deny'` and express.static's own
+ * path normalisation keep a crafted URL inside the mockup root.
+ *
+ * These pages contain text a prospect emailed us. It is escaped at render
+ * time (see site-builder.js), and served under a CSP that would neuter any
+ * script that did slip through: no scripts at all, styles inline-only,
+ * images from this origin or data: URIs, and no framing.
+ */
+app.use('/m', (_req, res, next) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "
+    + "font-src 'self' data:; form-action 'none'; frame-ancestors 'none'; base-uri 'none'"
+  );
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  // A mockup is a private draft for one prospect; keep it out of indexes.
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+  next();
+}, express.static(MOCKUP_ROOT, {
+  index: 'index.html',
+  dotfiles: 'deny',
+  redirect: true,
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-store'),
+}));
 
 // Phase 2 and 3 routers are mounted lazily so the tracker keeps working even
 // if their integrations are unconfigured or their modules fail to load.

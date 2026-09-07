@@ -353,6 +353,73 @@ const MIGRATIONS = [
         CHECK (channel IN ('email','whatsapp','sms'));
     `,
   },
+  {
+    name: '013_replies_briefs_mockups',
+    up: `
+      -- Every inbound message we have matched to a lead. Body is stored in
+      -- full because the brief is derived from it and we want to be able to
+      -- re-derive when the extractor improves.
+      CREATE TABLE replies (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        lead_id        INTEGER REFERENCES leads(id) ON DELETE CASCADE,
+        channel        TEXT    NOT NULL DEFAULT 'email'
+                               CHECK (channel IN ('email','whatsapp','sms','manual')),
+        provider_id    TEXT    UNIQUE,
+        thread_id      TEXT,
+        from_address   TEXT,
+        subject        TEXT,
+        body           TEXT    NOT NULL,
+        received_at    TEXT    NOT NULL,
+        fetched_at     TEXT    NOT NULL,
+        read_at        TEXT
+      );
+      CREATE INDEX idx_replies_lead ON replies(lead_id, received_at DESC);
+      CREATE INDEX idx_replies_recv ON replies(received_at DESC);
+
+      -- The structured brief pulled out of a reply. One per reply; a later
+      -- re-extraction replaces it. 'source' records whether the rules alone
+      -- produced it or the local model was involved, so the UI can show how
+      -- much to trust it.
+      CREATE TABLE briefs (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        reply_id       INTEGER NOT NULL UNIQUE REFERENCES replies(id) ON DELETE CASCADE,
+        lead_id        INTEGER REFERENCES leads(id) ON DELETE CASCADE,
+        services       TEXT,
+        primary_cta    TEXT,
+        areas          TEXT,
+        has_logo       INTEGER NOT NULL DEFAULT 0 CHECK (has_logo IN (0,1)),
+        has_photos     INTEGER NOT NULL DEFAULT 0 CHECK (has_photos IN (0,1)),
+        brand_colours  TEXT,
+        tone           TEXT,
+        notes          TEXT,
+        source         TEXT    NOT NULL DEFAULT 'rules',
+        confidence     INTEGER NOT NULL DEFAULT 50 CHECK (confidence BETWEEN 0 AND 100),
+        edited_by_user INTEGER NOT NULL DEFAULT 0 CHECK (edited_by_user IN (0,1)),
+        created_at     TEXT    NOT NULL,
+        updated_at     TEXT    NOT NULL
+      );
+      CREATE INDEX idx_briefs_lead ON briefs(lead_id);
+
+      -- A generated multi-page mockup. Files live on disk under
+      -- data/mockups/<token>/; the token is the only secret protecting the
+      -- preview URL, so it is long and random.
+      CREATE TABLE mockups (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        lead_id      INTEGER REFERENCES leads(id) ON DELETE CASCADE,
+        brief_id     INTEGER REFERENCES briefs(id) ON DELETE SET NULL,
+        token        TEXT    NOT NULL UNIQUE,
+        business_name TEXT   NOT NULL,
+        trade        TEXT,
+        pages        TEXT    NOT NULL,
+        palette      TEXT,
+        generated_at TEXT    NOT NULL,
+        sent_at      TEXT,
+        opened_at    TEXT,
+        error        TEXT
+      );
+      CREATE INDEX idx_mockups_lead ON mockups(lead_id, generated_at DESC);
+    `,
+  },
 ];
 
 function migrate() {

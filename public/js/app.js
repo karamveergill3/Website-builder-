@@ -12,6 +12,7 @@ import huntView      from './views/hunt.js';
 import deliverView   from './views/deliverability.js';
 import outboxView    from './views/outbox.js';
 import complianceView from './views/compliance.js';
+import repliesView   from './views/replies.js';
 
 const ROUTES = {
   '/leads':     leadsView,
@@ -22,6 +23,7 @@ const ROUTES = {
   '/compose':   composeView,
   '/templates': templatesView,
   '/outbox':    outboxView,
+  '/replies':   repliesView,
   '/log':       logView,
   '/settings':  settingsView,
   '/compliance': complianceView,

@@ -238,6 +238,46 @@ The art is `aria-hidden` — it carries no information a screen reader needs —
 and it is dropped entirely below 900px, where the screen is better spent on
 the phone number.
 
+### Sections each trade actually needs
+
+Identical sections for every sector is the fastest way to look like a
+template. So the theme declares what its trade needs:
+
+| Sector | Extra sections | Why |
+|---|---|---|
+| Hair & beauty | Price list, Opening hours | The two things every salon visitor came for |
+| Motor         | Price list, Opening hours | MOT and service prices; when you're open |
+| Food          | Price list, Opening hours | The menu, and when to turn up |
+| Retail        | Opening hours             | Same |
+| Building      | Areas covered, Why us     | Which towns, and why trust you |
+| Landscaping   | Areas covered, Why us     | Same |
+| Cleaning      | Areas covered, Price list | Which towns, what it costs |
+| Professional  | Why us                    | Credentials carry the work |
+
+The price list is set with dotted leaders in their own service names, and
+the prices are left blank — an obviously empty row asks a better question
+than an invented number does. **Trust markers are deliberately unfilled
+too**: putting a trade body, an insurance figure or a number of years on
+someone's website when you do not know them is printing a lie on their
+behalf.
+
+The nav is built from whatever the page contains, so a salon links to its
+prices and a roofer to its areas, capped at six so it never wraps.
+
+### On a phone
+
+Most of these get opened on a phone, so:
+
+- **A sticky call bar** sits at the bottom of the screen, always in reach,
+  with a slow pulse on the dot. For a trade site this is worth more than
+  anything else on the page.
+- **The nav scrolls sideways** on one line rather than stacking into two
+  rows and pushing the hero below the fold.
+- **The header drops its phone number**, since the call bar already carries
+  it.
+- **The artwork is dropped entirely** — the screen is better spent on the
+  number than on a decorative drawing.
+
 ### The headline
 
 Companies House calls a garage "Vehicle maintenance and repair" and a salon

@@ -77,6 +77,7 @@ const THEMES = {
     eyebrowTracking: '.16em',
     radius: '6px', btnRadius: '6px',
     motion: 'drive', ornament: 'stripes',
+    sections: ['areas', 'trust'],
   },
   motor: {
     font: 'Chakra+Petch:wght@600;700',
@@ -86,6 +87,7 @@ const THEMES = {
     eyebrowTracking: '.22em',
     radius: '2px', btnRadius: '2px',
     motion: 'sweep', ornament: 'grid',
+    sections: ['prices', 'hours'],
   },
   green: {
     font: 'Fraunces:opsz,wght@9..144,500;9..144,700',
@@ -95,6 +97,7 @@ const THEMES = {
     eyebrowTracking: '.18em',
     radius: '22px', btnRadius: '100px',
     motion: 'grow', ornament: 'organic',
+    sections: ['areas', 'trust'],
   },
   beauty: {
     font: 'Cormorant+Garamond:wght@300;400;600',
@@ -104,6 +107,7 @@ const THEMES = {
     eyebrowTracking: '.34em',
     radius: '2px', btnRadius: '2px',
     motion: 'unveil', ornament: 'orbs',
+    sections: ['prices', 'hours'],
   },
   food: {
     font: 'Playfair+Display:wght@500;700',
@@ -113,6 +117,7 @@ const THEMES = {
     eyebrowTracking: '.2em',
     radius: '14px', btnRadius: '100px',
     motion: 'rise', ornament: 'warm',
+    sections: ['prices', 'hours'],
   },
   retail: {
     font: 'DM+Serif+Display:ital@0;1',
@@ -122,6 +127,7 @@ const THEMES = {
     eyebrowTracking: '.24em',
     radius: '3px', btnRadius: '3px',
     motion: 'stagger', ornament: 'rules',
+    sections: ['hours'],
   },
   clean: {
     font: 'Outfit:wght@500;700',
@@ -131,6 +137,7 @@ const THEMES = {
     eyebrowTracking: '.18em',
     radius: '18px', btnRadius: '100px',
     motion: 'shimmer', ornament: 'bubbles',
+    sections: ['areas', 'prices'],
   },
   pro: {
     font: 'Inter:wght@600;800',
@@ -140,6 +147,7 @@ const THEMES = {
     eyebrowTracking: '.16em',
     radius: '10px', btnRadius: '8px',
     motion: 'settle', ornament: 'dots',
+    sections: ['trust'],
   },
 };
 
@@ -803,17 +811,31 @@ const NAV = [
 ];
 
 /**
- * Single-page nav. The whole site is one scroll, so these are anchors.
- * A one-pager is what actually closes small-trade work: everything a
- * caller needs is above the fold or one flick away, and there is no
- * navigation for someone to get lost in on a phone.
+ * Single-page nav, built from what the page actually contains — a salon
+ * links to its price list, a roofer to the towns it covers. Capped at five
+ * so the bar never wraps into a second row on a laptop.
+ *
+ * A one-pager is what closes small-trade work: everything a caller needs is
+ * above the fold or one flick away, and there is no navigation to get lost
+ * in on a phone.
  */
-const ANCHORS = [
-  ['#services', 'Services'],
-  ['#work', 'Our work'],
-  ['#about', 'About'],
-  ['#contact', 'Contact'],
-];
+const SECTION_LABELS = {
+  prices: 'Prices',
+  hours:  'Opening hours',
+  areas:  'Areas',
+  trust:  'Why us',
+};
+
+function anchorsFor(sections = []) {
+  const extra = sections.map((k) => [`#${k}`, SECTION_LABELS[k]]).filter(([, l]) => l);
+  return [
+    ['#services', 'Services'],
+    ...extra,
+    ['#work', 'Our work'],
+    ['#about', 'About'],
+    ['#contact', 'Contact'],
+  ].slice(0, 6);
+}
 
 /**
  * The visual layer.
@@ -1069,6 +1091,43 @@ function css(p, t) {
   .band .cta.ghost{background:transparent;color:#fff;
     border:1px solid rgba(255,255,255,.3)}
 
+  /* Price list — a dotted leader row, the way a real menu or salon list
+     is set. A plain two-column table reads as a spreadsheet. */
+  .price-list{margin-top:36px;max-width:640px}
+  .price-row{display:flex;align-items:baseline;gap:14px;padding:15px 0;
+    border-bottom:1px solid var(--line)}
+  .price-row:last-child{border-bottom:0}
+  .price-name{font-weight:600}
+  .price-dots{flex:1;border-bottom:1px dotted var(--line);transform:translateY(-4px)}
+  .price-val{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+  /* Areas covered */
+  .chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:32px}
+  .chip{border:1px solid var(--line);border-radius:100px;padding:9px 20px;
+    font-weight:600;font-size:.94rem;background:#fff;
+    transition:border-color .25s,transform .25s var(--ease)}
+  .chip:hover{border-color:var(--accent);transform:translateY(-2px)}
+  .chip-add{border-style:dashed;color:var(--muted);font-weight:500}
+
+  /* A phone-first call bar. On a trade site opened on a phone this is worth
+     more than anything else on the page, so it is always in reach. */
+  .call-bar{display:none}
+  @media (max-width:720px){
+    .call-bar{display:flex;position:fixed;left:12px;right:12px;bottom:12px;z-index:80;
+      align-items:center;justify-content:center;gap:10px;
+      background:${light ? 'var(--ink)' : 'var(--accent)'};
+      color:${light ? 'var(--ground)' : '#0b0b0b'};
+      padding:17px 22px;border-radius:100px;text-decoration:none;
+      font-weight:700;font-size:1.05rem;
+      box-shadow:0 10px 30px -8px rgba(0,0,0,.45)}
+    .call-bar::before{content:"";width:9px;height:9px;border-radius:50%;
+      background:currentColor;opacity:.55;
+      animation:pulse 2s ease-in-out infinite}
+    @keyframes pulse{0%,100%{opacity:.25;transform:scale(.8)}50%{opacity:.9;transform:scale(1.15)}}
+    /* Keep the footer clear of the bar. */
+    footer{padding-bottom:96px}
+  }
+
   footer{border-top:1px solid var(--line);padding:44px 0;color:var(--muted);
     font-size:.92rem;background:#fff}
   footer .bar{min-height:0;gap:18px}
@@ -1082,8 +1141,19 @@ function css(p, t) {
 
   @media (max-width:720px){
     body{font-size:16px}
-    nav{width:100%;margin-left:0;order:3;gap:18px}
-    nav a{font-size:.88rem}
+    /* Six links wrap to two rows on a phone and push the hero down. Keep
+       them on one line and let it scroll sideways instead — the scrollbar
+       is hidden, and the fade on the right is the affordance. */
+    nav{width:100%;margin-left:0;order:3;gap:20px;
+      flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;
+      padding-bottom:2px;
+      -webkit-mask-image:linear-gradient(90deg,#000 88%,transparent);
+      mask-image:linear-gradient(90deg,#000 88%,transparent)}
+    nav::-webkit-scrollbar{display:none}
+    nav a{font-size:.9rem;white-space:nowrap}
+    /* The sticky call bar already carries the number, so the header's
+       copy of it is just taking room. */
+    .tel{display:none}
     section{padding:72px 0}
     .hero{padding:88px 0 76px}
     .split{gap:36px}
@@ -1113,7 +1183,7 @@ function page({ title, brief, palette, theme, current, body, draftNote, single =
   const t = theme;
   const tel = telHref(b.phone);
   const mail = mailtoHref(b.email);
-  const links = single ? ANCHORS : NAV;
+  const links = single ? anchorsFor(t.sections) : NAV;
   const home = single ? '#top' : 'index.html';
   const brandParts = String(b.business_name).trim().split(/\s+/);
   const brandHtml = brandParts.length > 1
@@ -1344,6 +1414,114 @@ const BAND = {
 const bandHeading = (b) => (BAND[b.primary_cta] ?? BAND.enquire)[0];
 const bandCopy    = (b) => (BAND[b.primary_cta] ?? BAND.enquire)[1];
 
+/**
+ * The extra blocks a particular trade's site actually needs.
+ *
+ * Every sector was getting the same four sections, which is the fastest way
+ * to look like a template. A salon's most-visited page is its price list. A
+ * garage lives and dies on opening hours. A roofer who works across six
+ * towns needs those towns on the page, both for the reader and because it
+ * is what people search. So the theme declares what it gets.
+ *
+ * All of it is placeholder content the prospect edits — the point of the
+ * mockup is to show them the shape, and an obviously-blank price row asks
+ * a better question than an invented price does.
+ */
+function extraSections(b, wanted = []) {
+  const out = [];
+
+  if (wanted.includes('prices')) {
+    const rows = (b.services ?? []).slice(0, 6);
+    out.push(`
+<section id="prices" class="alt">
+  <div class="wrap">
+    <div class="reveal">
+      <p class="eyebrow">Price list</p>
+      <h2>What it costs</h2>
+      <p style="max-width:52ch;color:var(--muted)">Prices are the page people
+        come for. These are blanks for you to fill in — real numbers here save
+        you answering the same question all week.</p>
+    </div>
+    <div class="price-list reveal">
+      ${(rows.length ? rows : ['Your service']).map((sv) => `
+      <div class="price-row">
+        <span class="price-name">${esc(sv)}</span>
+        <span class="price-dots"></span>
+        <span class="price-val">from £—</span>
+      </div>`).join('')}
+    </div>
+  </div>
+</section>`);
+  }
+
+  if (wanted.includes('hours')) {
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    out.push(`
+<section id="hours">
+  <div class="wrap split reveal">
+    <div>
+      <p class="eyebrow">Opening hours</p>
+      <h2>When we're open</h2>
+      <p style="color:var(--muted)">The other thing everyone checks. Fill these
+        in and it stops being a phone call you have to answer.</p>
+      ${b.phone ? `<p><strong>Or just ring:</strong> ${esc(b.phone)}</p>` : ''}
+    </div>
+    <ul class="facts">
+      ${days.map((d, i) => `
+      <li><b>${d}</b> <span>${i === 6 ? 'Closed' : '—'}</span></li>`).join('')}
+    </ul>
+  </div>
+</section>`);
+  }
+
+  if (wanted.includes('areas')) {
+    const areas = b.areas?.length ? b.areas : ['Your area'];
+    out.push(`
+<section id="areas" class="alt">
+  <div class="wrap">
+    <div class="reveal">
+      <p class="eyebrow">Where we work</p>
+      <h2>Areas we cover</h2>
+      <p style="max-width:52ch;color:var(--muted)">Naming the towns matters
+        twice over: it answers the first question a caller has, and it is what
+        people actually type into a search.</p>
+    </div>
+    <div class="chips reveal">
+      ${areas.map((a) => `<span class="chip">${esc(a)}</span>`).join('')}
+      <span class="chip chip-add">+ add the rest</span>
+    </div>
+  </div>
+</section>`);
+  }
+
+  if (wanted.includes('trust')) {
+    // Deliberately unfilled. Inventing a trade body or an insurance figure
+    // for someone would be a lie printed on their own website.
+    out.push(`
+<section id="trust">
+  <div class="wrap">
+    <div class="reveal">
+      <p class="eyebrow">Why us</p>
+      <h2>Reasons to pick up the phone</h2>
+    </div>
+    <div class="grid reveal" data-n="3" style="margin-top:36px">
+      <div class="card"><h3>Years on the tools</h3>
+        <p>How long you have been going. Blank for you to fill in — it is not
+           our claim to make.</p></div>
+      <div class="card"><h3>Insured and accredited</h3>
+        <p>Your trade body, your cover, your registration number. Only what is
+           genuinely yours goes here.</p></div>
+      <div class="card"><h3>What people say</h3>
+        <p>One real review beats a page of marketing copy. Send a couple over
+           and they go here.</p></div>
+    </div>
+  </div>
+</section>`);
+  }
+
+  return out.join('\n');
+}
+
 /* --------------------------------------------------------------- build */
 
 export const PAGES = ['index.html', 'services.html', 'about.html', 'contact.html'];
@@ -1361,7 +1539,7 @@ export const newToken = () => randomBytes(16).toString('hex');
  * nothing they asked for. It also reviews faster — one screenshot and the
  * prospect has seen everything.
  */
-function singleBody(b, family = 'pro') {
+function singleBody(b, family = 'pro', sections = []) {
   const action = primaryAction(b, { single: true });
   const services = b.services ?? [];
   const where = b.areas?.length ? b.areas.join(', ') : 'the local area';
@@ -1415,7 +1593,9 @@ function singleBody(b, family = 'pro') {
   </div>
 </section>
 
-<section id="work" class="alt">
+${extraSections(b, sections)}
+
+<section id="work">
   <div class="wrap">
     <div class="reveal">
       <p class="eyebrow">Portfolio</p>
@@ -1467,6 +1647,11 @@ function singleBody(b, family = 'pro') {
   </div>
 </div>
 
+${tel ? `
+<a class="call-bar" href="${tel}">
+  <span>Call ${esc(b.phone)}</span>
+</a>` : ''}
+
 <section>
   <div class="wrap split reveal">
     <div>
@@ -1509,7 +1694,7 @@ export function renderSite(brief, { draftNote = null, pages = 'single' } = {}) {
     return {
       'index.html': page({
         ...common, title: 'Home', current: '#services', single: true,
-        body: singleBody(brief, theme.family),
+        body: singleBody(brief, theme.family, theme.sections ?? []),
       }),
     };
   }

@@ -499,3 +499,85 @@ test('every theme still declares a mode, so none renders undefined', () => {
     assert.ok(!html.includes('undefined'), `${trade} leaked undefined`);
   }
 });
+
+/* ------------------------------------------------- what each trade needs */
+
+test('a salon gets a price list, a roofer gets areas covered', () => {
+  // Identical sections for every sector is the fastest way to look like a
+  // template. A salon's most-visited page is its prices; a mobile trade
+  // lives on which towns it covers.
+  const salon = renderSite({ ...brief, trade: 'Hairdressing and beauty' })['index.html'];
+  assert.ok(salon.includes('id="prices"'), 'a salon needs a price list');
+  assert.ok(salon.includes('id="hours"'), 'and opening hours');
+
+  const roofer = renderSite({ ...brief, trade: 'Roofing' })['index.html'];
+  assert.ok(roofer.includes('id="areas"'), 'a roofer needs its areas');
+  assert.ok(!roofer.includes('id="prices"'), 'a roofer does not publish a price list');
+});
+
+test('the price list is set in their own service names', () => {
+  const html = renderSite({
+    ...brief, trade: 'Hairdressing and beauty',
+    services: ['Cut and blow dry', 'Balayage'],
+  })['index.html'];
+  assert.ok(html.includes('>Cut and blow dry<'));
+  assert.ok(html.includes('>Balayage<'));
+  // Blank, not invented — a made-up price on someone's own site is a lie.
+  assert.match(html, /from £—/);
+});
+
+test('trust markers stay unfilled rather than inventing credentials', () => {
+  const html = renderSite({ ...brief, trade: 'Roofing' })['index.html'];
+  assert.ok(html.includes('id="trust"'));
+  // Nothing that asserts a body, a number of years, or cover we cannot know.
+  assert.ok(!/Gas Safe|NICEIC|Checkatrade|\d+ years/i.test(html),
+    'must not fabricate an accreditation or a track record');
+});
+
+test('the nav is built from what the page actually contains', () => {
+  const salon = renderSite({ ...brief, trade: 'Hairdressing and beauty' })['index.html'];
+  assert.ok(salon.includes('href="#prices"'), 'nav must link to the price list');
+  const roofer = renderSite({ ...brief, trade: 'Roofing' })['index.html'];
+  assert.ok(roofer.includes('href="#areas"'));
+  assert.ok(!roofer.includes('href="#prices"'), 'no link to a section that is not there');
+});
+
+test('the nav never grows past six items', () => {
+  for (const trade of ['Hairdressing and beauty', 'Roofing', 'Bakeries', 'Architecture']) {
+    const html = renderSite({ ...brief, trade })['index.html'];
+    const nav = html.match(/<nav>([\s\S]*?)<\/nav>/)[1];
+    const count = (nav.match(/<a /g) ?? []).length;
+    assert.ok(count <= 6, `${trade} nav has ${count} items`);
+  }
+});
+
+test('every anchored nav link points at a section that exists', () => {
+  for (const trade of ['Hairdressing and beauty', 'Vehicle maintenance and repair',
+                       'Roofing', 'Landscaping', 'Bakeries', 'Florists',
+                       'Cleaning of buildings', 'Architecture']) {
+    const html = renderSite({ ...brief, trade })['index.html'];
+    const nav = html.match(/<nav>([\s\S]*?)<\/nav>/)[1];
+    for (const m of nav.matchAll(/href="#([a-z]+)"/g)) {
+      assert.ok(html.includes(`id="${m[1]}"`), `${trade}: nav links to missing #${m[1]}`);
+    }
+  }
+});
+
+test('a phone lead gets a call bar always within reach', () => {
+  const html = renderSite(brief)['index.html'];
+  assert.match(html, /<a class="call-bar" href="tel:07123456789"/);
+  assert.match(html, /@media \(max-width:720px\)\{[\s\S]*?\.call-bar\{display:flex;position:fixed/);
+  // And the footer has to clear it, or the last line sits under the bar.
+  assert.match(html, /footer\{padding-bottom:96px\}/);
+});
+
+test('no call bar when there is no dialable number', () => {
+  const html = renderSite({ ...brief, phone: null })['index.html'];
+  assert.ok(!html.includes('class="call-bar"'));
+});
+
+test('the mobile nav stays on one line instead of stacking', () => {
+  // Six links wrap to two rows on a 390px screen and push the hero down.
+  const html = renderSite({ ...brief, trade: 'Hairdressing and beauty' })['index.html'];
+  assert.match(html, /nav\{width:100%;margin-left:0;order:3;gap:20px;\s*flex-wrap:nowrap;overflow-x:auto/);
+});

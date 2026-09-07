@@ -43,9 +43,19 @@ router.post('/leads/:id/find-contacts', wrap(async (req, res) => {
   if (!Number.isInteger(id)) throw badRequest('Bad lead id');
   const lead = getLead(id);
   const opts = {
-    web:     req.body?.web !== false,
-    website: req.body?.website !== false,
+    web:        req.body?.web !== false,
+    websiteUrl: req.body?.website_url ?? null,
   };
+  // A URL the user pastes in is worth filing as a website signal so a
+  // later re-run picks it up automatically.
+  if (opts.websiteUrl) {
+    db.prepare(
+      `INSERT INTO contact_signals
+         (lead_id, kind, value, source, confidence, first_seen_at, last_seen_at)
+       VALUES (?, 'website', ?, 'user:manual', 100, ?, ?)
+       ON CONFLICT(lead_id, kind, value) DO UPDATE SET last_seen_at = excluded.last_seen_at`
+    ).run(id, opts.websiteUrl, nowIso(), nowIso());
+  }
   const out = await discover(lead, opts);
   res.json({
     signals: out.signals,

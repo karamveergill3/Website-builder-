@@ -142,6 +142,40 @@ test('promoting a hand-added signal updates the lead email', async () => {
   assert.equal(after.body.lead.email, 'hello@acme.co.uk');
 });
 
+test('find-contacts on a no-website lead skips the website path and says so', async () => {
+  // Create a hunt-shaped lead: known to have no website. We fake it via
+  // direct DB update since /api/leads does not accept has_website today.
+  const lead = await makeCorporateLead();
+  const { db } = await import('../server/db.js');
+  db.prepare('UPDATE leads SET has_website = 0 WHERE id = ?').run(lead.id);
+
+  const r = await post(`/api/leads/${lead.id}/find-contacts`, { web: false });
+  assert.equal(r.status, 200);
+  assert.ok(!r.body.sources.includes('website'),
+    `website should not be a source; got ${r.body.sources.join(',')}`);
+  assert.ok(r.body.errors.some((e) => /no-website/.test(e)),
+    `errors should explain the skip; got ${JSON.stringify(r.body.errors)}`);
+});
+
+test('find-contacts uses a manually-supplied URL and files it as a signal', async () => {
+  const lead = await makeCorporateLead();
+  const { db } = await import('../server/db.js');
+  db.prepare('UPDATE leads SET has_website = 0 WHERE id = ?').run(lead.id);
+
+  // We do not actually fetch anything here — the scrape will fail against
+  // a nonexistent host — but the URL must land in contact_signals as a
+  // website signal so a re-run picks it up automatically.
+  await post(`/api/leads/${lead.id}/find-contacts`, {
+    web: false,
+    website_url: 'http://not-a-real-host-for-testing.invalid/',
+  });
+  const sigs = await get(`/api/leads/${lead.id}/signals`);
+  const url = sigs.body.signals.find((s) => s.kind === 'website');
+  assert.ok(url, 'a website signal should have been filed');
+  assert.equal(url.value, 'http://not-a-real-host-for-testing.invalid/');
+  assert.equal(url.source, 'user:manual');
+});
+
 test('prepare from a template respects the channel column', async () => {
   const lead = await makeCorporateLead();
   const tpl = await post('/api/templates', {

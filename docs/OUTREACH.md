@@ -49,18 +49,25 @@ is prepared.
 
 ## Finding contacts for free
 
-The hunt fills in a lead's phone number when Google has it in the Places
-listing (already, no new cost). Beyond that, the finder does what a person
-would if they had all day:
+**The tool targets businesses with no website.** That single fact rules out
+most of what a general email-finder does — you cannot scrape a website that
+does not exist, and email addresses genuinely rarely exist for these
+businesses either. They are phone-first.
 
-1. **The lead's own website** — fetches the home page, follows any link
-   containing "contact" or "about", parses out `mailto:`, `tel:` and
-   `wa.me/` targets.
-2. **DuckDuckGo HTML search** — free, no API key. Filters the top results to
-   directories and social pages that reliably carry contact info
+What the finder actually does, in the order it matters:
+
+1. **Phone from Google Places** — captured by the daily hunt when the
+   listing carries a `nationalPhoneNumber`. Filed as both `lead.phone` and
+   a signal at 90% confidence. This is where most phones come from.
+2. **DuckDuckGo HTML search** — free, no API key. `"{business} {town}"`
+   plus a filter that keeps only public directories and social pages
    (Facebook, Yell, Checkatrade, Trustpilot, MyBuilder, Bark, Yelp,
-   Cylex, Hotfrog, 192.com, LinkedIn, Instagram).
-3. **Each of those pages** — fetches and applies the same extractor.
+   Cylex, Hotfrog, 192.com, LinkedIn, Instagram). Those pages often
+   carry the phone and sometimes an email.
+3. **Website scrape** — only when the lead is known to *have* a website
+   (`has_website === 1`) or the user pastes a URL in the reach modal.
+   For a hunt lead this is skipped entirely and `no-website:` is recorded
+   in the errors column so the trail explains why.
 
 **Every request is polite**:
 

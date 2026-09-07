@@ -33,16 +33,25 @@ export async function openReachDialog(leadId) {
   const lead = await api.leads.get(leadId);
   const leadRow = lead.lead ?? lead;
   const templates = (await api.templates.list()).templates;
+  // Default channel picks itself from what the lead actually has. Hunt
+  // leads have no website AND usually no email; they arrive with a phone
+  // from Google Places, so WhatsApp / call are the honest default.
+  const defaultChannel =
+    leadRow.can_email ? 'email'
+    : leadRow.phone   ? 'whatsapp'
+    : 'email';
+
   let state = {
     lead: leadRow,
     signals: [],
     finds: [],
     templates,
-    channel: 'whatsapp',
+    channel: defaultChannel,
     template_id: null,
     text: '',
     finding: false,
     lastPrepare: null,
+    manualUrl: '',
   };
 
   // Initial fetch of any signals we already have.
@@ -97,7 +106,8 @@ function leadSummary(lead) {
 }
 
 function signalsPanel(state) {
-  const { signals, finding } = state;
+  const { signals, finding, lead, manualUrl } = state;
+  const noWeb = lead.has_website === 0;
   return html`
     <div class="panel">
       <div class="panel-hd">
@@ -107,11 +117,29 @@ function signalsPanel(state) {
         </button>
       </div>
       <div class="panel-bd">
+        ${noWeb ? html`
+          <div class="msg msg-info" style="margin-bottom:10px"><div class="grow">
+            This business has no website — that is why it is in the tool.
+            Email addresses rarely exist for these leads (a business with no site
+            is usually phone-first). <b>Find contacts</b> looks for their
+            Yell, Facebook and Checkatrade listings instead, which usually
+            carry a phone and sometimes an email.
+          </div></div>
+        ` : ''}
+        <div class="cols" style="margin-bottom:10px">
+          <div class="f">
+            <label for="reach-url">Website URL <span class="opt">optional</span></label>
+            <input id="reach-url" type="url" data-act="url" value="${manualUrl}"
+                   placeholder="https://…"
+                   autocomplete="off">
+            <p class="tip">If you know one — a Facebook page URL works too — paste it and
+              <b>Find contacts</b> will scrape it. Otherwise the search-engine path runs
+              on its own.</p>
+          </div>
+        </div>
         ${!signals.length ? html`
           <p class="tip">No contact details discovered yet.
-            <b>Find contacts</b> reads the lead's own website (if we know one) plus
-            any public directory or Facebook page that mentions them.
-            Everything it finds is scraped from public pages, not looked up in a paid service.</p>`
+            Everything comes from public pages, never a paid lookup service.</p>`
         : html`
           <table class="rows">
             <thead><tr><th>Kind</th><th>Value</th><th class="num">Confidence</th><th>Source</th><th></th></tr></thead>
@@ -190,6 +218,11 @@ function messagePanel(state) {
       <div class="panel">
         <div class="panel-hd"><h3>Email</h3></div>
         <div class="panel-bd">
+          ${!lead.email && lead.has_website === 0 ? html`
+            <div class="msg msg-warn"><div class="grow">
+              This lead has no email address and no website — email is unlikely
+              to reach them. WhatsApp or a call is the honest channel here.
+            </div></div>` : ''}
           <p>Email uses the existing Compose screen —
             <a href="#/compose?lead=${lead.id}" data-act="email-hop">write and send there</a>.
             Every send goes through the PECR gate and appends your business footer.</p>
@@ -290,12 +323,15 @@ function wire(dlg, state) {
     }
   });
 
+  on(dlg, 'input', '[data-act="url"]', (_e, el) => { state.manualUrl = el.value.trim(); });
+
   on(dlg, 'click', '[data-act="find"]', async (_e, btn) => {
     state.finding = true;
     btn.disabled = true;
     btn.innerHTML = '<span class="spin"></span> Finding…';
     try {
-      const r = await api.contacts.find(state.lead.id);
+      const opts = state.manualUrl ? { website_url: state.manualUrl } : undefined;
+      const r = await api.contacts.find(state.lead.id, opts);
       state.signals = r.signals;
       const bits = [`${r.signals.length} signal${r.signals.length === 1 ? '' : 's'}`];
       if (r.sources?.length) bits.push(`from ${r.sources.join(', ')}`);

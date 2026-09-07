@@ -1,19 +1,27 @@
 /**
  * Contact finder: free discovery of a lead's email and phone.
  *
- * There is no API that gives away real business contact details. Every
- * "email-finder" product costs because verification costs. What CAN be done
- * for free is chase the same trail a person would: the company's website,
- * their Facebook page, their Yell listing, their director's other companies.
+ * The tool's target is businesses WITH NO WEBSITE. That single fact rules
+ * out most of what a general email-finder does — you cannot scrape a
+ * website that does not exist, and email addresses genuinely rarely exist
+ * for these businesses either. They are phone-first.
  *
- * This module walks that trail and files everything it finds as a signal
- * on the lead. Every signal carries a source and a confidence, so the UI
- * can show provenance and the user picks what to trust.
+ * What the finder actually does, in priority order:
  *
- * Failure is normal here — websites block scrapers, DuckDuckGo rate-limits,
- * Facebook demands logins. The finder treats every source as best-effort:
- * one source failing does not stop the others, and the finish row records
- * which sources contributed.
+ *   1. Phone from Google Places. Already captured by the daily hunt when
+ *      Google's listing carries a nationalPhoneNumber. Filed as a signal
+ *      here so the trail is visible on the lead.
+ *   2. Web-search-driven directory scrape. DuckDuckGo's HTML endpoint (no
+ *      key, no cost) points us at Yell / Facebook / Checkatrade pages that
+ *      often carry the phone, sometimes an email, and occasionally a
+ *      WhatsApp deep-link the business publishes for enquiries.
+ *   3. Website scrape. ONLY when the lead has a website (has_website === 1
+ *      on the row, or the caller has told us a URL). For a no-website lead
+ *      this path is skipped — there is nothing to fetch.
+ *
+ * Failure is normal here — DuckDuckGo rate-limits, Facebook demands logins,
+ * some sites 403 Node's fetch. Every source is best-effort: one failing
+ * does not stop the others, and the finish row records what contributed.
  *
  * Rate discipline:
  *   - 3s minimum between HTTP calls total (shared gate)
@@ -27,7 +35,6 @@
 
 import { db } from '../db.js';
 import { normalisePhone } from './handoff.js';
-import { profile as chProfile } from './companies-house.js';
 import { FREE_MAIL_DOMAINS } from './pecr.js';
 
 const USER_AGENT = 'ProspectBook/1.0 (+contact discovery for personal outreach)';
@@ -177,11 +184,12 @@ function cleanPhone(p) {
 // Emails on free-mail domains are individuals, not the business. Still worth
 // filing (a sole trader IS the business) but at lower confidence and the
 // PECR gate will refuse to email them.
-export function emailConfidence(email, lead) {
+export function emailConfidence(email, ctx) {
   const domain = email.split('@')[1] ?? '';
   if (FREE_MAIL_DOMAINS.has(domain)) return 30;
-  if (lead?.website && domain && lead.website.includes(domain.split('.').slice(-2).join('.'))) {
-    return 95; // domain matches the company's own site
+  const site = ctx?.website ?? '';
+  if (site && domain && site.toLowerCase().includes(domain.split('.').slice(-2).join('.'))) {
+    return 95; // domain matches the source website
   }
   if (/^(info|hello|contact|enquiries|admin|office|sales)@/.test(email)) return 75;
   return 60;
@@ -287,44 +295,28 @@ export async function fromDirectory(url) {
   return { ...extract(r.body), visited: [url] };
 }
 
-/* --------------------------------------------------------- source: CH officers */
-
-/**
- * Cross-reference: pull the company's officers from Companies House, and for
- * each officer, see what other companies they run. If any of THOSE companies
- * have a website registered anywhere, it is a lead in itself — but more
- * usefully, an officer's name plus a UK town is often enough to find a
- * personal Facebook page or LinkedIn.
- *
- * This does not pull emails on its own — it just returns officer names and
- * numbers of other companies they run. The web search step uses that.
- */
-export async function officers(companyNumber) {
-  if (!companyNumber) return [];
-  try {
-    const p = await chProfile(companyNumber);
-    if (!p) return [];
-    return p; // profile only, officer endpoint is a separate call
-  } catch {
-    return [];
-  }
-}
-
 /* --------------------------------------------------------- orchestrator */
 
 /**
  * Discover contact signals for one lead. Every source is best-effort;
  * failures are logged onto the contact_finds row.
  *
+ * The lead's `has_website` column decides whether the website path runs at
+ * all. A hunt-found lead has has_website=0 — we know they have no site, so
+ * there is nothing to scrape. The web-search path still runs and looks for
+ * their Yell/Facebook listings.
+ *
  * Options:
- *   web:      true  — search the web (DuckDuckGo). Off by default because a
- *                     miss makes noise; the caller opts in explicitly.
- *   website:  true  — fetch the lead's own site if we have one.
- *   maxUrls:  6     — cap on URLs visited across DDG follow-ups.
+ *   web:      true            — search the web via DuckDuckGo
+ *   websiteUrl: string|null   — a URL the caller wants scraped. Only used
+ *                                when the lead is known to have a website
+ *                                (has_website === 1) OR the caller supplies
+ *                                one explicitly.
+ *   maxUrls:  6               — cap on DDG-derived URLs to visit
  */
 export async function discover(lead, opts = {}) {
   const {
-    web = true, website = true, maxUrls = 6,
+    web = true, websiteUrl = null, maxUrls = 6,
   } = opts;
 
   const info = db.prepare(
@@ -348,20 +340,34 @@ export async function discover(lead, opts = {}) {
   }
   if (lead.email) push('email', lead.email.toLowerCase(), 'lead:existing', 100);
 
-  // 2. The lead's own website, if we know one.
-  const knownWebsite = lead.website ?? null;
-  if (website && knownWebsite) {
+  // 2. Any URL we already know for this lead — either passed in by the
+  //    caller or previously filed as a website signal.
+  const priorWebsite = db.prepare(
+    `SELECT value FROM contact_signals
+      WHERE lead_id = ? AND kind = 'website'
+      ORDER BY confidence DESC, first_seen_at ASC LIMIT 1`
+  ).get(lead.id)?.value ?? null;
+
+  const scrapeUrl = websiteUrl
+    || (lead.has_website === 1 ? priorWebsite : null)
+    || (lead.has_website !== 0 ? priorWebsite : null);
+
+  if (scrapeUrl) {
     sources.push('website');
     try {
-      const w = await fromWebsite(knownWebsite);
-      for (const e of w.emails)     push('email', e, 'website', emailConfidence(e, lead));
+      const w = await fromWebsite(scrapeUrl);
+      for (const e of w.emails)     push('email', e, 'website', emailConfidence(e, { website: scrapeUrl }));
       for (const p of w.phones)     push('phone', p, 'website', 80);
       for (const p of w.whatsapps)  push('whatsapp', p, 'website:wa', 90);
       for (const f of w.facebooks)  push('facebook', f, 'website:fb', 70);
     } catch (e) { errors.push(`website: ${e.message}`); }
+  } else if (lead.has_website === 0) {
+    errors.push('no-website: skipped web scrape (this business has no site)');
   }
 
-  // 3. Web search — top results filtered to directories/social.
+  // 3. Web search — top results filtered to directories/social. This is
+  //    THE useful path for no-website leads. DDG's rate-limit is the only
+  //    real ceiling; a search that 202s is recorded and the sweep moves on.
   if (web && (lead.business_name || lead.registered_name)) {
     sources.push('web');
     const q = [lead.registered_name ?? lead.business_name, lead.location]
@@ -377,7 +383,7 @@ export async function discover(lead, opts = {}) {
         const d = await fromDirectory(url);
         const host = safeHost(url);
         const src = `web:${host}`;
-        for (const e of d.emails)    push('email', e, src, emailConfidence(e, lead));
+        for (const e of d.emails)    push('email', e, src, emailConfidence(e, {}));
         for (const p of d.phones)    push('phone', p, src, 70);
         for (const p of d.whatsapps) push('whatsapp', p, src, 85);
         for (const f of d.facebooks) push('facebook', f, src, 60);

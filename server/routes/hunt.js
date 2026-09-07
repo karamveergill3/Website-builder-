@@ -8,6 +8,7 @@ import { configured as chConfigured } from '../lib/companies-house.js';
 import { resolveTrade, allTradeKeywords } from '../lib/sic.js';
 import { ledgerStats } from '../lib/recontact.js';
 import { REGIONS } from '../lib/towns.js';
+import { configured as placesConfigured } from '../lib/places.js';
 
 const router = Router();
 
@@ -42,7 +43,10 @@ router.get('/status', wrap((_req, res) => {
       found_total: targets.reduce((n, t) => n + t.found_total, 0),
     },
     next_run: nextRunAt(cfg),
-    places_configured: Boolean(process.env.GOOGLE_MAPS_API_KEY),
+    // Via the shared helper rather than reading the variable here, so the
+    // hunt's precondition and this flag can never disagree — a key of "  "
+    // is configured by one definition and not the other.
+    places_configured: placesConfigured(),
   });
 }));
 

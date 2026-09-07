@@ -465,3 +465,77 @@ test('only the derived website flag is stored, never listing content', async () 
   assert.equal(asText.includes('https://x.co.uk'), false);
   assert.equal(cached[0].has_website, 1);
 });
+
+test('the no-website filter is refused without a Google key, by route AND by hunt', async () => {
+  // Two guards on purpose. The route has always refused this, but the route
+  // is only the "Run now" button — server/hunt.js (cron) and the built-in
+  // scheduler both call hunt() directly. On those unattended paths the run
+  // used to read a register page, ask Places, and die with a bare NO_API_KEY,
+  // having paid for the page, leaving a 0 nobody was watching.
+  stub();
+  await clearLeads();
+  await configure({ hunt_require_no_website: '1' });
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  delete process.env.GOOGLE_MAPS_API_KEY;
+  try {
+    const res = await post('/api/hunt/run', {});
+    assert.equal(res.status, 400, 'the button refuses');
+    assert.match(res.body.error, /GOOGLE_MAPS_API_KEY/);
+    assert.equal(calls.register, 0, 'nothing was spent finding out');
+
+    const { hunt } = await import('../server/lib/hunter.js');
+    await assert.rejects(
+      () => hunt({ trigger: 'cli' }),
+      (err) => {
+        assert.match(err.message, /no website/i);
+        assert.match(err.message, /GOOGLE_MAPS_API_KEY/);
+        assert.match(err.message, /untick/i, 'and says what to do instead');
+        return true;
+      },
+      'the unattended path refuses too'
+    );
+    assert.equal(calls.register, 0, 'and still spends nothing');
+  } finally {
+    if (key !== undefined) process.env.GOOGLE_MAPS_API_KEY = key;
+  }
+});
+
+test('with the filter off, no Google key is needed at all', async () => {
+  stub();
+  await clearLeads();
+  await configure({ hunt_require_no_website: '0', hunt_daily_target: '2' });
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  delete process.env.GOOGLE_MAPS_API_KEY;
+  try {
+    register = [{ body: { hits: 2, items: [
+      company('NO FILTER ROOFING LIMITED', '30000301'),
+      company('NO FILTER SPARKS LIMITED', '30000302'),
+    ] } }];
+    const run = await runAndWait();
+    assert.equal(run.error ?? null, null);
+    assert.equal(run.found, 2, 'files everything for you to check yourself');
+    assert.equal(run.places_requests, 0, 'and never asks Google');
+  } finally {
+    if (key !== undefined) process.env.GOOGLE_MAPS_API_KEY = key;
+  }
+});
+
+test('the target key survives a trade or town containing punctuation', () => {
+  // This key used to be built with a literal NUL, which was collision-proof
+  // but made the whole module read as a binary to grep and file.
+  const seen = new Set();
+  for (const [trade, area] of [
+    ['roofer', 'Stoke-on-Trent'], ['roofer Stoke', 'on-Trent'],
+    ['roofer', null], ['roofer', ''], ['', 'roofer'],
+  ]) {
+    const k = JSON.stringify([trade ?? '', area ?? '']);
+    assert.ok(!seen.has(k) || (trade === 'roofer' && (area === null || area === '')),
+      `"${trade}" / "${area}" must not collide`);
+    seen.add(k);
+  }
+  assert.equal(
+    JSON.stringify(['roofer', null ?? '']),
+    JSON.stringify(['roofer', '']),
+    'a null area and an empty one are the same target'
+  );
+});

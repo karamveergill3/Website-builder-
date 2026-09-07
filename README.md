@@ -21,7 +21,7 @@ npm start                 # http://localhost:3000
 ```bash
 npm run doctor            # is it actually ready? makes real API calls
 npm run hunt              # find today's prospects now, without the server
-npm test                  # 348 tests
+npm test                  # 351 tests
 npm run lint
 ```
 
@@ -327,7 +327,7 @@ sqlite3 data/prospect-book.db ".backup 'backup.db'"
 npm test
 ```
 
-348 tests covering placeholder rendering, lead and template CRUD with
+351 tests covering placeholder rendering, lead and template CRUD with
 validation, stats, the PECR classification gate, Companies House matching and
 entity classification, suppression across lead deletion, log-snapshot
 immutability, the Places field mask and dedupe, Google's error-reason handling,

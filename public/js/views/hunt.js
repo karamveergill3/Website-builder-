@@ -145,10 +145,20 @@ export default async function huntView(root, _p, { refresh }) {
             <label for="h-enabled">Run automatically every day</label>
           </div>
           <div class="check" style="margin-top:8px">
-            <input id="h-nosite" name="hunt_require_no_website" type="checkbox" ${c.requireNoWebsite ? 'checked' : ''}>
+            <input id="h-nosite" name="hunt_require_no_website" type="checkbox"
+                   ${s.places_configured && c.requireNoWebsite ? 'checked' : ''}
+                   ${s.places_configured ? '' : 'disabled'}>
             <label for="h-nosite">Only businesses with no website
               ${!s.places_configured ? html`<span class="flag">needs a Google key</span>` : ''}</label>
           </div>
+          ${!s.places_configured ? html`
+            <p class="tip" style="margin-top:4px">
+              Whether a business has a website is a question only Google can
+              answer, so this needs <code class="mono">GOOGLE_MAPS_API_KEY</code>
+              in <code class="mono">.env</code>. Until then the hunt files every
+              company it finds and you check them yourself — more leads, more
+              sifting.
+            </p>` : ''}
           <div class="check" style="margin-top:8px">
             <input id="h-unlisted" name="hunt_include_unlisted" type="checkbox" ${c.includeUnlisted ? 'checked' : ''}>
             <label for="h-unlisted">Include companies Google has never heard of

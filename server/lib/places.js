@@ -60,6 +60,9 @@ export const PRICING_DEFAULTS = {
   free_calls_per_sku_per_month: 5000,
 };
 
+/** Whether a key is present. Mirrors companies-house.js's `configured`. */
+export const configured = () => Boolean(process.env.GOOGLE_MAPS_API_KEY?.trim());
+
 export class PlacesError extends Error {
   constructor(message, { status, code, retryable = false } = {}) {
     super(message);

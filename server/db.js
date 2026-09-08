@@ -881,6 +881,75 @@ If you'd rather I didn't message again, just say and I won't.`,
       }
     },
   },
+  {
+    name: '028_invoicing',
+    up: `
+      -- Clients we invoice (usually a won lead, sometimes entered by hand).
+      CREATE TABLE clients (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        name         TEXT NOT NULL,
+        contact_name TEXT,
+        email        TEXT,
+        phone        TEXT,
+        address      TEXT,
+        lead_id      INTEGER REFERENCES leads(id) ON DELETE SET NULL,
+        created_at   TEXT NOT NULL
+      );
+
+      -- Invoices. Money is integer PENCE, never a float — a document that is
+      -- a penny out over a VAT line is not one you send. The number is
+      -- sequential (see nextNumber in lib/invoicing.js); token is the
+      -- unguessable client-facing link; reference is what a bank payment
+      -- quotes so it can be reconciled.
+      CREATE TABLE invoices (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        number         TEXT NOT NULL UNIQUE,
+        client_id      INTEGER NOT NULL REFERENCES clients(id) ON DELETE RESTRICT,
+        kind           TEXT NOT NULL DEFAULT 'build' CHECK (kind IN ('build','maintenance')),
+        status         TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','paid','void')),
+        currency       TEXT NOT NULL DEFAULT 'GBP',
+        subtotal_pence INTEGER NOT NULL DEFAULT 0,
+        vat_pence      INTEGER NOT NULL DEFAULT 0,
+        total_pence    INTEGER NOT NULL DEFAULT 0,
+        vat_rate       INTEGER NOT NULL DEFAULT 0,
+        issued_at      TEXT,
+        due_at         TEXT,
+        paid_at        TEXT,
+        paid_method    TEXT,
+        notes          TEXT,
+        token          TEXT NOT NULL UNIQUE,
+        reference      TEXT NOT NULL,
+        created_at     TEXT NOT NULL,
+        created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL
+      );
+      CREATE INDEX idx_invoices_status ON invoices(status);
+      CREATE INDEX idx_invoices_client ON invoices(client_id);
+
+      CREATE TABLE invoice_lines (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_id  INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+        description TEXT NOT NULL,
+        qty         INTEGER NOT NULL DEFAULT 1,
+        unit_pence  INTEGER NOT NULL DEFAULT 0,
+        position    INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX idx_invoice_lines_inv ON invoice_lines(invoice_id);
+
+      -- A maintenance plan is the recurring monthly charge (a care plan).
+      -- Unlike a build, this one really is billed month after month, so it
+      -- carries the monthly amount and when the next invoice is due.
+      CREATE TABLE maintenance_plans (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id     INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        monthly_pence INTEGER NOT NULL,
+        description   TEXT,
+        active        INTEGER NOT NULL DEFAULT 1,
+        started_on    TEXT NOT NULL,
+        next_due_on   TEXT,
+        created_at    TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 function migrate() {

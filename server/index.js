@@ -14,6 +14,8 @@ import outreach from './routes/outreach.js';
 import mockups, { MOCKUP_ROOT } from './routes/mockups.js';
 import { seedIdentityFromEnv } from './lib/identity.js';
 import authRouter from './routes/auth.js';
+import invoices from './routes/invoices.js';
+import { getInvoiceByToken, renderInvoicePage } from './lib/invoicing.js';
 import { userForToken, readCookie, SESSION_COOKIE } from './lib/auth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -69,6 +71,7 @@ app.use('/api/templates', templates);
 app.use('/api/emails', emails);
 app.use('/api/settings', settings);
 app.use('/api/suppression', suppression);
+app.use('/api/invoices', invoices);
 // The outreach module registers /api/leads/:id/... paths too, so it must be
 // mounted AT /api and after the leads router — Express matches most-specific
 // first only within one Router.
@@ -99,6 +102,30 @@ app.use('/api', mockups);
  */
 const FONT_CSS = 'https://fonts.googleapis.com';
 const FONT_FILES = 'https://fonts.gstatic.com';
+
+/**
+ * The client-facing invoice, at /i/<token>. Public and outside the login —
+ * a client has no account; the unguessable token is what protects it, the
+ * same posture as a mockup preview. No script runs here (locked-down CSP),
+ * and everything variable is escaped at render time.
+ */
+app.get('/i/:token', (req, res) => {
+  const invoice = getInvoiceByToken(req.params.token);
+  if (!invoice || invoice.status === 'void') {
+    res.status(404).type('html').send('<h1>Invoice not found</h1>');
+    return;
+  }
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "
+    + "form-action 'none'; frame-ancestors 'none'; base-uri 'none'"
+  );
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+  res.setHeader('Cache-Control', 'no-store');
+  res.type('html').send(renderInvoicePage(invoice));
+});
 
 app.use('/m', (_req, res, next) => {
   res.setHeader(

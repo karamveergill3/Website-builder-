@@ -31,6 +31,11 @@ export const ALLOWED_KEYS = new Set([
   // Places pricing, so Google's repricing does not need a code change
   'places_text_search_per_1000', 'places_details_per_1000',
   'places_free_calls_per_month', 'places_pricing_verified_on',
+  // Invoicing: how the business gets paid, shown on every invoice.
+  // (biz_vat_number already lives in the identity block above.)
+  'invoice_prefix', 'invoice_vat_rate', 'invoice_terms', 'invoice_footer',
+  'pay_bank_name', 'pay_bank_sortcode', 'pay_bank_account',
+  'pay_paypal_link', 'pay_klarna_note',
 ]);
 
 export const DEFAULTS = {
@@ -79,6 +84,9 @@ export const DEFAULTS = {
   // still a business you can ring.
   hunt_require_mobile: '0',
   hunt_include_unlisted: '1',
+  // Invoicing
+  invoice_prefix: 'INV',
+  invoice_terms: 'Payment due within 14 days of the invoice date.',
   default_region_code: 'GB',
   optout_line: DEFAULT_OPTOUT_LINE,
   marketing_line: DEFAULT_MARKETING_LINE,

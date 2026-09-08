@@ -1335,6 +1335,16 @@ Thanks so much, and have a lovely day.
       ALTER TABLE invoices ADD COLUMN stripe_session_id TEXT;
     `,
   },
+  {
+    name: '035_invoice_deposit',
+    up: `
+      -- A deposit already paid, subtracted on the final invoice to leave the
+      -- balance due. The full job total stays in total_pence; the amount
+      -- actually payable now is total_pence - deposit_pence, and that is what
+      -- the Pay buttons charge and what a payment is checked against.
+      ALTER TABLE invoices ADD COLUMN deposit_pence INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 function migrate() {

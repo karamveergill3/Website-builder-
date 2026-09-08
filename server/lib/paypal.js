@@ -109,7 +109,7 @@ export async function createOrder(invoice, { returnUrl, cancelUrl }) {
       purchase_units: [{
         reference_id: invoice.number,
         description: `Invoice ${invoice.number}`.slice(0, 127),
-        amount: { currency_code: invoice.currency || 'GBP', value: value(invoice.total_pence) },
+        amount: { currency_code: invoice.currency || 'GBP', value: value(invoice.amount_due_pence ?? invoice.total_pence) },
       }],
       payment_source: {
         paypal: {

@@ -109,13 +109,19 @@ export const listClients = () =>
  * `lines` are [{ description, qty, unit_pence }]. `kind` is 'build' or
  * 'maintenance'. Returns the full invoice with lines and client attached.
  */
-export function createInvoice({ client_id, kind = 'build', lines = [], notes, due_at, created_by } = {}) {
+export function createInvoice({ client_id, kind = 'build', lines = [], notes, due_at, created_by,
+  deposit_pounds, deposit_pence } = {}) {
   if (!getClient(client_id)) throw badReq('Unknown client.');
   const clean = normaliseLines(lines);
   if (!clean.length) throw badReq('An invoice needs at least one line.');
   if (!['build', 'maintenance'].includes(kind)) throw badReq('Unknown invoice kind.');
 
   const t = totals(clean);
+  // A deposit already taken, subtracted to leave the balance due. Never more
+  // than the total (a negative balance is not a thing you can charge).
+  const rawDeposit = deposit_pence != null ? Math.round(Number(deposit_pence) || 0)
+    : (deposit_pounds != null && String(deposit_pounds).trim() !== '' ? toPence(deposit_pounds) : 0);
+  const deposit = Math.min(Math.max(0, rawDeposit), t.total_pence);
   const now = nowIso();
 
   const make = db.transaction(() => {
@@ -123,10 +129,10 @@ export function createInvoice({ client_id, kind = 'build', lines = [], notes, du
     const info = db.prepare(
       `INSERT INTO invoices
          (number, client_id, kind, status, currency,
-          subtotal_pence, vat_pence, total_pence, vat_rate,
+          subtotal_pence, vat_pence, total_pence, vat_rate, deposit_pence,
           issued_at, due_at, notes, token, reference, created_at, created_by)
        VALUES (@number, @client_id, @kind, 'draft', 'GBP',
-          @subtotal, @vat, @total, @rate,
+          @subtotal, @vat, @total, @rate, @deposit,
           NULL, @due, @notes, @token, @number, @now, @created_by)`
     ).run({
       number,
@@ -136,6 +142,7 @@ export function createInvoice({ client_id, kind = 'build', lines = [], notes, du
       vat: t.vat_pence,
       total: t.total_pence,
       rate: t.vat_rate,
+      deposit,
       due: s(due_at) ?? tomorrowFrom(now),
       notes: s(notes),
       token: randomBytes(16).toString('hex'),
@@ -298,7 +305,9 @@ function withParts(inv) {
     'SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY position, id'
   ).all(inv.id);
   const client = getClient(inv.client_id);
-  return { ...inv, lines, client };
+  // The amount payable now: the full total less any deposit already taken.
+  const amount_due_pence = inv.total_pence - (inv.deposit_pence || 0);
+  return { ...inv, lines, client, amount_due_pence };
 }
 
 /** First of next month if the date is a month-end-safe add. Keeps the day. */
@@ -352,6 +361,8 @@ export function renderInvoicePage(inv, settings = getSettings()) {
   const pay = paymentOptions(settings);
   const isPaid = inv.status === 'paid';
   const isBuild = inv.kind === 'build';
+  const deposit = inv.deposit_pence || 0;
+  const amountDue = inv.amount_due_pence ?? (inv.total_pence - deposit);
 
   const bizName = v('biz_name') || 'Your business';
   const lines = inv.lines.map((l) => `
@@ -379,7 +390,7 @@ export function renderInvoicePage(inv, settings = getSettings()) {
       <div class="pay">
         <h4>Card${isBuild ? ', Klarna or Clearpay' : ''}</h4>
         <form method="POST" action="/i/${esc(inv.token)}/pay/stripe">
-          <button class="btn" type="submit">Pay ${money(inv.total_pence, inv.currency)} by card${isBuild ? ' or instalments' : ''}</button>
+          <button class="btn" type="submit">Pay ${money(amountDue, inv.currency)} by card${isBuild ? ' or instalments' : ''}</button>
         </form>
         ${isBuild ? '<p class="fine">Pay by debit or credit card, or choose Klarna (Pay in 3) or Clearpay (Pay in 4) at checkout to spread the cost. Either way it settles the invoice in full.</p>' : ''}
       </div>`);
@@ -393,7 +404,7 @@ export function renderInvoicePage(inv, settings = getSettings()) {
       <div class="pay">
         <h4>Card or PayPal${isBuild ? ', pay now or spread it monthly' : ''}</h4>
         <form method="POST" action="/i/${esc(inv.token)}/pay/paypal">
-          <button class="btn" type="submit">Pay ${money(inv.total_pence, inv.currency)} with PayPal</button>
+          <button class="btn" type="submit">Pay ${money(amountDue, inv.currency)} with PayPal</button>
         </form>
         ${isBuild ? '<p class="fine">At checkout you can pay the full amount or choose PayPal Pay in 3 to spread it over monthly instalments, and either way it settles the invoice in full.</p>' : ''}
       </div>`);
@@ -401,7 +412,7 @@ export function renderInvoicePage(inv, settings = getSettings()) {
     payBlocks.push(`
       <div class="pay">
         <h4>Card or PayPal${isBuild ? ', pay now or spread it monthly' : ''}</h4>
-        <p><a class="btn" href="${safeUrl(pay.paypal)}" target="_blank" rel="noopener">Pay ${money(inv.total_pence, inv.currency)} with PayPal</a></p>
+        <p><a class="btn" href="${safeUrl(pay.paypal)}" target="_blank" rel="noopener">Pay ${money(amountDue, inv.currency)} with PayPal</a></p>
         ${isBuild ? '<p class="fine">At checkout you can pay the full amount or choose PayPal Pay in 3 to spread it over monthly instalments, and either way it settles the invoice in full.</p>' : ''}
       </div>`);
   }
@@ -518,7 +529,10 @@ export function renderInvoicePage(inv, settings = getSettings()) {
     <table class="totals">
       <tr><td class="lbl">Subtotal</td><td class="num">${money(inv.subtotal_pence, inv.currency)}</td></tr>
       ${vatRow}
-      <tr class="grand"><td>Total</td><td class="num">${money(inv.total_pence, inv.currency)}</td></tr>
+      <tr class="${deposit > 0 ? '' : 'grand'}"><td class="${deposit > 0 ? 'lbl' : ''}">Total</td><td class="num">${money(inv.total_pence, inv.currency)}</td></tr>
+      ${deposit > 0 ? `
+      <tr><td class="lbl">Deposit paid</td><td class="num">-${money(deposit, inv.currency)}</td></tr>
+      <tr class="grand"><td>Balance due</td><td class="num">${money(amountDue, inv.currency)}</td></tr>` : ''}
     </table>
 
     ${payment}

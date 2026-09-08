@@ -180,11 +180,12 @@ app.get('/i/:token/paypal/return', async (req, res) => {
   }
   try {
     const cap = await captureOrder(orderId);
+    const dueP = invoice.amount_due_pence ?? invoice.total_pence;
     const ok = cap.paid
-      && cap.amount_pence === invoice.total_pence
+      && cap.amount_pence === dueP
       && (cap.currency ?? invoice.currency) === invoice.currency;
     if (ok) markPaid(invoice.id, 'paypal', cap.capture_id);
-    else console.error('[paypal] capture not applied', { status: cap.status, amount: cap.amount_pence, expected: invoice.total_pence });
+    else console.error('[paypal] capture not applied', { status: cap.status, amount: cap.amount_pence, expected: dueP });
   } catch (err) {
     console.error('[paypal] capture:', err.message);
   }
@@ -233,11 +234,12 @@ app.get('/i/:token/stripe/return', async (req, res) => {
   }
   try {
     const s = await retrieveSession(sessionId);
+    const dueP = invoice.amount_due_pence ?? invoice.total_pence;
     const ok = s.paid
-      && s.amount_pence === invoice.total_pence
+      && s.amount_pence === dueP
       && (s.currency ?? invoice.currency) === invoice.currency;
     if (ok) markPaid(invoice.id, 'stripe', s.payment_ref);
-    else console.error('[stripe] session not applied', { status: s.status, amount: s.amount_pence, expected: invoice.total_pence });
+    else console.error('[stripe] session not applied', { status: s.status, amount: s.amount_pence, expected: dueP });
   } catch (err) {
     console.error('[stripe] retrieve:', err.message);
   }

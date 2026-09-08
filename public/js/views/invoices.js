@@ -46,6 +46,14 @@ async function openInvoiceForm(clients, { presetClientId } = {}) {
             <option value="maintenance">Maintenance (one-off)</option>
           </select>
         </div>
+        <div class="f">
+          <label for="iv-deposit">Deposit</label>
+          <select id="iv-deposit" name="deposit_mode">
+            <option value="none">No deposit (full amount)</option>
+            <option value="half-invoice">50% deposit invoice (send first)</option>
+            <option value="final-half">Final invoice (50% deposit already paid)</option>
+          </select>
+        </div>
       </div>
       <div id="iv-newclient" class="panel" style="padding:10px;margin-bottom:10px" hidden>
         <div class="cols">
@@ -114,14 +122,30 @@ async function openInvoiceForm(clients, { presetClientId } = {}) {
       recalc();
     },
     onSubmit: async (d, root) => {
-      const lines = $$('.line', root).map((tr) => ({
+      let lines = $$('.line', root).map((tr) => ({
         description: tr.querySelector('.l-desc').value.trim(),
         qty: Number(tr.querySelector('.l-qty').value) || 1,
         unit_pounds: tr.querySelector('.l-unit').value,
       })).filter((l) => l.description && l.unit_pounds !== '');
       if (!lines.length) throw new Error('Add at least one line with a description and price.');
 
-      const body = { kind: d.kind, lines, notes: d.notes, due_at: d.due_at || undefined };
+      // Deposit flow. The full job total (before VAT) drives the 50% split.
+      const subPence = lines.reduce((n, l) =>
+        n + Math.round((Number(l.qty) || 1) * (Number(l.unit_pounds) || 0) * 100), 0);
+      let deposit_pounds;
+      let notes = d.notes;
+      if (d.deposit_mode === 'half-invoice') {
+        // The first invoice: just the 50% deposit, as one clear line.
+        const half = Math.round(subPence / 2);
+        lines = [{ description: '50% deposit for your website (balance due on completion)',
+                   qty: 1, unit_pounds: (half / 100).toFixed(2) }];
+        notes = notes || 'This is the 50% deposit to begin the work. The balance is invoiced on completion.';
+      } else if (d.deposit_mode === 'final-half') {
+        // The final invoice: full itemised total, with the 50% deposit subtracted.
+        deposit_pounds = (Math.round(subPence / 2) / 100).toFixed(2);
+      }
+
+      const body = { kind: d.kind, lines, notes, due_at: d.due_at || undefined, deposit_pounds };
       if (d.client_id) {
         body.client_id = Number(d.client_id);
       } else {
@@ -147,10 +171,11 @@ export default async function invoicesView(root, _params, { refresh }) {
   const clients = (await api.invoices.clients().catch(() => ({ clients: [] }))).clients;
   const s = settings.settings ?? {};
 
+  const due = (i) => i.amount_due_pence ?? i.total_pence;
   const outstanding = invoices.filter((i) => i.status === 'sent')
-    .reduce((n, i) => n + i.total_pence, 0);
+    .reduce((n, i) => n + due(i), 0);
   const paid = invoices.filter((i) => i.status === 'paid')
-    .reduce((n, i) => n + i.total_pence, 0);
+    .reduce((n, i) => n + due(i), 0);
 
   const payReady = Boolean((s.pay_bank_account && s.pay_bank_name) || s.pay_paypal_link);
 

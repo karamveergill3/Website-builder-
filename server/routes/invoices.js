@@ -94,6 +94,7 @@ router.post('/', wrap((req, res) => {
     lines: parseLines(req.body),
     notes: str(req.body?.notes),
     due_at: str(req.body?.due_at),
+    deposit_pounds: str(req.body?.deposit_pounds),
     created_by: req.user?.id ?? null,
   });
   res.status(201).json({ invoice });

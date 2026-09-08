@@ -148,4 +148,32 @@ test('the invoice page needs no login even though the API does', async () => {
   assert.equal(noCookie.status, 200);
 });
 
+test('a deposit is subtracted to leave the balance due, and only the balance is charged', async () => {
+  await put('/api/settings', { biz_vat_number: '' }); // not VAT registered
+  const c = await client('Deposit Co Ltd');
+  const inv = (await post('/api/invoices', {
+    client_id: c.id,
+    lines: [{ description: 'Website build', qty: 1, unit_pounds: '650' }],
+    deposit_pounds: '325',
+  })).body.invoice;
+  assert.equal(inv.total_pence, 65000, 'the full job total is kept');
+  assert.equal(inv.deposit_pence, 32500, 'the deposit already taken');
+  assert.equal(inv.amount_due_pence, 32500, 'balance due = total − deposit');
+
+  const html = await (await fetch(`${base}/i/${inv.token}`)).text();
+  assert.match(html, /Deposit paid/, 'the deduction is shown');
+  assert.match(html, /Balance due/, 'and the balance');
+});
+
+test('a deposit can never exceed the total', async () => {
+  const c = await client('Overpaid Ltd');
+  const inv = (await post('/api/invoices', {
+    client_id: c.id,
+    lines: [{ description: 'x', qty: 1, unit_pounds: '100' }],
+    deposit_pounds: '500',
+  })).body.invoice;
+  assert.equal(inv.deposit_pence, 10000, 'clamped to the total');
+  assert.equal(inv.amount_due_pence, 0, 'nothing left to pay, never negative');
+});
+
 test.after(teardown);

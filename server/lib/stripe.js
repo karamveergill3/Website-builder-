@@ -82,7 +82,7 @@ export async function createCheckoutSession(invoice, { successUrl, cancelUrl }) 
   form.set('client_reference_id', invoice.number);
   form.set('line_items[0][quantity]', '1');
   form.set('line_items[0][price_data][currency]', String(invoice.currency || 'GBP').toLowerCase());
-  form.set('line_items[0][price_data][unit_amount]', String(Math.round(Number(invoice.total_pence) || 0)));
+  form.set('line_items[0][price_data][unit_amount]', String(Math.round(Number(invoice.amount_due_pence ?? invoice.total_pence) || 0)));
   form.set('line_items[0][price_data][product_data][name]', `Invoice ${invoice.number}`.slice(0, 250));
 
   const session = await call('/v1/checkout/sessions', { form });

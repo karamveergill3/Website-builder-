@@ -128,3 +128,32 @@ test('render 404s for an unknown lead or template', async () => {
 });
 
 test.after(teardown);
+
+/* ------------------------------------------------- trade-tailored openers */
+
+test('a lead carries its sector, so the right opener can pick itself', async () => {
+  const salon = await makeLead({ category: 'nail bar' });
+  const trade = await makeLead({ category: 'roofers' });
+  const other = await makeLead({ category: 'cafe' });
+
+  const byId = Object.fromEntries(
+    (await get('/api/leads')).body.leads.map((l) => [l.id, l])
+  );
+  assert.equal(byId[salon.id].sector_label, 'Salons & beauty');
+  assert.equal(byId[trade.id].sector_label, 'Trades');
+  assert.equal(byId[other.id].sector_label, null, 'the rest use the generic opener');
+});
+
+test('the salon and trades WhatsApp openers are seeded and read naturally', async () => {
+  const names = (await get('/api/templates')).body.templates
+    .filter((t) => t.channel === 'whatsapp').map((t) => t.name);
+  assert.ok(names.includes('First message — WhatsApp · Salons & beauty'));
+  assert.ok(names.includes('First message — WhatsApp · Trades'));
+
+  // The generic opener no longer jams the raw trade word in — it reads for any
+  // trade, salons and cafés included.
+  const wa = (await get('/api/templates')).body.templates
+    .find((t) => t.name === 'First message — WhatsApp');
+  assert.ok(!wa.body.includes('{{category}}'), 'the generic opener drops the fragile trade word');
+});
+

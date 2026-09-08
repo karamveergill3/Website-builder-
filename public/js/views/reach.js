@@ -88,9 +88,20 @@ export async function openReachDialog(leadId) {
  * follow-up must never be the thing that opens on a business that has not
  * been written to yet.
  */
-function defaultTemplateFor(templates, channel) {
+function defaultTemplateFor(templates, channel, lead) {
   const forChannel = templates.filter((t) => t.channel === channel);
-  return forChannel.find((t) => /^first/i.test(t.name)) ?? forChannel[0] ?? null;
+  // Prefer the opener written for this lead's trade — the salon one for a
+  // salon, the trades one for a roofer — matched on the sector suffix the
+  // server put on the lead. Fall back to the plain first message (the one
+  // with no "· sector" suffix), then anything.
+  const label = lead?.sector_label;
+  if (label) {
+    const tuned = forChannel.find((t) => t.name.includes(`· ${label}`));
+    if (tuned) return tuned;
+  }
+  return forChannel.find((t) => /^first/i.test(t.name) && !t.name.includes('·'))
+    ?? forChannel.find((t) => /^first/i.test(t.name))
+    ?? forChannel[0] ?? null;
 }
 
 /** Fill the box from a template, rendered for this lead by the server. */
@@ -111,7 +122,7 @@ async function fillFrom(state, id) {
 async function fillDefault(state) {
   if (state.channel === 'email' || state.channel === 'call') return;
   if (state.text && state.text !== state.rendered) return;   // theirs, not ours
-  const tpl = defaultTemplateFor(state.templates, state.channel);
+  const tpl = defaultTemplateFor(state.templates, state.channel, state.lead);
   if (!tpl) { state.text = ''; state.rendered = ''; state.empty = []; return; }
   await fillFrom(state, tpl.id);
 }

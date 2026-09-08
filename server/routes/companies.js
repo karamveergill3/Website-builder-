@@ -274,6 +274,11 @@ router.post('/discover/import', wrap((req, res) => {
         note: `Companies House ${number}`,
         now: nowIso(),
       });
+      // File it in the company ledger, the same as every other import path
+      // (the hunt, applyMatch, POST /api/leads). Without this, a company
+      // imported here and then deleted before it was contacted would be
+      // offered again by a later hunt — the ledger is what remembers it.
+      recordFound(db.prepare('SELECT * FROM leads WHERE id = ?').get(info.lastInsertRowid));
       imported.push(Number(info.lastInsertRowid));
     }
   })();

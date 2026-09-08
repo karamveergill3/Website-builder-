@@ -35,11 +35,11 @@ export const STARTERS = [
     subject: 'A website for {{business}}?',
     body: `Hi,
 
-I was looking for {{category}} around {{location}} and came across {{business}} — but I couldn't find a website for you anywhere.
+I came across {{business}} in {{location}} and noticed you don't have a website.
 
-I build simple one-page sites for local trades: what you do, the areas you cover, a few photos, and a button that dials you straight from a phone. Nothing complicated, and nothing you have to maintain.
+I build simple one-page sites for local businesses: what you do, the areas you cover, a few photos, and a button that dials you straight from a phone. Nothing complicated, and nothing you have to maintain.
 
-If it's any use I'll put together a mock-up of yours first, free and with no obligation, so you can look at a real page rather than take my word for it.
+If it's any use I'll put a mock-up of yours together first — free and with no obligation — so you can look at a real page rather than take my word for it.
 
 Worth a look?
 
@@ -69,9 +69,37 @@ And if you'd rather I didn't write again, reply and say so and I won't.
     subject: '',
     body: `Hi, is this {{business}}?
 
-I'm {{my_name}} from {{my_business}}. I was looking for {{category}} around {{location}} and couldn't find a website for you, so I thought I'd ask whether one would be any use.
+I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — I build simple one-page sites for local businesses: what you do, a few photos, and a button that calls you straight from a phone.
 
-I make simple one-page sites for local trades — what you do, your areas, a few photos and a tap-to-call button. I'm happy to mock yours up for free so you can see it before deciding anything.
+Happy to put a mock-up of yours together for free so you can see it first. Worth a look?
+
+If you'd rather I didn't message again, just say and I won't.`,
+  },
+
+  // Salon & beauty: the framing that lands is "this is where new clients look".
+  {
+    name: 'First message — WhatsApp · Salons & beauty',
+    channel: 'whatsapp',
+    subject: '',
+    body: `Hi, is this {{business}}?
+
+I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a salon that's usually the first place a new client looks. I build simple one-pagers with your treatments, photos of your work and a tap-to-call or book button, and they're easy to keep updated.
+
+Happy to mock yours up for free so you can see it first. Worth a look?
+
+If you'd rather I didn't message again, just say and I won't.`,
+  },
+
+  // Trades: they want to be seen doing the work and reached in one tap.
+  {
+    name: 'First message — WhatsApp · Trades',
+    channel: 'whatsapp',
+    subject: '',
+    body: `Hi, is this {{business}}?
+
+I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a trade, most people just want to see a few jobs you've done and tap to call. That's exactly what I build: a clean one-pager with photos of your work, the areas you cover and a call button.
+
+Happy to mock yours up for free so you can see it first. Worth a look?
 
 If you'd rather I didn't message again, just say and I won't.`,
   },
@@ -84,7 +112,7 @@ If you'd rather I didn't message again, just say and I won't.`,
     // that is the right trade: a text that does not say who sent it or how to
     // stop it is not one that may lawfully be sent. Phones stitch the parts
     // back together; the recipient sees one message.
-    body: `Hi, is this {{business}}? {{my_name}} here from {{my_business}} — I couldn't find a website for you. I build one-page sites for {{category}} around {{location}} and I'll mock yours up free so you can see it. Reply STOP and I won't text again.`,
+    body: `Hi, is this {{business}}? {{my_name}} here from {{my_business}} — I noticed you don't have a website. I build one-page sites for local businesses and I'll mock yours up free so you can see it. Reply STOP and I won't text again.`,
   },
 ];
 

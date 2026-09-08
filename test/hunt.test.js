@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 process.env.COMPANIES_HOUSE_API_KEY = 'test-key';
 process.env.GOOGLE_MAPS_API_KEY = 'test-places-key';
 
-const { get, post, put, del, teardown } = await import('./helpers.js');
+const { get, post, patch, put, del, teardown } = await import('./helpers.js');
 const { db } = await import('../server/db.js');
 const { judge, spreadByTrade, sameTown } = await import('../server/lib/hunter.js');
 const { normaliseName } = await import('../server/lib/companies-house.js');
@@ -864,6 +864,40 @@ test('require-mobile asks Google even with the phone box unticked', async () => 
   assert.equal(run.places_requests, 1, 'Google is asked for the number');
   assert.equal(run.found, 1);
   assert.match((await get('/api/leads')).body.leads[0].phone, /^07/);
+});
+
+test('a company contacted by WhatsApp is never found again, even after its lead is deleted', async () => {
+  // The owner's rule, end to end: reach out to a business once and it must not
+  // reappear in a later run — not even after the lead row is deleted, because
+  // the no-repeat memory is the ledger, which outlives the lead.
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_trades: 'roofers', hunt_areas: 'Otley',
+    hunt_require_no_website: '0', hunt_daily_target: '5',
+  });
+
+  register = [{ body: { hits: 1, items: [company('WHATSAPPED ROOFING LIMITED', '62000009')] } }];
+  const run1 = await runAndWait();
+  assert.equal(run1.found, 1, 'found the first time');
+  const lead = (await get('/api/leads')).body.leads[0];
+
+  // Reach out on WhatsApp: prepare the hand-off and confirm it was sent.
+  await patch(`/api/leads/${lead.id}`, { phone: '07700 900123' });
+  const prep = await post('/api/outreach/prepare',
+    { lead_id: lead.id, channel: 'whatsapp', text: 'Hi from Keylo' });
+  assert.equal(prep.status, 200, JSON.stringify(prep.body));
+  await post(`/api/outreach/${prep.body.event_id}/sent`, {});
+
+  // Delete the lead — "not interested in this row", which must NOT undo the
+  // fact that the business was already approached.
+  await del(`/api/leads/${lead.id}`);
+
+  // The register would happily hand the same company back; the hunt must not.
+  register = [{ body: { hits: 1, items: [company('WHATSAPPED ROOFING LIMITED', '62000009')] } }];
+  const run2 = await runAndWait();
+  assert.equal(run2.found, 0, 'a business already messaged must never resurface');
+  assert.equal((await get('/api/leads')).body.leads.length, 0, 'and no fresh lead is filed for it');
 });
 
 test('require-mobile without a Google key is refused, naming the mobile filter', async () => {

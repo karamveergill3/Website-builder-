@@ -106,21 +106,24 @@ export function setupView(root) {
  * a shared hub each rep sets their own here and their WhatsApps go out under
  * their own identity, not the admin's.
  */
-export async function openAccount(user) {
+export async function openAccount(user, { firstRun = false } = {}) {
   return modal({
-    title: 'My account',
+    title: firstRun ? `Welcome, ${user.name}` : 'My account',
     body: html`
+      ${firstRun ? html`<p style="margin:0 0 12px">One quick thing before you start:
+        add the WhatsApp number you'll be messaging from. It goes on the messages you send
+        so businesses know who they're talking to.</p>` : ''}
       <div class="f"><label for="a-name">Your name <span class="opt">shown in your messages</span></label>
         <input id="a-name" name="name" type="text" value="${user.name ?? ''}" required></div>
-      <div class="f"><label for="a-phone">Your WhatsApp number <span class="opt">optional</span></label>
-        <input id="a-phone" name="phone" type="tel" value="${user.phone ?? ''}" placeholder="07…"></div>
+      <div class="f"><label for="a-phone">Your WhatsApp number ${firstRun ? '' : html`<span class="opt">optional</span>`}</label>
+        <input id="a-phone" name="phone" type="tel" value="${user.phone ?? ''}" placeholder="07…" ${firstRun ? 'autofocus' : ''}></div>
       <div class="f"><label for="a-pass">New password <span class="opt">leave blank to keep</span></label>
         <input id="a-pass" name="password" type="password" autocomplete="new-password" minlength="8"></div>
       <p class="tip">Your name and number appear in the WhatsApp and SMS messages you send,
         so the business you're contacting knows who they're talking to. The Keylo name and
         email stay the same for everyone.</p>`,
-    footer: html`<button type="button" data-close>Cancel</button>
-      <button type="submit" class="primary">Save</button>`,
+    footer: html`<button type="button" data-close>${firstRun ? 'Skip for now' : 'Cancel'}</button>
+      <button type="submit" class="primary">${firstRun ? 'Save and start' : 'Save'}</button>`,
     onSubmit: async (d) => {
       const body = { name: d.name, phone: d.phone };
       if (d.password) body.password = d.password;

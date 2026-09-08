@@ -831,6 +831,56 @@ const MIGRATIONS = [
       ALTER TABLE users ADD COLUMN phone TEXT;
     `,
   },
+  {
+    name: '027_trade_openers',
+    // Add the salon and trades WhatsApp openers, and reword the generic ones
+    // to read naturally for any trade. The old wording slotted the raw trade
+    // word in — fine for "roofers", clumsy for "nail bar" and "café", which
+    // are exactly the trades the owner cares about. New wording leans on the
+    // business name and town, which always read well. The reword only touches
+    // a template whose body is still the original shipped text, so anything
+    // the owner has edited is left exactly as it is.
+    run: () => {
+      seedStarterTemplates(); // adds the new sector variants to existing DBs
+
+      const OLD = {
+        'First message — email':
+`Hi,
+
+I was looking for {{category}} around {{location}} and came across {{business}} — but I couldn't find a website for you anywhere.
+
+I build simple one-page sites for local trades: what you do, the areas you cover, a few photos, and a button that dials you straight from a phone. Nothing complicated, and nothing you have to maintain.
+
+If it's any use I'll put together a mock-up of yours first, free and with no obligation, so you can look at a real page rather than take my word for it.
+
+Worth a look?
+
+{{my_name}}
+{{my_phone}}`,
+        'First message — WhatsApp':
+`Hi, is this {{business}}?
+
+I'm {{my_name}} from {{my_business}}. I was looking for {{category}} around {{location}} and couldn't find a website for you, so I thought I'd ask whether one would be any use.
+
+I make simple one-page sites for local trades — what you do, your areas, a few photos and a tap-to-call button. I'm happy to mock yours up for free so you can see it before deciding anything.
+
+If you'd rather I didn't message again, just say and I won't.`,
+        'First message — SMS':
+`Hi, is this {{business}}? {{my_name}} here from {{my_business}} — I couldn't find a website for you. I build one-page sites for {{category}} around {{location}} and I'll mock yours up free so you can see it. Reply STOP and I won't text again.`,
+      };
+
+      const byName = new Map(STARTERS.map((s) => [s.name, s]));
+      const now = new Date().toISOString();
+      for (const [name, oldBody] of Object.entries(OLD)) {
+        const cur = db.prepare('SELECT id, body FROM templates WHERE name = ?').get(name);
+        const next = byName.get(name);
+        if (cur && next && cur.body === oldBody) {
+          db.prepare('UPDATE templates SET body = ?, updated_at = ? WHERE id = ?')
+            .run(next.body, now, cur.id);
+        }
+      }
+    },
+  },
 ];
 
 function migrate() {

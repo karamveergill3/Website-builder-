@@ -6,6 +6,7 @@ import {
 import { ENTITY_TYPES, sendability, looksCorporate } from '../lib/pecr.js';
 import { isSuppressed, suppress } from '../lib/suppression.js';
 import { recordContact, recordFound, recontactCheck, ledgerFor } from '../lib/recontact.js';
+import { sectorFor, sectorLabel } from '../lib/sectors.js';
 
 export const STATUSES = ['new', 'sent', 'replied', 'won', 'lost'];
 
@@ -40,6 +41,11 @@ function toApi(row) {
     block_code: verdict.allowed ? null : verdict.code,
     block_reason: verdict.reason,
     looks_corporate: looksCorporate(row.business_name),
+    // Which broad sector this trade falls in, so the right opening message
+    // picks itself on the Reach screen. Server-side, so the keyword list has
+    // one home.
+    sector: sectorFor(row.category),
+    sector_label: sectorLabel(sectorFor(row.category)),
     can_contact: again.allowed,
     contacted_before: !again.allowed || again.code === 'IN_CONVERSATION',
     contacted_at: again.previous ?? row.last_contacted_at ?? null,

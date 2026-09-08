@@ -156,7 +156,13 @@ async function boot() {
 
   showUser(status.user);
   window.addEventListener('hashchange', route);
-  return route();
+  await route();
+
+  // First sign-in with no number yet: nudge them to link their WhatsApp
+  // before they start, so the messages they send carry their own identity.
+  if (!status.user.phone) {
+    if (await openAccount(status.user, { firstRun: true })) location.reload();
+  }
 }
 
 boot();

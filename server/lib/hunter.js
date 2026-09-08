@@ -513,6 +513,18 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
           counters.already_known++;
           continue;
         }
+        // A LIVE ledger probe, not just the `seen` snapshot taken at the top
+        // of the run. A company contacted (or filed) by another rep WHILE this
+        // hunt is grinding through its HTTP calls, whose lead is then deleted,
+        // would pass both checks above — the snapshot predates the contact and
+        // the leads row is gone — and be re-presented as a fresh prospect. The
+        // ledger row survives the delete, so reading it live closes that race
+        // and keeps "already contacted, never again" true even mid-run.
+        if (c.company_number
+            && db.prepare('SELECT 1 FROM company_ledger WHERE company_number = ?').get(c.company_number)) {
+          counters.already_known++;
+          continue;
+        }
         // The register matched the address, not the town. Check the town.
         if (!sameTown(t.area, c.locality)) {
           counters.wrong_town++;

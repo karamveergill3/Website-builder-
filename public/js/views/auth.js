@@ -59,7 +59,7 @@ export function loginView(root) {
 }
 
 export function setupView(root) {
-  mount(root, gateShell('Welcome to Keylo', 'Create the owner account — this is the admin', html`
+  mount(root, gateShell('Welcome to Keylo Studios', 'Create the owner account — this is the admin', html`
     <form id="setup">
       <div class="f">
         <label for="s-name">Your name</label>

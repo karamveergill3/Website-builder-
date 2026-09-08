@@ -255,6 +255,18 @@ export default async function huntView(root, _p, { refresh }) {
                 an hour a day. Tightest filter here: expect far fewer, all of them
                 messageable.</span></label>
           </div>
+          <div id="phone-filter-warn" class="msg msg-warn" style="margin-top:8px"
+               ${(c.requirePhone || c.requireMobile) ? '' : 'hidden'}>
+            <div class="grow">
+              <b>This is the setting that starves the hunt.</b> It only keeps a
+              business if Google already shows a number for it — but a business
+              with no website usually isn't on Google at all, so there's nothing
+              to read and it gets binned. On the last run this dropped the vast
+              majority of what it looked at. Leave it <b>off</b>: the hunt files
+              every no-website company, and <b>Find contacts</b> pulls the mobile
+              afterwards so you can still WhatsApp them.
+            </div>
+          </div>
           <p class="tip" style="margin-top:4px">
             Neither Companies House nor Google holds an email address, so there
             is no "must have an email" to tick — nothing could satisfy it.
@@ -362,6 +374,17 @@ export default async function huntView(root, _p, { refresh }) {
       toast(err.message, { error: true, ms: 7000 });
     }
   });
+
+  // Live warning: the phone/mobile filters are the usual reason a run finds
+  // almost nothing, so say so the moment either is ticked, not just after a
+  // wasted run.
+  const phoneWarn = () => {
+    const warn = $('#phone-filter-warn', root);
+    if (!warn) return;
+    warn.hidden = !($('#h-phone', root)?.checked || $('#h-mobile', root)?.checked);
+  };
+  $('#h-phone', root)?.addEventListener('change', phoneWarn);
+  $('#h-mobile', root)?.addEventListener('change', phoneWarn);
 
   on(root, 'click', '[data-act="add-all-trades"]', async (_e, btn) => {
     btn.disabled = true;

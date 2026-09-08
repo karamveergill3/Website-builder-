@@ -790,6 +790,37 @@ const MIGRATIONS = [
       bump('hunt_max_places_requests', 80, 120);
     },
   },
+  {
+    name: '025_users_and_sessions',
+    up: `
+      -- Accounts, so the hub can be reached by a team over the internet
+      -- without handing the URL-holder the whole database. Email is stored
+      -- lowercased and unique; the password is a scrypt hash, never the
+      -- plaintext. See server/lib/auth.js.
+      CREATE TABLE users (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        email         TEXT NOT NULL UNIQUE,
+        name          TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        role          TEXT NOT NULL DEFAULT 'rep' CHECK (role IN ('admin','rep')),
+        active        INTEGER NOT NULL DEFAULT 1,
+        created_at    TEXT NOT NULL,
+        last_login_at TEXT
+      );
+
+      -- One row per signed-in browser. token_hash is the SHA-256 of the
+      -- cookie value, never the value itself, so a dump of this table cannot
+      -- be replayed as a live session.
+      CREATE TABLE sessions (
+        token_hash   TEXT PRIMARY KEY,
+        user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at   TEXT NOT NULL,
+        expires_at   TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_sessions_user ON sessions(user_id);
+    `,
+  },
 ];
 
 function migrate() {

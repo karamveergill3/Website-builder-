@@ -13,6 +13,8 @@ import suppression from './routes/suppression.js';
 import outreach from './routes/outreach.js';
 import mockups, { MOCKUP_ROOT } from './routes/mockups.js';
 import { seedIdentityFromEnv } from './lib/identity.js';
+import authRouter from './routes/auth.js';
+import { userForToken, readCookie, SESSION_COOKIE } from './lib/auth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, '..', 'public');
@@ -20,9 +22,34 @@ const PUBLIC_DIR = resolve(__dirname, '..', 'public');
 export const app = express();
 
 app.use(express.json({ limit: '1mb' }));
+
+// Attach the signed-in user (or leave it null) to every request, before
+// anything else looks. Reads the session cookie; never throws.
+app.use((req, _res, next) => {
+  try {
+    req.user = userForToken(readCookie(req.headers.cookie, SESSION_COOKIE));
+  } catch {
+    req.user = null;
+  }
+  next();
+});
+
+// The app shell (HTML/JS/CSS) is public — it holds no data and simply shows a
+// login screen until /api/auth confirms a session. The DATA behind /api is
+// what the gate below protects.
 app.use(express.static(PUBLIC_DIR, { extensions: ['html'] }));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, db: DB_PATH }));
+
+// Sign-in lives before the gate: you must be able to reach it with no session.
+app.use('/api/auth', authRouter);
+
+// The gate. Everything under /api past this point needs a signed-in user.
+// /api/auth and /api/health are already handled above, so they never reach it.
+app.use('/api', (req, res, next) => {
+  if (req.user) return next();
+  res.status(401).json({ error: 'Sign in to continue.', code: 'UNAUTHENTICATED' });
+});
 
 /**
  * A sweep or a send that was in flight when the process died leaves rows that

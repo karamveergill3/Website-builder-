@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 process.env.GMAIL_CLIENT_ID = 'test-client-id';
 process.env.GMAIL_CLIENT_SECRET = 'test-client-secret';
 
-const { get, post, put, del, IDENTITY, teardown, nextCompanyNumber } = await import('./helpers.js');
+const { get, post, put, del, IDENTITY, teardown, nextCompanyNumber, authHeaders } = await import('./helpers.js');
 const { setSetting } = await import('../server/db.js');
 const { buildRawMessage } = await import('../server/lib/gmail.js');
 
@@ -213,7 +213,7 @@ test('a lead that opts out AFTER being queued is not sent to', async () => {
   await post(`/api/leads/${lead.id}`.replace('/api/leads', '/api/leads'), {});
   const patched = await fetch(`${(await import('./helpers.js')).base}/api/leads/${lead.id}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ opted_out: true }),
   });
   assert.equal(patched.status, 200);
@@ -357,7 +357,7 @@ test('the OAuth callback escapes everything it echoes back', async () => {
   const payload = '<script>alert(1)</script>';
   const res = await fetch(
     `${base}/api/gmail/callback?error=${encodeURIComponent(payload)}`,
-    { redirect: 'manual' }
+    { redirect: 'manual', headers: authHeaders() }
   );
   const html = await res.text();
 
@@ -370,7 +370,7 @@ test('the OAuth callback escapes everything it echoes back', async () => {
 test('a callback without a matching state is refused', async () => {
   const { base } = await import('./helpers.js');
   const res = await fetch(`${base}/api/gmail/callback?code=abc&state=not-one-we-issued`,
-    { redirect: 'manual' });
+    { redirect: 'manual', headers: authHeaders() });
   assert.equal(res.status, 400);
   assert.match(await res.text(), /not one this app started/i);
 });

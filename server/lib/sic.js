@@ -71,7 +71,6 @@ export const TRADES = [
   { codes: ['96090'], label: 'Personal care', terms: ['tattoo', 'tattoo artist', 'tattooist', 'piercer', 'piercing'] },
   { codes: ['96040'], label: 'Wellbeing', terms: ['massage', 'massage therapist', 'reflexology', 'acupuncture', 'holistic', 'reiki'] },
   { codes: ['86900'], label: 'Complementary therapy', terms: ['osteopath', 'chiropractor', 'physio', 'physiotherapist', 'sports therapist', 'sports massage'] },
-  { codes: ['93130'], label: 'Fitness', terms: ['gym', 'personal trainer', 'fitness', 'pt', 'yoga', 'yoga studio', 'pilates', 'crossfit'] },
   { codes: ['96090'], label: 'Pet services', terms: ['dog groomer', 'dog grooming', 'dog walker', 'pet services', 'dog daycare', 'pet sitter'] },
 
   /* --------------- food and drink ------------------------------------- */

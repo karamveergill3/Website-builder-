@@ -13,8 +13,8 @@ import assert from 'node:assert/strict';
 
 process.env.GOOGLE_MAPS_API_KEY = 'test-places-key';
 
-const { post, teardown, nextCompanyNumber } = await import('./helpers.js');
-const { discover } = await import('../server/lib/contact-finder.js');
+const { get, post, teardown, nextCompanyNumber } = await import('./helpers.js');
+const { discover, autoPromote } = await import('../server/lib/contact-finder.js');
 
 const realFetch = globalThis.fetch;
 let place = null; // the single Places listing the stub returns
@@ -70,6 +70,33 @@ test('with a Places website, it is filed and fed to the scrape path', async () =
   const out = await discover(lead, { web: false });
   const site = out.signals.find((s) => s.kind === 'website');
   assert.ok(site && site.value === 'https://arlofire.example', 'the website is captured');
+});
+
+test('auto-promote copies a found mobile straight onto the lead', async () => {
+  place = {
+    id: 'p4', displayName: { text: 'Arlo Fire Safety' },
+    formattedAddress: 'Leek', nationalPhoneNumber: '07700 900123',
+  };
+  const lead = await makeLead();
+  await discover(lead, { web: false });
+  const set = autoPromote(lead.id);
+  assert.ok(set.phone, 'a phone was promoted');
+  assert.equal(set.phoneMobile, true, 'and it is recognised as a mobile');
+
+  const row = (await get(`/api/leads/${lead.id}`)).body.lead;
+  assert.ok(row.phone && row.phone.startsWith('+447'), `lead.phone is the mobile: ${row.phone}`);
+});
+
+test('auto-promote still files a landline when that is all there is', async () => {
+  place = {
+    id: 'p5', displayName: { text: 'Arlo Fire Safety' },
+    formattedAddress: 'Leek', nationalPhoneNumber: '01538 373737',
+  };
+  const lead = await makeLead();
+  await discover(lead, { web: false });
+  const set = autoPromote(lead.id);
+  assert.ok(set.phone, 'the landline is still filed as the number');
+  assert.notEqual(set.phoneMobile, true, 'but not flagged a mobile');
 });
 
 test.after(() => { globalThis.fetch = realFetch; teardown(); });

@@ -15,7 +15,7 @@ import { wrap, badRequest, notFound, nowIso, requiredStr } from '../lib/http.js'
 import { sendability } from '../lib/pecr.js';
 import { recontactCheck, recordContact } from '../lib/recontact.js';
 import { isSuppressed } from '../lib/suppression.js';
-import { discover, signalsForLead, promoteSignal, recentFinds } from '../lib/contact-finder.js';
+import { discover, signalsForLead, promoteSignal, recentFinds, autoPromote } from '../lib/contact-finder.js';
 import { handoff } from '../lib/handoff.js';
 import { renderTemplate } from '../lib/template.js';
 
@@ -110,7 +110,7 @@ router.post('/leads/find-contacts', wrap(async (req, res) => {
 
   sweep = {
     running: true, total: leads.length, done: 0,
-    found_phone: 0, found_email: 0, none: 0,
+    found_phone: 0, found_mobile: 0, found_email: 0, none: 0,
     started_at: nowIso(), finished_at: null, error: null,
   };
 
@@ -119,8 +119,12 @@ router.post('/leads/find-contacts', wrap(async (req, res) => {
       if (!sweep.running) break;
       try {
         const out = await discover(lead, { web: lead.has_website !== 0 });
+        // Copy the best number/email onto the lead so it shows on the row and
+        // the mobile/reachable filters work, mobile preferred for WhatsApp.
+        const promoted = autoPromote(lead.id);
         const kinds = new Set((out.signals ?? []).map((sig) => sig.kind));
         if (kinds.has('phone')) sweep.found_phone += 1;
+        if (promoted.phoneMobile) sweep.found_mobile += 1;
         if (kinds.has('email')) sweep.found_email += 1;
         if (!kinds.has('phone') && !kinds.has('email')) sweep.none += 1;
       } catch (err) {

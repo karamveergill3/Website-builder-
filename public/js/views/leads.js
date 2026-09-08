@@ -127,11 +127,20 @@ export default async function leadsView(root, params, { refresh }) {
   const isTeam = roster.filter((u) => u.active).length > 1;
 
   const has = (v) => Boolean(v && String(v).trim());
+  // A UK mobile in either shape it gets stored in: national (07…) or E.164
+  // (+447…/447…). These are the only numbers WhatsApp and SMS can reach.
+  const isMobile = (p) => {
+    const d = String(p ?? '').replace(/\D/g, '');
+    return /^447\d{9}$/.test(d) || /^07\d{9}$/.test(d);
+  };
   // Working views: what needs doing, rather than what state it is in.
   const VIEWS = {
     unchecked: (l) => l.block_code === 'UNCLASSIFIED',
     noemail:   (l) => l.can_email === false && l.block_code === 'NO_EMAIL',
     nosite:    (l) => l.has_website === 0,
+    // Has an 07 mobile — the ones you can actually WhatsApp. This is what you
+    // want after a Find contacts sweep if WhatsApp is the channel.
+    mobile:    (l) => isMobile(l.phone),
     // Something to contact them by at all — a phone or an email. This is the
     // "phone and/or email" filter: it only means anything once Find contacts
     // has run, because the hunt files a company before either is known.
@@ -193,7 +202,10 @@ export default async function leadsView(root, params, { refresh }) {
         <button class="pill" data-filter="all" aria-pressed="${status === 'all'}">All <b>${stats.total}</b></button>
         ${STATUSES.map((s) => html`
           <button class="pill" data-filter="${s}" aria-pressed="${status === s}">${s} <b>${stats.by_status[s] ?? 0}</b></button>`)}
-        ${(counts.unchecked || counts.noemail || counts.nosite || counts.reachable || counts.nocontact || view) ? html`<span class="sep"></span>` : ''}
+        ${(counts.unchecked || counts.noemail || counts.nosite || counts.mobile || counts.reachable || counts.nocontact || view) ? html`<span class="sep"></span>` : ''}
+        ${counts.mobile ? html`
+          <button class="pill" data-view="mobile" aria-pressed="${view === 'mobile'}"
+            title="Has an 07 mobile — the ones you can WhatsApp">mobile <b>${counts.mobile}</b></button>` : ''}
         ${counts.reachable ? html`
           <button class="pill" data-view="reachable" aria-pressed="${view === 'reachable'}"
             title="Has a phone number or an email — something to contact them by">reachable <b>${counts.reachable}</b></button>` : ''}
@@ -524,8 +536,9 @@ export default async function leadsView(root, params, { refresh }) {
         }
         if (!sweep.running) {
           clearInterval(tick);
-          toast(`Found a phone for ${sweep.found_phone}, an email for ${sweep.found_email}`
-            + `, nothing for ${sweep.none}`);
+          toast(`${sweep.found_mobile ?? 0} mobiles · ${sweep.found_phone} with a phone`
+            + ` · ${sweep.found_email} with an email · ${sweep.none} nothing`,
+          { ms: 6000 });
           refresh();
         }
       }, 1500);

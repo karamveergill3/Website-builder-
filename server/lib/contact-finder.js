@@ -485,6 +485,51 @@ export function signalsForLead(leadId) {
   ).all(leadId);
 }
 
+const isMobileValue = (v) => normalisePhone(v).mobile === true;
+
+/**
+ * After a sweep files a lead's signals, copy the best ones onto the lead
+ * itself, so the number shows on the row and the filters work — without the
+ * owner opening every lead to promote by hand.
+ *
+ * Only a blank field is filled; anything already on the lead is left alone.
+ * For the phone a MOBILE beats a landline (WhatsApp and SMS reach 07s and
+ * nothing else), then higher confidence wins. An email is only auto-filled
+ * when it is a real find (confidence >= 50), so a low-confidence personal
+ * address does not quietly attach itself.
+ *
+ * Returns what it set: { phone?, phoneMobile?, email? }.
+ */
+export function autoPromote(leadId) {
+  const lead = db.prepare('SELECT phone, email FROM leads WHERE id = ?').get(leadId);
+  if (!lead) return {};
+  const sigs = signalsForLead(leadId);
+  const out = {};
+  const blank = (v) => !v || !String(v).trim();
+
+  if (blank(lead.phone)) {
+    const phones = sigs.filter((s) => s.kind === 'phone').sort((a, b) =>
+      (Number(isMobileValue(b.value)) - Number(isMobileValue(a.value)))
+      || (b.confidence - a.confidence));
+    if (phones[0]) {
+      db.prepare('UPDATE leads SET phone = ? WHERE id = ?').run(phones[0].value, leadId);
+      db.prepare('UPDATE contact_signals SET promoted_at = ? WHERE id = ?').run(nowIso(), phones[0].id);
+      out.phone = phones[0].value;
+      out.phoneMobile = isMobileValue(phones[0].value);
+    }
+  }
+  if (blank(lead.email)) {
+    const email = sigs.filter((s) => s.kind === 'email' && s.confidence >= 50)
+      .sort((a, b) => b.confidence - a.confidence)[0];
+    if (email) {
+      db.prepare('UPDATE leads SET email = ? WHERE id = ?').run(email.value, leadId);
+      db.prepare('UPDATE contact_signals SET promoted_at = ? WHERE id = ?').run(nowIso(), email.id);
+      out.email = email.value;
+    }
+  }
+  return out;
+}
+
 export function promoteSignal(leadId, signalId) {
   const sig = db.prepare(
     'SELECT * FROM contact_signals WHERE id = ? AND lead_id = ?'

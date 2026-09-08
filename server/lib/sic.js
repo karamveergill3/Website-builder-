@@ -3,8 +3,11 @@
  * so "roofers" finds SIC 43910 without anyone memorising the register.
  *
  * The list covers the trades most likely to be running without a website —
- * building trades, home services, motor, personal services, food, retail —
- * i.e. every category where a small independent might plausibly buy one.
+ * building trades, home services, motor, personal services, food — i.e. the
+ * SERVICE businesses a one-page brochure site actually suits. Pure product
+ * retailers (a jeweller, a boutique, a car-parts shop) are deliberately left
+ * out: what they need is an online shop with a stock catalogue, not the
+ * lead-generating site Keylo builds, so the hunt does not chase them.
  * Anything you type that does not resolve here is reported back as
  * "unrecognised" rather than silently dropped, and any five-digit code can
  * be typed in directly.
@@ -58,7 +61,6 @@ export const TRADES = [
 
   /* --------------- motor trade ---------------------------------------- */
   { codes: ['45200'], label: 'Vehicle maintenance and repair', terms: ['garage', 'mechanic', 'mechanics', 'mot', 'mot centre', 'car repair', 'bodyshop', 'body shop', 'mobile mechanic'] },
-  { codes: ['45320'], label: 'Vehicle parts and accessories', terms: ['car parts', 'auto parts', 'tyres', 'tyre fitter', 'exhaust'] },
   { codes: ['45400'], label: 'Motorcycles', terms: ['motorcycle repair', 'motorbike repair', 'bike shop'] },
   { codes: ['45201'], label: 'Valeting and cleaning', terms: ['car valeting', 'car detailing', 'mobile valet'] },
   { codes: ['85530'], label: 'Driving instruction', terms: ['driving instructor', 'driving school', 'driving lessons'] },
@@ -81,17 +83,6 @@ export const TRADES = [
   { codes: ['10130'], label: 'Butchers', terms: ['butcher', 'butchers', 'family butcher'] },
   { codes: ['47230'], label: 'Fishmongers', terms: ['fishmonger', 'fishmongers'] },
   { codes: ['47240'], label: 'Delis and food shops', terms: ['deli', 'delicatessen', 'farm shop', 'greengrocer'] },
-
-  /* --------------- retail --------------------------------------------- */
-  { codes: ['47760'], label: 'Florists', terms: ['florist', 'florists', 'flower shop', 'wedding flowers'] },
-  { codes: ['47770'], label: 'Jewellers', terms: ['jeweller', 'jewellers', 'jewellery'] },
-  { codes: ['47610'], label: 'Bookshops', terms: ['bookshop', 'book shop', 'independent bookshop'] },
-  { codes: ['47640'], label: 'Sports and cycle shops', terms: ['bike shop', 'cycle shop', 'sports shop'] },
-  { codes: ['47750'], label: 'Health and beauty shops', terms: ['health shop', 'wellbeing shop'] },
-  { codes: ['47789'], label: 'Independent retail', terms: ['gift shop', 'homeware', 'lifestyle shop', 'independent shop', 'antiques'] },
-  { codes: ['47710'], label: 'Clothing shops', terms: ['boutique', 'clothing shop', 'wedding dress', 'bridal', 'menswear', 'kidswear'] },
-  { codes: ['47740'], label: 'Furniture and homeware', terms: ['furniture shop', 'furniture maker', 'bespoke furniture'] },
-  { codes: ['47810', '47820'], label: 'Market stalls', terms: ['market stall', 'street food'] },
 
   /* --------------- events, arts, personal services -------------------- */
   { codes: ['74209'], label: 'Photography', terms: ['photographer', 'photographers', 'photography', 'wedding photographer'] },

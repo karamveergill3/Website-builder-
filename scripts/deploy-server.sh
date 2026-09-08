@@ -191,10 +191,19 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now keylo-duckdns.timer
 sudo /usr/local/bin/keylo-duckdns.sh || warn "DuckDNS update failed — check the subdomain and token."
 
-# --- Caddy: serve the domain over HTTPS, proxying to the hub ----------------
-say "Telling Caddy to serve https://${DOMAIN} …"
+# --- Caddy: serve the domain(s) over HTTPS, proxying to the hub -------------
+# The list of hostnames Caddy serves lives in /etc/keylo-domains, one per line.
+# The DuckDNS domain is always included; a branded domain added there later
+# (e.g. app.keylostudios.com) is kept across re-runs of this installer.
+if ! sudo test -f /etc/keylo-domains; then
+  echo "${DOMAIN}" | sudo tee /etc/keylo-domains >/dev/null
+elif ! sudo grep -qxF "${DOMAIN}" /etc/keylo-domains; then
+  echo "${DOMAIN}" | sudo tee -a /etc/keylo-domains >/dev/null
+fi
+CADDY_HOSTS="$(sudo grep -v '^[[:space:]]*$' /etc/keylo-domains | paste -sd, -)"
+say "Telling Caddy to serve: ${CADDY_HOSTS}"
 sudo tee /etc/caddy/Caddyfile >/dev/null <<CADDY
-${DOMAIN} {
+${CADDY_HOSTS} {
     encode gzip
     reverse_proxy 127.0.0.1:3000
 }

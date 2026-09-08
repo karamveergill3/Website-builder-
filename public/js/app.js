@@ -13,6 +13,8 @@ import deliverView   from './views/deliverability.js';
 import outboxView    from './views/outbox.js';
 import complianceView from './views/compliance.js';
 import repliesView   from './views/replies.js';
+import teamView, { loginView, setupView } from './views/auth.js';
+import { api } from './api.js';
 
 const ROUTES = {
   '/leads':     leadsView,
@@ -28,6 +30,7 @@ const ROUTES = {
   '/settings':  settingsView,
   '/compliance': complianceView,
   '/deliverability': deliverView,
+  '/team':      teamView,
 };
 
 function parseHash() {
@@ -77,6 +80,9 @@ async function route() {
   try {
     await render(el, params, { refresh, navigate });
   } catch (err) {
+    // A session that lapsed mid-use: drop straight to the login rather than
+    // showing a confusing error on a screen the viewer is no longer allowed.
+    if (err.status === 401) { hideChrome(); return loginView($('#view')); }
     console.error(err);
     mount($('#view'), html`
       <div class="panel"><div class="panel-bd">
@@ -87,5 +93,64 @@ async function route() {
   }
 }
 
-window.addEventListener('hashchange', route);
-route();
+/**
+ * Boot gate. Before the router runs, ask who (if anyone) is signed in:
+ *
+ *   - no accounts yet  → the first-run setup screen (create the admin)
+ *   - not signed in     → the login screen
+ *   - signed in         → show who, wire logout, reveal the admin-only Team
+ *                         tab, and start routing as normal.
+ *
+ * login and setup reload the page on success, so this runs again and lets the
+ * app through — one source of truth for "who is signed in".
+ */
+function hideChrome() {
+  const m = document.querySelector('.masthead');
+  if (m) m.hidden = true;
+}
+
+function showUser(user) {
+  const inner = document.querySelector('.masthead-inner');
+  if (!inner || document.getElementById('userbox')) return;
+
+  if (user.role === 'admin' && !document.querySelector('#nav a[href="#/team"]')) {
+    const a = document.createElement('a');
+    a.href = '#/team';
+    a.textContent = 'Team';
+    $('#nav')?.append(a);
+  }
+
+  const box = document.createElement('div');
+  box.id = 'userbox';
+  box.className = 'userbox';
+  box.innerHTML = `<span class="who" title="${user.email}">${user.name}</span>`
+    + '<button class="mini ghost" id="logout">Sign out</button>';
+  inner.append(box);
+
+  box.querySelector('#logout').addEventListener('click', async () => {
+    try { await api.auth.logout(); } catch { /* sign out regardless */ }
+    location.reload();
+  });
+}
+
+async function boot() {
+  let status;
+  try {
+    status = await api.auth.status();
+  } catch {
+    mount($('#view'), html`<div class="panel"><div class="panel-bd">
+      <div class="msg msg-bad"><div class="grow">Can't reach the hub. Is it running?</div></div>
+      <p style="margin-top:12px"><button onclick="location.reload()">Try again</button></p>
+    </div></div>`);
+    return;
+  }
+
+  if (status.needs_setup) { hideChrome(); return setupView(freshView()); }
+  if (!status.authenticated) { hideChrome(); return loginView(freshView()); }
+
+  showUser(status.user);
+  window.addEventListener('hashchange', route);
+  return route();
+}
+
+boot();

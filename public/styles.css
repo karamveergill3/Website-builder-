@@ -341,3 +341,23 @@ kbd {
   .rows td.c-act { text-align: left; margin-top: 6px; }
   .rows td.c-pick { position: absolute; right: 14px; }
 }
+
+/* ---- Auth gate (login / first-run setup) + signed-in user chip ---- */
+.masthead-inner { position: relative; }
+.userbox {
+  display: flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 12px;
+}
+.userbox .who { font-size: .8rem; color: var(--ink-2); font-weight: 600; white-space: nowrap; }
+
+.gate {
+  min-height: 70vh; display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.gate-card { width: 100%; max-width: 380px; }
+.gate-hd { text-align: center; padding: 22px 20px 6px; }
+.gate-hd .mark {
+  width: 30px; height: 30px; border-radius: 6px; background: var(--green-deep);
+  display: inline-block; margin-bottom: 10px;
+}
+.gate-hd h1 { font-size: 1.3rem; font-variation-settings: "SOFT" 30, "WONK" 1; }
+.gate-hd p { margin-top: 2px; }
+.gate .f { margin-top: 12px; }

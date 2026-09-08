@@ -76,4 +76,14 @@ export const api = {
     sent:    (eventId) => request('POST', `/api/outreach/${eventId}/sent`, {}),
     list:    (params)  => request('GET',  '/api/outreach' + qs(params)),
   },
+  auth: {
+    status:   ()             => request('GET',  '/api/auth/status'),
+    setup:    (body)         => request('POST', '/api/auth/setup', body),
+    login:    (body)         => request('POST', '/api/auth/login', body),
+    logout:   ()             => request('POST', '/api/auth/logout', {}),
+    updateMe: (body)         => request('PATCH','/api/auth/me', body),
+    users:    ()             => request('GET',  '/api/auth/users'),
+    addUser:  (body)         => request('POST', '/api/auth/users', body),
+    setUser:  (id, body)     => request('PATCH', `/api/auth/users/${id}`, body),
+  },
 };

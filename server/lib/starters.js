@@ -19,14 +19,15 @@
  *     company in front of you, and the free mock-up is the one thing this tool
  *     does that a cold email doesn't.
  *
- *   They give a gentle way out.  Not the robotic "reply STOP", which reads as
- *     spam, but a warm human line ("just let me know and I won't message
- *     again"). An EMAIL doesn't carry one in the body at all: lib/compliance.js
- *     appends the identity block and opt-out to every email automatically, so
- *     repeating it here would only double it up. A WhatsApp or SMS is a deep
- *     link the user taps and nothing can be appended to it, so those bodies
- *     carry the sender and the soft opt-out themselves. Removing that line
- *     from a cold WhatsApp/SMS is not a style choice.
+ *   They give a gentle way out, folded into the ask.  Not a bracketed
+ *     disclaimer and not the robotic "reply STOP", but a natural half-sentence
+ *     ("no pressure at all, and if it's not for you, just say and I won't
+ *     message again"). An EMAIL doesn't carry one in the body at all:
+ *     lib/compliance.js appends the identity block and opt-out to every email
+ *     automatically. A WhatsApp or SMS is a deep link the user taps and
+ *     nothing can be appended to it, so those bodies carry the sender and the
+ *     soft opt-out themselves. Removing that from a cold WhatsApp/SMS is not a
+ *     style choice: PECR needs it, and it is what keeps the number off a ban.
  *
  * No dashes: they read as machine-written. The sender tokens come from
  * Settings, so nothing personal lives in this file and one edit fixes every
@@ -84,12 +85,10 @@ We build simple, great looking one page websites for local businesses. Just a cl
 
 I'd be really happy to put together a free mock up for {{business}} so you can see exactly how it could look, with no cost and no obligation at all.
 
-Would that be something you'd like me to do for you?
+Would that be something you'd like me to do for you? No pressure at all, and if it's not for you, just say and I won't message again.
 
 Thanks so much, and have a great day.
-{{my_name}}, {{my_business}}
-
-(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
+{{my_name}}, {{my_business}}`,
   },
 
   // Salon & beauty: the framing that lands is "this is where new clients look".
@@ -103,12 +102,10 @@ We build simple, beautiful one page websites: your treatments, lovely photos of 
 
 I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
-Would you like me to do that for you?
+Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
 
 Thanks so much, and have a lovely day.
-{{my_name}}, {{my_business}}
-
-(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
+{{my_name}}, {{my_business}}`,
   },
 
   // Trades: they want to be seen doing the work and reached in one tap.
@@ -122,12 +119,10 @@ For a trade, most people just want to see a few jobs you've done and be able to 
 
 I'd be happy to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
-Would you like me to do that for you?
+Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
 
 Cheers, and all the best with the work.
-{{my_name}}, {{my_business}}
-
-(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
+{{my_name}}, {{my_business}}`,
   },
 
   // Food & drink: menu, hours and how to order are what people look for.
@@ -141,12 +136,10 @@ For a place like yours, a website is usually where people check the menu, your o
 
 I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
-Would you like me to do that for you?
+Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
 
 Thanks so much, and hope you're keeping busy.
-{{my_name}}, {{my_business}}
-
-(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
+{{my_name}}, {{my_business}}`,
   },
 
   // Motor: what you do and booking in, with a call button.
@@ -160,12 +153,10 @@ For a garage, a website is where people check what you do and book their car in.
 
 I'd be happy to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
-Would you like me to do that for you?
+Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
 
 Cheers, and all the best.
-{{my_name}}, {{my_business}}
-
-(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
+{{my_name}}, {{my_business}}`,
   },
 
   // Health & fitness: what's on offer and booking, before someone commits.
@@ -179,12 +170,10 @@ For somewhere like yours, a website is usually the first place people look befor
 
 I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
-Would you like me to do that for you?
+Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
 
 Thanks so much, and have a great day.
-{{my_name}}, {{my_business}}
-
-(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
+{{my_name}}, {{my_business}}`,
   },
 
   // Shops: what you stock, where you are, when you're open.
@@ -198,12 +187,10 @@ For a shop, a website is where people check what you stock, where you are and wh
 
 I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
-Would you like me to do that for you?
+Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
 
 Thanks so much, and have a lovely day.
-{{my_name}}, {{my_business}}
-
-(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
+{{my_name}}, {{my_business}}`,
   },
 
   {
@@ -213,7 +200,7 @@ Thanks so much, and have a lovely day.
     // A text that doesn't say who sent it or how to stop it is not one that
     // may lawfully be sent, so both live in the body. Warm, not robotic: no
     // "reply STOP". Phones stitch multi-part texts back into one message.
-    body: `Hi, I'm {{my_name}} from {{my_business}}. I came across {{business}} and noticed you don't have a website yet, and I'd be happy to build you a free one page mock up to look at, with no obligation. Would you like me to put one together? If it's not for you, just let me know and I won't message again.`,
+    body: `Hi, I'm {{my_name}} from {{my_business}}. I came across {{business}} and noticed you don't have a website yet, and I'd be happy to build you a free one page mock up to look at, with no obligation. Would you like me to put one together? If it's not for you, just say and I won't message again.`,
   },
 ];
 

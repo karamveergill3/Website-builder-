@@ -43,7 +43,7 @@ test('an invoice totals its lines exactly, numbered and tokened', async () => {
   assert.equal(inv.subtotal_pence, 65000, '600 + 2×25');
   assert.equal(inv.vat_pence, 0, 'not VAT registered');
   assert.equal(inv.total_pence, 65000);
-  assert.match(inv.number, /^INV-\d{4}$/);
+  assert.match(inv.number, /^INV-\d{3}$/);
   assert.equal(inv.reference, inv.number, 'the bank reference is the number');
   assert.ok(inv.token && inv.token.length >= 24, 'has an unguessable link token');
   assert.equal(inv.status, 'draft');

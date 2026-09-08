@@ -81,7 +81,7 @@ export function nextNumber() {
   const prefix = String(getSetting('invoice_prefix', 'INV') || 'INV').trim();
   const seq = Number(getSetting('invoice_seq', '0')) + 1;
   setSetting('invoice_seq', String(seq));
-  return `${prefix}-${String(seq).padStart(4, '0')}`;
+  return `${prefix}-${String(seq).padStart(3, '0')}`;
 }
 
 /* ---------------------------------------------------------------- clients */
@@ -136,7 +136,7 @@ export function createInvoice({ client_id, kind = 'build', lines = [], notes, du
       vat: t.vat_pence,
       total: t.total_pence,
       rate: t.vat_rate,
-      due: s(due_at),
+      due: s(due_at) ?? tomorrowFrom(now),
       notes: s(notes),
       token: randomBytes(16).toString('hex'),
       now,
@@ -309,6 +309,14 @@ function addMonth(iso) {
   // If the next month is shorter (e.g. 31 Jan → Feb), setUTCMonth overflows;
   // pull back to the last day of the intended month.
   if (d.getUTCDate() < day) d.setUTCDate(0);
+  return d.toISOString().slice(0, 10);
+}
+
+/** The day after a timestamp, as YYYY-MM-DD. The default due date: a build is
+ * payable within 24 hours unless the owner sets a later date on the invoice. */
+function tomorrowFrom(iso) {
+  const d = new Date(iso);
+  d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
 }
 
@@ -515,7 +523,10 @@ export function renderInvoicePage(inv, settings = getSettings()) {
 
     ${payment}
 
-    ${v('invoice_terms') || v('invoice_footer') ? `<div class="terms">${esc([v('invoice_terms'), v('invoice_footer')].filter(Boolean).join('\n\n'))}</div>` : ''}
+    <div class="terms">${esc([
+      v('invoice_terms') || 'Payment is due within 24 hours of the invoice date.',
+      v('invoice_footer'),
+    ].filter(Boolean).join('\n\n'))}</div>
   </div>
 </body></html>`;
 }

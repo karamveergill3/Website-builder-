@@ -75,7 +75,19 @@ async function openInvoiceForm(clients, { presetClientId } = {}) {
       const lines = $('#iv-lines', root);
       // Injected here rather than in the html`` template, which escapes an
       // interpolated string — so the row would render as literal text.
-      lines.insertAdjacentHTML('beforeend', lineRow({ description: 'One-page website design & build' }));
+      // A build is pre-itemised so the invoice shows the full scope of work,
+      // not one vague line. Price the ones you're charging for and delete the
+      // rest; a blank-priced row is dropped on save, so nothing shows at £0.
+      const BUILD_ITEMS = [
+        'Bespoke one-page website, designed and built',
+        'Mobile and tablet optimisation',
+        'Click-to-call, WhatsApp and enquiry buttons',
+        'Google and on-page SEO setup',
+        'Business email and domain setup',
+        'Secure hosting and SSL certificate (first year)',
+        'Testing, launch and handover',
+      ];
+      for (const d of BUILD_ITEMS) lines.insertAdjacentHTML('beforeend', lineRow({ description: d }));
       const recalc = () => {
         let total = 0;
         for (const tr of $$('.line', root)) {
@@ -235,12 +247,14 @@ export default async function invoicesView(root, _params, { refresh }) {
             <input name="pay_klarna_note" value="${s.pay_klarna_note ?? ''}" placeholder="Ask us about paying monthly with Klarna"></div>
         </div>
         <div class="cols">
-          <div class="f"><label>Invoice prefix</label><input name="invoice_prefix" value="${s.invoice_prefix ?? 'INV'}"></div>
+          <div class="f"><label>Invoice prefix</label><input name="invoice_prefix" value="${s.invoice_prefix ?? 'INV'}" placeholder="KEY"></div>
+          <div class="f"><label>Next invoice number <span class="opt">the next one you raise</span></label>
+            <input id="iv-next-number" type="number" min="1" value="${Number(s.invoice_seq ?? 0) + 1}"></div>
           <div class="f"><label>VAT number <span class="opt">leave blank if not registered</span></label>
             <input name="biz_vat_number" value="${s.biz_vat_number ?? ''}"></div>
         </div>
         <div class="f"><label>Payment terms</label>
-          <input name="invoice_terms" value="${s.invoice_terms ?? ''}" placeholder="Payment due within 14 days of the invoice date."></div>
+          <input name="invoice_terms" value="${s.invoice_terms ?? ''}" placeholder="Payment is due within 24 hours of the invoice date."></div>
         <div class="bar"><button type="submit" class="primary">Save payment details</button></div>
       </form>
     </div></div>
@@ -336,6 +350,13 @@ export default async function invoicesView(root, _params, { refresh }) {
   on(root, 'submit', '#pay-form', async (ev) => {
     ev.preventDefault();
     const body = Object.fromEntries(new FormData(ev.target));
+    // "Next invoice number" is a friendlier UI than the raw counter (id only,
+    // no name, so it stays out of the form's settings keys). A number is minted
+    // as counter+1, so store one less than what they typed.
+    const nextEl = ev.target.querySelector('#iv-next-number');
+    if (nextEl && nextEl.value) {
+      body.invoice_seq = String(Math.max(0, Math.round(Number(nextEl.value)) - 1));
+    }
     await api.settings.save(body);
     toast('Saved');
     refresh();

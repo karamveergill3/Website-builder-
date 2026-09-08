@@ -391,7 +391,8 @@ router.post('/bulk-delete', wrap((req, res) => {
     'DELETE FROM company_ledger WHERE company_key = ? AND contacted_at IS NULL'
   );
 
-  const out = { deleted: 0, suppressed: 0, forgotten: 0, kept: 0 };
+  const out = { deleted: 0, suppressed: 0, forgotten: 0, reopened: 0, kept: 0 };
+  const forgottenTowns = new Set();
 
   const run = db.transaction((rows) => {
     for (const id of rows) {
@@ -408,11 +409,37 @@ router.post('/bulk-delete', wrap((req, res) => {
 
       if (!filed) continue;
       if (filed.contacted_at) { out.kept += 1; continue; }
-      out.forgotten += unfile.run(filed.company_key).changes;
+      const removed = unfile.run(filed.company_key).changes;
+      out.forgotten += removed;
+      if (removed && lead.location) forgottenTowns.add(lead.location);
     }
   });
 
   run(all ? db.prepare('SELECT id FROM leads').all().map((r) => r.id) : ids);
+
+  // Clearing the ledger is not enough on its own. The hunt reads the register
+  // one page at a time and remembers how far it got (the target's cursor), and
+  // it retires a town it has worked through (exhausted_at). So a forgotten
+  // business still never reappears — the run starts past the page it sits on.
+  // Re-open the towns we just forgot: rewind their cursor and un-retire them,
+  // so the next hunt reads them again from the top and re-finds the business.
+  if (forget && out.forgotten > 0) {
+    const norm = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const wanted = new Set([...forgottenTowns].map(norm));
+    const reopen = db.prepare(
+      'UPDATE hunt_targets SET cursor = 0, exhausted_at = NULL WHERE id = ?'
+    );
+    const targets = db.prepare('SELECT id, area FROM hunt_targets').all();
+    const reopenAll = db.transaction(() => {
+      for (const t of targets) {
+        // Match the town, or — if the forgotten leads carried no town to match
+        // on — re-open everything, so the escape hatch always actually works.
+        if (!wanted.size || wanted.has(norm(t.area))) out.reopened += reopen.run(t.id).changes;
+      }
+    });
+    reopenAll();
+  }
+
   res.json(out);
 }));
 

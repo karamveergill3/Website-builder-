@@ -21,6 +21,7 @@ import assert from 'node:assert/strict';
 const { get, post, patch, del, teardown, nextCompanyNumber } = await import('./helpers.js');
 const { ledgerFor, knownCompanyNumbers } = await import('../server/lib/recontact.js');
 const { isSuppressed } = await import('../server/lib/suppression.js');
+const { db } = await import('../server/db.js');
 
 const uniq = () => Math.random().toString(36).slice(2, 8);
 
@@ -135,6 +136,41 @@ test('a mixed batch forgets only the untouched half', async () => {
   assert.equal(res.body.kept, 1);
   assert.equal(knownCompanyNumbers().has(fresh.company_number), false);
   assert.equal(knownCompanyNumbers().has(done.company_number), true);
+});
+
+test('forget re-opens the town so the hunt can reach the business again', async () => {
+  // Clearing the ledger is not enough on its own: the hunt pages through the
+  // register and remembers how far it got, and retires a worked-through town.
+  // A forgotten business still never reappears unless that paging is rewound.
+  await clear();
+  db.prepare('DELETE FROM hunt_targets').run();
+  db.prepare(
+    `INSERT INTO hunt_targets (trade, sic_codes, area, cursor, exhausted_at, created_at)
+     VALUES ('roofers', '43910', 'Stafford', 300, ?, ?)`
+  ).run(new Date().toISOString(), new Date().toISOString());
+
+  await makeLead({ location: 'Stafford' });
+  const res = await post('/api/leads/bulk-delete', { all: true, forget: true });
+  assert.equal(res.body.forgotten, 1);
+  assert.ok(res.body.reopened >= 1, 'the town it sat in was re-opened');
+
+  const t = db.prepare("SELECT * FROM hunt_targets WHERE area = 'Stafford'").get();
+  assert.equal(t.cursor, 0, 'paging rewound to the top');
+  assert.equal(t.exhausted_at, null, 'and the town is no longer retired');
+});
+
+test('a plain delete (no forget) leaves the paging alone', async () => {
+  await clear();
+  db.prepare('DELETE FROM hunt_targets').run();
+  db.prepare(
+    `INSERT INTO hunt_targets (trade, sic_codes, area, cursor, created_at)
+     VALUES ('roofers', '43910', 'Stafford', 300, ?)`
+  ).run(new Date().toISOString());
+
+  await makeLead({ location: 'Stafford' });
+  const res = await post('/api/leads/bulk-delete', { all: true });
+  assert.equal(res.body.reopened, 0, 'without forget, nothing is re-opened');
+  assert.equal(db.prepare("SELECT cursor FROM hunt_targets WHERE area = 'Stafford'").get().cursor, 300);
 });
 
 /* ------------------------------------------------------------- opt-out */

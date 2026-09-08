@@ -54,6 +54,7 @@ export function verifyPassword(password, stored) {
 /* ----------------------------------------------------------------- users */
 
 const normEmail = (e) => String(e ?? '').trim().toLowerCase();
+const own = (v) => { const t = String(v ?? '').trim(); return t || null; };
 
 export function countUsers() {
   return db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
@@ -69,7 +70,7 @@ export function getUserById(id) {
 
 export function listUsers() {
   return db.prepare(
-    `SELECT id, email, name, role, active, created_at, last_login_at
+    `SELECT id, email, name, phone, role, active, created_at, last_login_at
        FROM users ORDER BY role = 'admin' DESC, name COLLATE NOCASE`
   ).all();
 }
@@ -79,7 +80,7 @@ export function listUsers() {
  * client for the two things a human gets wrong: a weak password and a
  * duplicate email.
  */
-export function createUser({ email, name, password, role = 'rep' }) {
+export function createUser({ email, name, password, role = 'rep', phone = null }) {
   const e = normEmail(email);
   const n = String(name ?? '').trim();
   if (!e || !e.includes('@')) throw badReq('A valid email address is required.');
@@ -91,15 +92,20 @@ export function createUser({ email, name, password, role = 'rep' }) {
   if (getUserByEmail(e)) throw badReq('An account with that email already exists.');
 
   const info = db.prepare(
-    `INSERT INTO users (email, name, password_hash, role, active, created_at)
-     VALUES (?, ?, ?, ?, 1, ?)`
-  ).run(e, n, hashPassword(password), role, nowIso());
+    `INSERT INTO users (email, name, password_hash, role, active, created_at, phone)
+     VALUES (?, ?, ?, ?, 1, ?, ?)`
+  ).run(e, n, hashPassword(password), role, nowIso(), own(phone));
   return getUserById(Number(info.lastInsertRowid));
 }
 
 export function setUserActive(id, active) {
   db.prepare('UPDATE users SET active = ? WHERE id = ?').run(active ? 1 : 0, id);
   if (!active) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id); // sign them out
+  return getUserById(id);
+}
+
+export function setUserPhone(id, phone) {
+  db.prepare('UPDATE users SET phone = ? WHERE id = ?').run(own(phone), id);
   return getUserById(id);
 }
 
@@ -114,7 +120,8 @@ export function setUserPassword(id, password) {
 
 /** The public shape of a user: never the hash. */
 export const publicUser = (u) => u && {
-  id: u.id, email: u.email, name: u.name, role: u.role, active: u.active === 1,
+  id: u.id, email: u.email, name: u.name, role: u.role,
+  phone: u.phone ?? '', active: u.active === 1,
 };
 
 /* --------------------------------------------------------------- sessions */

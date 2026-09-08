@@ -821,6 +821,16 @@ const MIGRATIONS = [
       CREATE INDEX idx_sessions_user ON sessions(user_id);
     `,
   },
+  {
+    name: '026_user_phone',
+    up: `
+      -- Each rep's own contact/WhatsApp number. On a team hub the message
+      -- body says who sent it ({{my_name}}/{{my_phone}}), and that has to be
+      -- the person signed in, not the shared Keylo record. Nullable: a rep
+      -- who never sets it falls back to the business number.
+      ALTER TABLE users ADD COLUMN phone TEXT;
+    `,
+  },
 ];
 
 function migrate() {

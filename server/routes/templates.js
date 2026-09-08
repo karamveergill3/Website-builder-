@@ -88,7 +88,7 @@ router.get('/:id/render', wrap((req, res) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
   if (!lead) throw notFound('Lead not found');
 
-  const rendered = renderTemplate(t, lead);
+  const rendered = renderTemplate(t, lead, undefined, req.user);
   res.json({
     template: { id: t.id, name: t.name, channel: t.channel },
     lead: { id: lead.id, business_name: lead.business_name, location: lead.location },
@@ -96,7 +96,7 @@ router.get('/:id/render', wrap((req, res) => {
     body: rendered.body,
     // Tokens that rendered to nothing. "{{my_name}} from " with the name
     // missing reads as a bug in the message rather than a gap in Settings.
-    empty: emptyPlaceholders(t, lead),
+    empty: emptyPlaceholders(t, lead, undefined, req.user),
   });
 }));
 

@@ -230,7 +230,7 @@ router.post('/outreach/prepare', wrap((req, res) => {
           `Template "${tpl.name}" is for ${tpl.channel}, not ${channel}.`
         );
       }
-      const r = renderTemplate(tpl, lead);
+      const r = renderTemplate(tpl, lead, undefined, req.user);
       text = r.body;
       subject = r.subject;
     } else {

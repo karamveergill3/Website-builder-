@@ -78,6 +78,7 @@ export const api = {
   },
   auth: {
     status:   ()             => request('GET',  '/api/auth/status'),
+    me:       ()             => request('GET',  '/api/auth/me'),
     setup:    (body)         => request('POST', '/api/auth/setup', body),
     login:    (body)         => request('POST', '/api/auth/login', body),
     logout:   ()             => request('POST', '/api/auth/logout', {}),

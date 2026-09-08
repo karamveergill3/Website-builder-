@@ -7,8 +7,9 @@
  * Also supported, because they fall out of the same lead record for free:
  *   {{phone}}  {{email}}  {{first_name}}
  *
- * About the sender, read from Settings:
- *   {{my_name}}  {{my_business}}  {{my_phone}}  {{my_email}}  {{my_website}}
+ * About the sender: {{my_business}} {{my_email}} {{my_website}} are the shared
+ * Keylo details from Settings; {{my_name}} and {{my_phone}} are the signed-in
+ * rep's own, so a message says who actually sent it (see senderContext).
  *
  * The sender half exists because WhatsApp and SMS get no footer. An email is
  * signed off by lib/compliance.js, which appends the identity block and the
@@ -53,18 +54,23 @@ export function leadContext(lead = {}) {
 }
 
 /**
- * The sender half of the substitution map, from Settings.
+ * The sender half of the substitution map.
  *
- * Settings are seeded from .env on boot (lib/identity.js), so these are the
- * same details the email footer uses — one place to change them, and no
- * personal detail sitting in a template that gets copied about.
+ * The BUSINESS identity — name, email, website — comes from Settings, which
+ * is one shared Keylo record. The PERSON, though, is whoever is signed in:
+ * on a team hub the same message is sent by different reps, and it has to say
+ * "I'm Sam" when Sam sends it and "I'm Karam" when Karam does. So a signed-in
+ * user's own name and phone overlay the shared values; the rest stays Keylo.
+ * With no user (a background render, or a test) it falls back to Settings
+ * throughout, which is the old single-user behaviour.
  */
-export function senderContext(settings = getSettings()) {
+export function senderContext(settings = getSettings(), user = null) {
   const v = (k) => (typeof settings[k] === 'string' ? settings[k].trim() : '');
+  const own = (val) => (typeof val === 'string' && val.trim() ? val.trim() : null);
   return {
-    my_name:     v('biz_contact_name'),
+    my_name:     own(user?.name)  ?? v('biz_contact_name'),
     my_business: v('biz_name'),
-    my_phone:    v('biz_phone'),
+    my_phone:    own(user?.phone) ?? v('biz_phone'),
     my_email:    v('biz_email'),
     my_website:  v('biz_website'),
   };
@@ -80,8 +86,8 @@ export function render(str, ctx) {
 }
 
 /** Render a whole template against a lead. */
-export function renderTemplate(template, lead, settings) {
-  const ctx = { ...leadContext(lead), ...senderContext(settings) };
+export function renderTemplate(template, lead, settings, user) {
+  const ctx = { ...leadContext(lead), ...senderContext(settings, user) };
   return {
     subject: render(template.subject, ctx),
     body: render(template.body, ctx),
@@ -93,8 +99,8 @@ export function renderTemplate(template, lead, settings) {
  * is the right behaviour, but it can leave text reading "roofers in ," so the
  * preview says so rather than letting it go out unnoticed.
  */
-export function emptyPlaceholders(template, lead, settings) {
-  const ctx = { ...leadContext(lead), ...senderContext(settings) };
+export function emptyPlaceholders(template, lead, settings, user) {
+  const ctx = { ...leadContext(lead), ...senderContext(settings, user) };
   const used = new Set();
   for (const s of [template.subject, template.body]) {
     for (const m of String(s ?? '').matchAll(TOKEN)) used.add(m[1].toLowerCase());

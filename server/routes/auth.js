@@ -17,7 +17,7 @@ import { db } from '../db.js';
 import { wrap, badRequest, notFound } from '../lib/http.js';
 import {
   countUsers, createUser, getUserByEmail, getUserById, listUsers,
-  setUserActive, setUserPassword, verifyPassword, publicUser,
+  setUserActive, setUserPassword, setUserPhone, verifyPassword, publicUser,
   createSession, destroySession, sessionCookie, clearCookie, isSecure,
   SESSION_COOKIE, readCookie,
 } from '../lib/auth.js';
@@ -94,11 +94,19 @@ router.get('/me', wrap((req, res) => {
   res.json({ user: publicUser(req.user) });
 }));
 
-/** A rep can change their own name and password; nothing else. */
+/** Anyone can change their own name, WhatsApp number and password. */
 router.patch('/me', wrap((req, res) => {
   if (!req.user) throw unauthorized('Not signed in.');
   if (req.body?.name != null) updateName(req.user.id, req.body.name);
-  if (req.body?.password != null) setUserPassword(req.user.id, req.body.password);
+  if (req.body?.phone != null) setUserPhone(req.user.id, req.body.phone);
+  if (req.body?.password != null) {
+    setUserPassword(req.user.id, req.body.password);
+    // setUserPassword drops every session for this user — right when an admin
+    // resets someone, but here it is the user themselves, so re-issue this
+    // device's session. Other devices are still signed out, which is the
+    // point of changing a password.
+    startSession(res, req, req.user);
+  }
   res.json({ user: publicUser(getUserById(req.user.id)) });
 }));
 
@@ -122,7 +130,8 @@ router.post('/users', wrap((req, res) => {
   requireAdmin(req);
   const role = req.body?.role === 'admin' ? 'admin' : 'rep';
   const user = createUser({
-    email: req.body?.email, name: req.body?.name, password: req.body?.password, role,
+    email: req.body?.email, name: req.body?.name, password: req.body?.password,
+    phone: req.body?.phone, role,
   });
   res.status(201).json({ user: publicUser(user) });
 }));
@@ -140,6 +149,7 @@ router.patch('/users/:id', wrap((req, res) => {
   }
 
   if (req.body?.name != null) updateName(id, req.body.name);
+  if (req.body?.phone != null) setUserPhone(id, req.body.phone);
   if (req.body?.active != null) setUserActive(id, Boolean(req.body.active));
   if (req.body?.password != null) setUserPassword(id, req.body.password);
   res.json({ user: publicUser(getUserById(id)) });

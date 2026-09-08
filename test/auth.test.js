@@ -183,6 +183,35 @@ test('suspending a rep locks them out immediately', async () => {
   assert.equal((await login('rep3@test.example', 'rep-pass-123')).status, 401);
 });
 
+test('a message renders under the signed-in rep, not the admin', async () => {
+  // The whole point of per-rep identity on a shared hub: when Sam sends the
+  // WhatsApp opener it must say "I'm Sam", even though the business identity
+  // in Settings is the admin's. This proves the render endpoint uses the
+  // caller's own name.
+  const admin = await adminCookie();
+  await call('POST', '/api/auth/users', {
+    cookie: admin,
+    body: { name: 'Sam Sender', email: 'sam.sender@test.example', password: 'sam-pass-123' },
+  });
+  const rep = await login('sam.sender@test.example', 'sam-pass-123');
+  await call('PATCH', '/api/auth/me', { cookie: rep.cookie, body: { phone: '07700 900321' } });
+
+  // A lead for the rep to write to, and the seeded WhatsApp opener.
+  const lead = await call('POST', '/api/leads', {
+    cookie: rep.cookie,
+    body: { business_name: 'Gate Test Salon', location: 'Stafford', category: 'nail bar' },
+  });
+  const templates = (await call('GET', '/api/templates', { cookie: rep.cookie })).body.templates;
+  const wa = templates.find((t) => t.channel === 'whatsapp' && /^first/i.test(t.name));
+
+  const rendered = await call(
+    'GET', `/api/templates/${wa.id}/render?lead_id=${lead.body.lead.id}`, { cookie: rep.cookie }
+  );
+  assert.match(rendered.body.body, /Sam Sender/, 'the sender is the rep, from their session');
+  assert.ok(!rendered.body.body.includes(TEST_ADMIN.name),
+    'not the admin whose details are in Settings');
+});
+
 test('the admin cannot suspend or demote their own account', async () => {
   const admin = await adminCookie();
   const me = await call('GET', '/api/auth/me', { cookie: admin });

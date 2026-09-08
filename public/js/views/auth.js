@@ -100,6 +100,37 @@ export function setupView(root) {
   });
 }
 
+/**
+ * "My account" — the signed-in person edits their own name, WhatsApp number
+ * and password. The name and number are what a message says it's from, so on
+ * a shared hub each rep sets their own here and their WhatsApps go out under
+ * their own identity, not the admin's.
+ */
+export async function openAccount(user) {
+  return modal({
+    title: 'My account',
+    body: html`
+      <div class="f"><label for="a-name">Your name <span class="opt">shown in your messages</span></label>
+        <input id="a-name" name="name" type="text" value="${user.name ?? ''}" required></div>
+      <div class="f"><label for="a-phone">Your WhatsApp number <span class="opt">optional</span></label>
+        <input id="a-phone" name="phone" type="tel" value="${user.phone ?? ''}" placeholder="07…"></div>
+      <div class="f"><label for="a-pass">New password <span class="opt">leave blank to keep</span></label>
+        <input id="a-pass" name="password" type="password" autocomplete="new-password" minlength="8"></div>
+      <p class="tip">Your name and number appear in the WhatsApp and SMS messages you send,
+        so the business you're contacting knows who they're talking to. The Keylo name and
+        email stay the same for everyone.</p>`,
+    footer: html`<button type="button" data-close>Cancel</button>
+      <button type="submit" class="primary">Save</button>`,
+    onSubmit: async (d) => {
+      const body = { name: d.name, phone: d.phone };
+      if (d.password) body.password = d.password;
+      await api.auth.updateMe(body);
+      toast('Saved');
+      return true;
+    },
+  });
+}
+
 /* ------------------------------------------------------------- team screen */
 
 export default async function teamView(root, _params, { refresh }) {
@@ -131,7 +162,8 @@ export default async function teamView(root, _params, { refresh }) {
       <tbody>
         ${data.users.map((u) => html`
           <tr data-id="${u.id}" style="${u.active ? '' : 'opacity:.55'}">
-            <td class="c-name"><span class="name">${u.name}</span></td>
+            <td class="c-name"><span class="name">${u.name}</span>
+              ${u.phone ? html`<span class="meta">${u.phone}</span>` : ''}</td>
             <td class="meta">${u.email}</td>
             <td>${u.role === 'admin' ? html`<span class="flag" data-ok>admin</span>` : 'rep'}</td>
             <td class="meta nw">${u.last_login_at ? relative(u.last_login_at) : 'never'}</td>

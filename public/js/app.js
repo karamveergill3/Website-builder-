@@ -13,7 +13,7 @@ import deliverView   from './views/deliverability.js';
 import outboxView    from './views/outbox.js';
 import complianceView from './views/compliance.js';
 import repliesView   from './views/replies.js';
-import teamView, { loginView, setupView } from './views/auth.js';
+import teamView, { loginView, setupView, openAccount } from './views/auth.js';
 import { api } from './api.js';
 
 const ROUTES = {
@@ -123,9 +123,15 @@ function showUser(user) {
   const box = document.createElement('div');
   box.id = 'userbox';
   box.className = 'userbox';
-  box.innerHTML = `<span class="who" title="${user.email}">${user.name}</span>`
+  box.innerHTML = `<button class="who" id="account" title="Edit your name, number and password">${user.name}</button>`
     + '<button class="mini ghost" id="logout">Sign out</button>';
   inner.append(box);
+
+  box.querySelector('#account').addEventListener('click', async () => {
+    // Fetch fresh, so the modal shows the current phone/name not a boot-time copy.
+    const { user: me } = await api.auth.me?.() ?? { user };
+    if (await openAccount(me ?? user)) location.reload();
+  });
 
   box.querySelector('#logout').addEventListener('click', async () => {
     try { await api.auth.logout(); } catch { /* sign out regardless */ }

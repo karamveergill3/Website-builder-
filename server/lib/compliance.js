@@ -39,7 +39,7 @@ export const OPTIONAL_IDENTITY_FIELDS = [
  * and a reply is the strongest positive signal a mail filter reads.
  */
 export const DEFAULT_OPTOUT_LINE =
-  "If this isn't relevant, reply and say so — I won't write again.";
+  "If this isn't something you'd find useful, just reply and say so and I won't write again.";
 
 /**
  * PECR reg 23(c) pulls in reg 7 of the E-Commerce Regulations 2002: a

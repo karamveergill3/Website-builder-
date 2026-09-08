@@ -968,6 +968,115 @@ If you'd rather I didn't message again, just say and I won't.`,
     // edited or deleted starter is left alone.
     run: seedStarterTemplates,
   },
+  {
+    name: '031_warm_openers',
+    // Rewrite the shipped openers to read like a person wrote them: a proper
+    // "Hi, I'm X from {{my_business}}", warmer and a little longer, a real sign
+    // off, no dashes, and a gentle opt-out in place of the robotic "reply STOP".
+    // Only touches a template still holding its previously shipped text, so any
+    // wording the owner has edited is left exactly as it is. The email opt-out
+    // now lives solely in the auto-appended footer (lib/compliance.js), so the
+    // email bodies no longer repeat it.
+    run: () => {
+      seedStarterTemplates(); // make sure every named starter exists first
+
+      const OLD = {
+        'First message — email':
+`Hi,
+
+I came across {{business}} in {{location}} and noticed you don't have a website.
+
+I build simple one-page sites for local businesses: what you do, the areas you cover, a few photos, and a button that dials you straight from a phone. Nothing complicated, and nothing you have to maintain.
+
+If it's any use I'll put a mock-up of yours together first — free and with no obligation — so you can look at a real page rather than take my word for it.
+
+Worth a look?
+
+{{my_name}}
+{{my_phone}}`,
+        'Follow-up — email':
+`Hi,
+
+I wrote last week about a website for {{business}}. Just a short nudge in case it landed at a busy moment.
+
+The offer of a free mock-up stands — I'll build the page, you look at it, and if it's not for you that is the end of it.
+
+And if you'd rather I didn't write again, reply and say so and I won't.
+
+{{my_name}}
+{{my_phone}}`,
+        'First message — WhatsApp':
+`Hi, is this {{business}}?
+
+I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — I build simple one-page sites for local businesses: what you do, a few photos, and a button that calls you straight from a phone.
+
+Happy to put a mock-up of yours together for free so you can see it first. Worth a look?
+
+If you'd rather I didn't message again, just say and I won't.`,
+        'First message — WhatsApp · Salons & beauty':
+`Hi, is this {{business}}?
+
+I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a salon that's usually the first place a new client looks. I build simple one-pagers with your treatments, photos of your work and a tap-to-call or book button, and they're easy to keep updated.
+
+Happy to mock yours up for free so you can see it first. Worth a look?
+
+If you'd rather I didn't message again, just say and I won't.`,
+        'First message — WhatsApp · Trades':
+`Hi, is this {{business}}?
+
+I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a trade, most people just want to see a few jobs you've done and tap to call. That's exactly what I build: a clean one-pager with photos of your work, the areas you cover and a call button.
+
+Happy to mock yours up for free so you can see it first. Worth a look?
+
+If you'd rather I didn't message again, just say and I won't.`,
+        'First message — WhatsApp · Food & drink':
+`Hi, is this {{business}}?
+
+I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a place like yours that's usually where people check the menu, your hours and how to order. I build simple one-pagers with your menu, a few photos and a tap-to-call button.
+
+Happy to mock yours up for free so you can see it first. Worth a look?
+
+If you'd rather I didn't message again, just say and I won't.`,
+        'First message — WhatsApp · Motor':
+`Hi, is this {{business}}?
+
+I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a garage that's where people check what you do and book in. I build simple one-pagers with your services, opening hours and a tap-to-call button.
+
+Happy to mock yours up for free so you can see it first. Worth a look?
+
+If you'd rather I didn't message again, just say and I won't.`,
+        'First message — WhatsApp · Health & fitness':
+`Hi, is this {{business}}?
+
+I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for somewhere like yours it's usually the first place people look before booking. I build simple one-pagers with what you offer, your prices or timetable and a tap-to-book or call button.
+
+Happy to mock yours up for free so you can see it first. Worth a look?
+
+If you'd rather I didn't message again, just say and I won't.`,
+        'First message — WhatsApp · Shops':
+`Hi, is this {{business}}?
+
+I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a shop that's where people check what you stock, where you are and your opening hours. I build simple one-pagers with photos, your location and a tap-to-call button.
+
+Happy to mock yours up for free so you can see it first. Worth a look?
+
+If you'd rather I didn't message again, just say and I won't.`,
+        'First message — SMS':
+`Hi, is this {{business}}? {{my_name}} here from {{my_business}} — I noticed you don't have a website. I build one-page sites for local businesses and I'll mock yours up free so you can see it. Reply STOP and I won't text again.`,
+      };
+
+      const byName = new Map(STARTERS.map((s) => [s.name, s]));
+      const now = new Date().toISOString();
+      for (const [name, oldBody] of Object.entries(OLD)) {
+        const cur = db.prepare('SELECT id, body FROM templates WHERE name = ?').get(name);
+        const next = byName.get(name);
+        if (cur && next && cur.body === oldBody) {
+          db.prepare('UPDATE templates SET subject = ?, body = ?, updated_at = ? WHERE id = ?')
+            .run(next.subject, next.body, now, cur.id);
+        }
+      }
+    },
+  },
 ];
 
 function migrate() {

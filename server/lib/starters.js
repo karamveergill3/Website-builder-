@@ -4,62 +4,73 @@
  * A first approach is the one piece of writing that decides whether any of
  * the rest of this matters, and staring at an empty box is how a tool with a
  * hundred leads in it goes unused. So the wording is here, ready, and every
- * one of these is meant to be edited into the owner's own voice — they are a
+ * one of these is meant to be edited into the owner's own voice: they are a
  * starting point, not a house style.
  *
- * Three things they all do, and none of them are decoration:
+ * They are written to read like a real person sent them, not a template:
  *
- *   They name the business.  A message that opens "Hi there" is a circular
- *     and reads as one. {{business}} and {{location}} come off the lead row,
- *     so the message on screen is always about the company in front of you.
+ *   They introduce a person.  Each opens "Hi, I'm {{my_name}} from
+ *     {{my_business}}", because a message from a name lands better than one
+ *     from a faceless business, and PECR reg 23 says a marketing message must
+ *     not conceal who sent it.
  *
- *   They name the sender.  PECR reg 23 says a marketing message must not
- *     conceal who sent it and must give a way to opt out. An email gets that
- *     appended automatically (lib/compliance.js); a WhatsApp or SMS is a deep
- *     link the user taps and nothing can be appended to it afterwards, so the
- *     WhatsApp and SMS bodies carry the identification and the opt-out line
- *     themselves. Removing those lines from a cold message is not a style
- *     choice.
+ *   They name the business and offer the mock-up.  {{business}} and
+ *     {{location}} come off the lead row, so the message is always about the
+ *     company in front of you, and the free mock-up is the one thing this tool
+ *     does that a cold email doesn't.
  *
- *   They offer the mock-up.  It is the only thing this tool does that a
- *     competitor's cold email does not, and it is free to give away.
+ *   They give a gentle way out.  Not the robotic "reply STOP", which reads as
+ *     spam, but a warm human line ("just let me know and I won't message
+ *     again"). An EMAIL doesn't carry one in the body at all: lib/compliance.js
+ *     appends the identity block and opt-out to every email automatically, so
+ *     repeating it here would only double it up. A WhatsApp or SMS is a deep
+ *     link the user taps and nothing can be appended to it, so those bodies
+ *     carry the sender and the soft opt-out themselves. Removing that line
+ *     from a cold WhatsApp/SMS is not a style choice.
  *
- * The sender tokens read from Settings rather than being typed in, so nothing
- * personal lives in this file and one edit in Settings fixes every template.
+ * No dashes: they read as machine-written. The sender tokens come from
+ * Settings, so nothing personal lives in this file and one edit fixes every
+ * template.
  */
 
 export const STARTERS = [
   {
     name: 'First message — email',
     channel: 'email',
-    subject: 'A website for {{business}}?',
+    subject: 'A quick idea for {{business}}',
     body: `Hi,
 
-I came across {{business}} in {{location}} and noticed you don't have a website.
+I'm {{my_name}} from {{my_business}}. I came across {{business}} while looking around {{location}}, and I noticed you don't have a website yet, so I thought I'd get in touch and introduce myself properly.
 
-I build simple one-page sites for local businesses: what you do, the areas you cover, a few photos, and a button that dials you straight from a phone. Nothing complicated, and nothing you have to maintain.
+We help local businesses get online with simple, smart one page websites. Nothing over complicated: a clear page that shows what you do, the areas you cover, a few photos of your work, and a button so someone can call or message you straight from their phone. It's the kind of thing that helps new customers find you and feel confident getting in touch.
 
-If it's any use I'll put a mock-up of yours together first — free and with no obligation — so you can look at a real page rather than take my word for it.
+If it would be useful, I'd genuinely love to put together a free mock up of what a site for {{business}} could look like. There's no cost and no obligation at all. You'd just get to see a real page built around your business, and if it's not for you, that's completely fine.
 
-Worth a look?
+Would you like me to put one together for you to look at?
 
+Thanks so much for reading, and I hope business is going well.
+
+All the best,
 {{my_name}}
+{{my_business}}
 {{my_phone}}`,
   },
 
   {
     name: 'Follow-up — email',
     channel: 'email',
-    subject: 'Following up — {{business}}',
+    subject: 'Following up on {{business}}',
     body: `Hi,
 
-I wrote last week about a website for {{business}}. Just a short nudge in case it landed at a busy moment.
+I'm {{my_name}} from {{my_business}}. I dropped you a message last week about building a free website mock up for {{business}}, and I just wanted to follow up gently in case it arrived at a busy time. I completely understand how full the days get.
 
-The offer of a free mock-up stands — I'll build the page, you look at it, and if it's not for you that is the end of it.
+The offer still stands, and there's honestly no pressure at all. I'd put the page together, send it over for you to look at, and if it's not something you want to take further, that's absolutely no problem.
 
-And if you'd rather I didn't write again, reply and say so and I won't.
+If you'd like me to go ahead, just reply and let me know and I'll get started.
 
+Wishing you all the best,
 {{my_name}}
+{{my_business}}
 {{my_phone}}`,
   },
 
@@ -69,11 +80,18 @@ And if you'd rather I didn't write again, reply and say so and I won't.
     subject: '',
     body: `Hi, is this {{business}}?
 
-I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — I build simple one-page sites for local businesses: what you do, a few photos, and a button that calls you straight from a phone.
+My name is {{my_name}} and I'm from {{my_business}}. I came across you while looking around {{location}} and noticed you don't have a website yet, so I thought I'd reach out and say hello.
 
-Happy to put a mock-up of yours together for free so you can see it first. Worth a look?
+We build simple, great looking one page websites for local businesses. Just a clear page with what you do, a few photos, and a button so people can call or message you straight from their phone.
 
-If you'd rather I didn't message again, just say and I won't.`,
+I'd be really happy to put together a free mock up for {{business}} so you can see exactly how it could look, with no cost and no obligation at all.
+
+Would that be something you'd like me to do for you?
+
+Thanks so much, and have a great day.
+{{my_name}}, {{my_business}}
+
+(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
   },
 
   // Salon & beauty: the framing that lands is "this is where new clients look".
@@ -83,11 +101,18 @@ If you'd rather I didn't message again, just say and I won't.`,
     subject: '',
     body: `Hi, is this {{business}}?
 
-I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a salon that's usually the first place a new client looks. I build simple one-pagers with your treatments, photos of your work and a tap-to-call or book button, and they're easy to keep updated.
+My name is {{my_name}} and I'm from {{my_business}}. I came across you in {{location}} and noticed you don't have a website yet. For a salon that's so often the first place a new client looks before they book, so I wanted to reach out.
 
-Happy to mock yours up for free so you can see it first. Worth a look?
+We build simple, beautiful one page websites: your treatments, lovely photos of your work, and a button so someone can call or book you straight from their phone. They're really easy to keep updated too.
 
-If you'd rather I didn't message again, just say and I won't.`,
+I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
+
+Would you like me to do that for you?
+
+Thanks so much, and have a lovely day.
+{{my_name}}, {{my_business}}
+
+(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
   },
 
   // Trades: they want to be seen doing the work and reached in one tap.
@@ -97,11 +122,18 @@ If you'd rather I didn't message again, just say and I won't.`,
     subject: '',
     body: `Hi, is this {{business}}?
 
-I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a trade, most people just want to see a few jobs you've done and tap to call. That's exactly what I build: a clean one-pager with photos of your work, the areas you cover and a call button.
+My name is {{my_name}} and I'm from {{my_business}}. I came across you in {{location}} and noticed you don't have a website yet, so I thought I'd get in touch.
 
-Happy to mock yours up for free so you can see it first. Worth a look?
+For a trade, most people just want to see a few jobs you've done and be able to tap to call. That's exactly what we build: a clean one page site with photos of your work, the areas you cover, and a call button, so new customers can find you and get straight through.
 
-If you'd rather I didn't message again, just say and I won't.`,
+I'd be happy to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
+
+Would you like me to do that for you?
+
+Cheers, and all the best with the work.
+{{my_name}}, {{my_business}}
+
+(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
   },
 
   // Food & drink: menu, hours and how to order are what people look for.
@@ -111,11 +143,18 @@ If you'd rather I didn't message again, just say and I won't.`,
     subject: '',
     body: `Hi, is this {{business}}?
 
-I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a place like yours that's usually where people check the menu, your hours and how to order. I build simple one-pagers with your menu, a few photos and a tap-to-call button.
+My name is {{my_name}} and I'm from {{my_business}}. I came across you in {{location}} and noticed you don't have a website yet, so I wanted to say hello.
 
-Happy to mock yours up for free so you can see it first. Worth a look?
+For a place like yours, a website is usually where people check the menu, your opening hours and how to order, so it can make a real difference. We build simple, tasty looking one page sites with your menu, a few photos and a tap to call button.
 
-If you'd rather I didn't message again, just say and I won't.`,
+I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
+
+Would you like me to do that for you?
+
+Thanks so much, and hope you're keeping busy.
+{{my_name}}, {{my_business}}
+
+(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
   },
 
   // Motor: what you do and booking in, with a call button.
@@ -125,11 +164,18 @@ If you'd rather I didn't message again, just say and I won't.`,
     subject: '',
     body: `Hi, is this {{business}}?
 
-I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a garage that's where people check what you do and book in. I build simple one-pagers with your services, opening hours and a tap-to-call button.
+My name is {{my_name}} and I'm from {{my_business}}. I came across you in {{location}} and noticed you don't have a website yet, so I thought I'd reach out.
 
-Happy to mock yours up for free so you can see it first. Worth a look?
+For a garage, a website is where people check what you do and book their car in. We build simple, straightforward one page sites with your services, your opening hours and a tap to call button, so customers can find you and get booked in easily.
 
-If you'd rather I didn't message again, just say and I won't.`,
+I'd be happy to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
+
+Would you like me to do that for you?
+
+Cheers, and all the best.
+{{my_name}}, {{my_business}}
+
+(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
   },
 
   // Health & fitness: what's on offer and booking, before someone commits.
@@ -139,11 +185,18 @@ If you'd rather I didn't message again, just say and I won't.`,
     subject: '',
     body: `Hi, is this {{business}}?
 
-I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for somewhere like yours it's usually the first place people look before booking. I build simple one-pagers with what you offer, your prices or timetable and a tap-to-book or call button.
+My name is {{my_name}} and I'm from {{my_business}}. I came across you in {{location}} and noticed you don't have a website yet, so I wanted to introduce myself.
 
-Happy to mock yours up for free so you can see it first. Worth a look?
+For somewhere like yours, a website is usually the first place people look before they commit to booking. We build simple, welcoming one page sites with what you offer, your prices or timetable, and a tap to book or call button.
 
-If you'd rather I didn't message again, just say and I won't.`,
+I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
+
+Would you like me to do that for you?
+
+Thanks so much, and have a great day.
+{{my_name}}, {{my_business}}
+
+(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
   },
 
   // Shops: what you stock, where you are, when you're open.
@@ -153,22 +206,28 @@ If you'd rather I didn't message again, just say and I won't.`,
     subject: '',
     body: `Hi, is this {{business}}?
 
-I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a shop that's where people check what you stock, where you are and your opening hours. I build simple one-pagers with photos, your location and a tap-to-call button.
+My name is {{my_name}} and I'm from {{my_business}}. I came across you in {{location}} and noticed you don't have a website yet, so I thought I'd say hello.
 
-Happy to mock yours up for free so you can see it first. Worth a look?
+For a shop, a website is where people check what you stock, where you are and when you're open. We build simple, welcoming one page sites with photos, your location and a tap to call button, so new customers can find you easily.
 
-If you'd rather I didn't message again, just say and I won't.`,
+I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
+
+Would you like me to do that for you?
+
+Thanks so much, and have a lovely day.
+{{my_name}}, {{my_business}}
+
+(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
   },
 
   {
     name: 'First message — SMS',
     channel: 'sms',
     subject: '',
-    // Over one 160-character segment once the business name is filled in, and
-    // that is the right trade: a text that does not say who sent it or how to
-    // stop it is not one that may lawfully be sent. Phones stitch the parts
-    // back together; the recipient sees one message.
-    body: `Hi, is this {{business}}? {{my_name}} here from {{my_business}} — I noticed you don't have a website. I build one-page sites for local businesses and I'll mock yours up free so you can see it. Reply STOP and I won't text again.`,
+    // A text that doesn't say who sent it or how to stop it is not one that
+    // may lawfully be sent, so both live in the body. Warm, not robotic: no
+    // "reply STOP". Phones stitch multi-part texts back into one message.
+    body: `Hi, is this {{business}}? I'm {{my_name}} from {{my_business}}. I noticed you don't have a website yet, and I'd be happy to build you a free one page mock up to look at, with no obligation. Would you like me to put one together? If it's not for you, just let me know and I won't message again.`,
   },
 ];
 

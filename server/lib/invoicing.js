@@ -26,6 +26,7 @@ import { randomBytes } from 'node:crypto';
 import { db, getSetting, setSetting, getSettings } from '../db.js';
 import { nowIso } from './http.js';
 import { esc, safeUrl } from './site-builder.js';
+import { configured as paypalConfigured } from './paypal.js';
 
 /* ------------------------------------------------------------------ money */
 
@@ -183,14 +184,22 @@ export function markSent(id) {
   return getInvoice(id);
 }
 
-/** Record a payment. method ∈ full | bank | paypal | klarna. */
-export function markPaid(id, method) {
+/** Record a payment. method ∈ full | bank | paypal | klarna. ref is a receipt
+ * reference (e.g. the PayPal capture id) when there is one. */
+export function markPaid(id, method, ref = null) {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
   if (!inv) throw notFoundErr('Invoice not found.');
   const m = ['full', 'bank', 'paypal', 'klarna'].includes(method) ? method : 'other';
   db.prepare(
-    "UPDATE invoices SET status = 'paid', paid_at = ?, paid_method = ? WHERE id = ?"
-  ).run(nowIso(), m, id);
+    "UPDATE invoices SET status = 'paid', paid_at = ?, paid_method = ?, payment_ref = COALESCE(?, payment_ref) WHERE id = ?"
+  ).run(nowIso(), m, ref, id);
+  return getInvoice(id);
+}
+
+/** Remember the PayPal order created for an invoice, so the return redirect
+ * can be matched back to it. */
+export function setPayPalOrder(id, orderId) {
+  db.prepare('UPDATE invoices SET paypal_order_id = ? WHERE id = ?').run(String(orderId), id);
   return getInvoice(id);
 }
 
@@ -344,7 +353,20 @@ export function renderInvoicePage(inv, settings = getSettings()) {
   // Klarna (they pay us in full, the client repays them); maintenance is a
   // straight monthly charge.
   const payBlocks = [];
-  if (pay.paypal) {
+  // Live "Pay now" when PayPal is connected: a form that posts back to us, we
+  // create the order server-side and redirect to PayPal. No script, so it
+  // works under the locked-down CSP (which allows form-action 'self'). Falls
+  // back to a plain PayPal link when only that is configured.
+  if (paypalConfigured()) {
+    payBlocks.push(`
+      <div class="pay">
+        <h4>Card or PayPal${isBuild ? ' — pay now, or spread it monthly' : ''}</h4>
+        <form method="POST" action="/i/${esc(inv.token)}/pay/paypal">
+          <button class="btn" type="submit">Pay ${money(inv.total_pence, inv.currency)} with PayPal</button>
+        </form>
+        ${isBuild ? '<p class="fine">At checkout you can pay the full amount or choose PayPal Pay in 3 to spread it over monthly instalments — either way it settles the invoice in full.</p>' : ''}
+      </div>`);
+  } else if (pay.paypal) {
     payBlocks.push(`
       <div class="pay">
         <h4>Card or PayPal${isBuild ? ' — pay now, or spread it monthly' : ''}</h4>

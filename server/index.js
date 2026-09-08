@@ -15,7 +15,8 @@ import mockups, { MOCKUP_ROOT } from './routes/mockups.js';
 import { seedIdentityFromEnv } from './lib/identity.js';
 import authRouter from './routes/auth.js';
 import invoices from './routes/invoices.js';
-import { getInvoiceByToken, renderInvoicePage } from './lib/invoicing.js';
+import { getInvoiceByToken, renderInvoicePage, setPayPalOrder, markPaid } from './lib/invoicing.js';
+import { configured as paypalConfigured, createOrder, captureOrder, PayPalError } from './lib/paypal.js';
 import { userForToken, readCookie, SESSION_COOKIE } from './lib/auth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -117,14 +118,76 @@ app.get('/i/:token', (req, res) => {
   }
   res.setHeader(
     'Content-Security-Policy',
+    // form-action 'self' so the "Pay with PayPal" button can post back to us
+    // (which then redirects to PayPal); still no script anywhere.
     "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "
-    + "form-action 'none'; frame-ancestors 'none'; base-uri 'none'"
+    + "form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
   );
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
   res.setHeader('Cache-Control', 'no-store');
   res.type('html').send(renderInvoicePage(invoice));
+});
+
+/** The public base URL as the client reached us (honours the tunnel proxy). */
+function publicBase(req) {
+  const proto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim()
+    || (req.secure ? 'https' : 'http');
+  return `${proto}://${req.get('host')}`;
+}
+
+/**
+ * Start a PayPal payment for an invoice. Public (the client has no login);
+ * the amount is taken from the stored invoice, never from the request, and we
+ * remember the order id so the return can be matched back to this invoice.
+ */
+app.post('/i/:token/pay/paypal', express.urlencoded({ extended: false }), async (req, res) => {
+  const invoice = getInvoiceByToken(req.params.token);
+  if (!invoice || invoice.status === 'void') { res.status(404).send('Invoice not found'); return; }
+  if (invoice.status === 'paid') { res.redirect(`/i/${invoice.token}`); return; }
+  if (!paypalConfigured()) { res.redirect(`/i/${invoice.token}`); return; }
+  try {
+    const base = publicBase(req);
+    const order = await createOrder(invoice, {
+      returnUrl: `${base}/i/${invoice.token}/paypal/return`,
+      cancelUrl: `${base}/i/${invoice.token}`,
+    });
+    setPayPalOrder(invoice.id, order.id);
+    res.redirect(303, order.approveUrl);
+  } catch (err) {
+    console.error('[paypal] create order:', err.message);
+    res.status(err instanceof PayPalError ? err.status : 502)
+      .type('html').send('<h1>Could not start the payment</h1><p>Please try again shortly.</p>');
+  }
+});
+
+/**
+ * PayPal returns the client here after they approve. Capture the order and —
+ * only if PayPal reports COMPLETED, the returned order matches the one we
+ * created for THIS invoice, and the captured amount and currency match the
+ * invoice to the penny — mark it paid. Anything else leaves it unpaid.
+ */
+app.get('/i/:token/paypal/return', async (req, res) => {
+  const invoice = getInvoiceByToken(req.params.token);
+  if (!invoice) { res.status(404).send('Invoice not found'); return; }
+  if (invoice.status === 'paid') { res.redirect(`/i/${invoice.token}`); return; }
+
+  const orderId = String(req.query.token ?? '');
+  if (!orderId || orderId !== invoice.paypal_order_id) {
+    res.redirect(`/i/${invoice.token}`); return; // not the order we issued
+  }
+  try {
+    const cap = await captureOrder(orderId);
+    const ok = cap.paid
+      && cap.amount_pence === invoice.total_pence
+      && (cap.currency ?? invoice.currency) === invoice.currency;
+    if (ok) markPaid(invoice.id, 'paypal', cap.capture_id);
+    else console.error('[paypal] capture not applied', { status: cap.status, amount: cap.amount_pence, expected: invoice.total_pence });
+  } catch (err) {
+    console.error('[paypal] capture:', err.message);
+  }
+  res.redirect(`/i/${invoice.token}`);
 });
 
 app.use('/m', (_req, res, next) => {

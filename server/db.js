@@ -950,6 +950,16 @@ If you'd rather I didn't message again, just say and I won't.`,
       );
     `,
   },
+  {
+    name: '029_invoice_paypal',
+    up: `
+      -- The PayPal order created for an invoice (so a return redirect can be
+      -- matched to the right invoice) and the capture id once paid (the
+      -- receipt reference from PayPal).
+      ALTER TABLE invoices ADD COLUMN paypal_order_id TEXT;
+      ALTER TABLE invoices ADD COLUMN payment_ref TEXT;
+    `,
+  },
 ];
 
 function migrate() {

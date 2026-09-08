@@ -267,6 +267,27 @@ async function checkOllama() {
     + '&& ollama pull llama3.2');
 }
 
+async function checkPayPal() {
+  const { configured, apiBase, accessToken } = await import('./lib/paypal.js');
+  if (!configured()) {
+    return warn('PayPal (optional)', 'not connected',
+      'Only needed for the automated "Pay now" button on invoices. Set '
+      + 'PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in .env (and PAYPAL_ENV='
+      + 'sandbox while testing). Without it, invoices still show your PayPal '
+      + 'link and bank details.');
+  }
+  const env = String(process.env.PAYPAL_ENV ?? '').toLowerCase() === 'sandbox' ? 'sandbox' : 'live';
+  try {
+    await accessToken(); // a real token request against PayPal
+    return ok('PayPal', `connected (${env}) via ${apiBase().replace('https://', '')}`);
+  } catch (err) {
+    return bad('PayPal', err.message,
+      'Check PAYPAL_CLIENT_ID/SECRET are the REST app credentials (not the '
+      + 'account login), and that PAYPAL_ENV matches where you created them — '
+      + 'sandbox keys do not work against live and vice versa.');
+  }
+}
+
 /* ----------------------------------------------------------------- main */
 
 async function main() {
@@ -281,6 +302,7 @@ async function main() {
   await checkIdentity();
   await checkHunt();
   await checkLedger();
+  await checkPayPal();
   await checkOllama();
 
   const width = Math.max(...results.map((r) => r.name.length));

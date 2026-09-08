@@ -36,6 +36,8 @@
 import { db } from '../db.js';
 import { normalisePhone } from './handoff.js';
 import { FREE_MAIL_DOMAINS } from './pecr.js';
+import { configured as placesConfigured, textSearch, normalise as normalisePlace } from './places.js';
+import { normaliseName } from './companies-house.js';
 
 const USER_AGENT = 'ProspectBook/1.0 (+contact discovery for personal outreach)';
 const HTTP_TIMEOUT_MS = 12_000;
@@ -195,6 +197,38 @@ export function emailConfidence(email, ctx) {
   return 60;
 }
 
+/* ------------------------------------------------------- source: Places */
+
+/**
+ * Look a business up on Google Places by its own name and town, and read the
+ * phone (and website) straight off the listing.
+ *
+ * This is the finder's most reliable source. Most no-website tradespeople DO
+ * have a Google Business Profile — a phone, opening hours, reviews, but no
+ * site — and Places answers over a paid API that a server IP can actually
+ * reach, unlike DuckDuckGo/Yell scraping which datacenter IPs get blocked or
+ * challenged on. It needs a Places key; with none set it is skipped.
+ *
+ * A listing is only accepted when its name matches the company we asked for,
+ * so we never attach a random neighbour's number. Returns a normalised place
+ * row ({ phone, website_uri, ... }) or null.
+ */
+export async function placesLookup(lead, { signal } = {}) {
+  const name = lead.registered_name || lead.business_name;
+  if (!name) return null;
+  const q = [name, lead.location].filter(Boolean).join(' ');
+  const { places } = await textSearch(q, { pageSize: 5, signal });
+  const key = normaliseName(name);
+  if (!key) return null;
+  for (const place of places) {
+    const row = normalisePlace(place);
+    const rk = normaliseName(row.display_name ?? '');
+    // Exact, or one name is the other with a suffix ("… Ltd") dropped.
+    if (rk && (rk === key || rk.startsWith(key) || key.startsWith(rk))) return row;
+  }
+  return null; // no confident match — better nothing than the wrong business
+}
+
 /* --------------------------------------------------------- source: DDG */
 
 /**
@@ -340,8 +374,28 @@ export async function discover(lead, opts = {}) {
   }
   if (lead.email) push('email', lead.email.toLowerCase(), 'lead:existing', 100);
 
-  // 2. Any URL we already know for this lead — either passed in by the
-  //    caller or previously filed as a website signal.
+  // 2. Google Places — the finder's primary source. Reliable from a server IP
+  //    (a paid API, not a scrape), and the one place a no-website tradesman
+  //    usually still appears: a Google Business Profile with a phone. Gets the
+  //    phone directly, and hands the website scrape a URL if Google has one.
+  let placesWebsite = null;
+  if (placesConfigured() && (lead.registered_name || lead.business_name)) {
+    sources.push('places');
+    try {
+      const p = await placesLookup(lead);
+      if (p?.phone) {
+        const n = normalisePhone(p.phone);
+        if (n.ok) push('phone', n.e164, 'places', 88);
+      }
+      if (p?.website_uri) {
+        push('website', p.website_uri, 'places', 90);
+        placesWebsite = p.website_uri;
+      }
+    } catch (e) { errors.push(`places: ${e.message}`); }
+  }
+
+  // 3. Any URL we already know for this lead — from Places just now, passed in
+  //    by the caller, or previously filed as a website signal.
   const priorWebsite = db.prepare(
     `SELECT value FROM contact_signals
       WHERE lead_id = ? AND kind = 'website'
@@ -349,6 +403,7 @@ export async function discover(lead, opts = {}) {
   ).get(lead.id)?.value ?? null;
 
   const scrapeUrl = websiteUrl
+    || placesWebsite
     || (lead.has_website === 1 ? priorWebsite : null)
     || (lead.has_website !== 0 ? priorWebsite : null);
 
@@ -365,9 +420,10 @@ export async function discover(lead, opts = {}) {
     errors.push('no-website: skipped web scrape (this business has no site)');
   }
 
-  // 3. Web search — top results filtered to directories/social. This is
-  //    THE useful path for no-website leads. DDG's rate-limit is the only
-  //    real ceiling; a search that 202s is recorded and the sweep moves on.
+  // 4. Web search — top results filtered to directories/social. A useful
+  //    extra for no-website leads, but unreliable: DuckDuckGo rate-limits and
+  //    challenges datacenter IPs, so this is best-effort behind Places. A
+  //    search that 202s or 403s is recorded and the sweep moves on.
   if (web && (lead.business_name || lead.registered_name)) {
     sources.push('web');
     const q = [lead.registered_name ?? lead.business_name, lead.location]

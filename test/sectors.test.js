@@ -28,9 +28,26 @@ test('building trades map to the trades opener', () => {
   assert.equal(sectorLabel('trades'), 'Trades');
 });
 
-test('everything else falls back to the generic opener', () => {
-  for (const c of ['cafe', 'takeaway', 'restaurant', 'garage', 'boutique',
-                   'driving instructor', 'accountant', '']) {
+test('food, motor, fitness and shops each get their own opener', () => {
+  for (const c of ['cafe', 'coffee shop', 'takeaway', 'restaurant', 'bakery', 'fish and chips']) {
+    assert.equal(sectorFor(c), 'food', `"${c}" is food & drink`);
+  }
+  for (const c of ['garage', 'mechanic', 'MOT centre', 'car valeting', 'tyre fitter']) {
+    assert.equal(sectorFor(c), 'motor', `"${c}" is motor`);
+  }
+  for (const c of ['gym', 'personal trainer', 'pilates studio', 'physio', 'dentist']) {
+    assert.equal(sectorFor(c), 'fitness', `"${c}" is health & fitness`);
+  }
+  for (const c of ['boutique', 'florist', 'jeweller', 'gift shop']) {
+    assert.equal(sectorFor(c), 'shop', `"${c}" is a shop`);
+  }
+  assert.equal(sectorLabel('food'), 'Food & drink');
+  assert.equal(sectorLabel('motor'), 'Motor');
+});
+
+test('a genuinely unrecognised trade falls back to the generic opener', () => {
+  for (const c of ['accountant', 'photographer', 'translator', 'dog groomer',
+                   'cleaner', 'driving instructor', 'estate agent', '']) {
     assert.equal(sectorFor(c), null, `"${c}" has no dedicated opener`);
   }
   assert.equal(sectorLabel(null), null);

@@ -104,6 +104,62 @@ Happy to mock yours up for free so you can see it first. Worth a look?
 If you'd rather I didn't message again, just say and I won't.`,
   },
 
+  // Food & drink: menu, hours and how to order are what people look for.
+  {
+    name: 'First message — WhatsApp · Food & drink',
+    channel: 'whatsapp',
+    subject: '',
+    body: `Hi, is this {{business}}?
+
+I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a place like yours that's usually where people check the menu, your hours and how to order. I build simple one-pagers with your menu, a few photos and a tap-to-call button.
+
+Happy to mock yours up for free so you can see it first. Worth a look?
+
+If you'd rather I didn't message again, just say and I won't.`,
+  },
+
+  // Motor: what you do and booking in, with a call button.
+  {
+    name: 'First message — WhatsApp · Motor',
+    channel: 'whatsapp',
+    subject: '',
+    body: `Hi, is this {{business}}?
+
+I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a garage that's where people check what you do and book in. I build simple one-pagers with your services, opening hours and a tap-to-call button.
+
+Happy to mock yours up for free so you can see it first. Worth a look?
+
+If you'd rather I didn't message again, just say and I won't.`,
+  },
+
+  // Health & fitness: what's on offer and booking, before someone commits.
+  {
+    name: 'First message — WhatsApp · Health & fitness',
+    channel: 'whatsapp',
+    subject: '',
+    body: `Hi, is this {{business}}?
+
+I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for somewhere like yours it's usually the first place people look before booking. I build simple one-pagers with what you offer, your prices or timetable and a tap-to-book or call button.
+
+Happy to mock yours up for free so you can see it first. Worth a look?
+
+If you'd rather I didn't message again, just say and I won't.`,
+  },
+
+  // Shops: what you stock, where you are, when you're open.
+  {
+    name: 'First message — WhatsApp · Shops',
+    channel: 'whatsapp',
+    subject: '',
+    body: `Hi, is this {{business}}?
+
+I'm {{my_name}} from {{my_business}}. I came across you in {{location}} and noticed you don't have a website — for a shop that's where people check what you stock, where you are and your opening hours. I build simple one-pagers with photos, your location and a tap-to-call button.
+
+Happy to mock yours up for free so you can see it first. Worth a look?
+
+If you'd rather I didn't message again, just say and I won't.`,
+  },
+
   {
     name: 'First message — SMS',
     channel: 'sms',

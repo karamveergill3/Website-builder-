@@ -960,6 +960,14 @@ If you'd rather I didn't message again, just say and I won't.`,
       ALTER TABLE invoices ADD COLUMN payment_ref TEXT;
     `,
   },
+  {
+    name: '030_more_trade_openers',
+    // More per-trade WhatsApp openers (food & drink, motor, health & fitness,
+    // shops) so the Reach screen has a tailored message for nearly any lead,
+    // not just salons and building trades. Seeds only the ones missing, so an
+    // edited or deleted starter is left alone.
+    run: seedStarterTemplates,
+  },
 ];
 
 function migrate() {

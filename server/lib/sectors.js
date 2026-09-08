@@ -9,10 +9,12 @@
  * user typed — "roofers", "nail bar", "café") is mapped to a small set of
  * sectors, and the Reach screen opens the matching template.
  *
- * Deliberately few sectors: two that earn their own wording — the building
- * trades and the salon/beauty world — and everything else on a generic opener
- * that reads naturally for any trade. Matching is substring and
- * case-insensitive against a keyword list, first hit wins.
+ * A handful of sectors earn their own wording; anything unrecognised falls to
+ * a generic opener that reads naturally for any trade. Order matters — the
+ * first sector whose keyword hits wins — so the most specific trade terms
+ * (salon, building trades) come before the broader ones. Matching is a
+ * case-insensitive WORD-PREFIX (see sectorFor), so "roof" hits "roofing" but
+ * "tan" does not hit "accountant".
  */
 
 export const SECTORS = [
@@ -31,8 +33,41 @@ export const SECTORS = [
       'roof', 'plumb', 'electric', 'spark', 'plaster', 'render', 'joiner', 'carpen',
       'build', 'construction', 'brick', 'tiler', 'tiling', 'floor', 'paint', 'decorat',
       'glaz', 'window', 'kitchen fitter', 'bathroom', 'landscap', 'garden', 'fenc',
-      'pav', 'driveway', 'drive', 'tarmac', 'scaffold', 'ground', 'drain', 'guttering',
+      'pav', 'driveway', 'tarmac', 'scaffold', 'ground', 'drain', 'guttering', 'shopfit',
       'damp', 'insulation', 'heating', 'gas', 'boiler', 'handyman', 'mason', 'demolition',
+    ],
+  },
+  {
+    key: 'motor',
+    label: 'Motor',
+    keywords: [
+      'garage', 'mechanic', 'mot', 'tyre', 'tire', 'valet', 'bodyshop', 'body shop',
+      'auto', 'motor', 'vehicle', 'car ', 'cars', 'car repair', 'recovery',
+    ],
+  },
+  {
+    key: 'food',
+    label: 'Food & drink',
+    keywords: [
+      'cafe', 'coffee', 'takeaway', 'take away', 'restaurant', 'bakery', 'baker',
+      'deli', 'catering', 'caterer', 'patisserie', 'bistro', 'diner', 'chippy',
+      'fish and chip', 'pizzeria', 'sandwich', 'butcher',
+    ],
+  },
+  {
+    key: 'fitness',
+    label: 'Health & fitness',
+    keywords: [
+      'gym', 'fitness', 'personal train', 'pilates', 'yoga', 'physio', 'dentist',
+      'dental', 'chiropract', 'osteopath', 'sports therap', 'wellbeing',
+    ],
+  },
+  {
+    key: 'shop',
+    label: 'Shops',
+    keywords: [
+      'shop', 'boutique', 'retail', 'florist', 'jeweller', 'grocer', 'newsagent',
+      'off licence', 'gift shop', 'homeware', 'furniture',
     ],
   },
 ];

@@ -134,14 +134,14 @@ test.after(teardown);
 test('a lead carries its sector, so the right opener can pick itself', async () => {
   const salon = await makeLead({ category: 'nail bar' });
   const trade = await makeLead({ category: 'roofers' });
-  const other = await makeLead({ category: 'cafe' });
+  const other = await makeLead({ category: 'accountant' });
 
   const byId = Object.fromEntries(
     (await get('/api/leads')).body.leads.map((l) => [l.id, l])
   );
   assert.equal(byId[salon.id].sector_label, 'Salons & beauty');
   assert.equal(byId[trade.id].sector_label, 'Trades');
-  assert.equal(byId[other.id].sector_label, null, 'the rest use the generic opener');
+  assert.equal(byId[other.id].sector_label, null, 'an unrecognised trade uses the generic opener');
 });
 
 test('the salon and trades WhatsApp openers are seeded and read naturally', async () => {

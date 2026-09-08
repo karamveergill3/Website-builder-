@@ -13,6 +13,24 @@ Everyone who signs in shares one lead pool and one "already contacted"
 memory, so no business is ever approached twice across the team. Each rep
 uses their own phone for WhatsApp; the emails carry the Keylo Studios name.
 
+## Sharing the day's leads
+
+The daily hunt has one target for the whole hub (set it under **Settings →
+Hunt** — for three of you working 5 each, set it to **15**). As it finds
+businesses it shares them out across the active team automatically: the next
+find goes to whoever is holding the fewest un-worked leads, so an empty
+morning deals evenly (5/5/5) and nobody on holiday gets buried.
+
+On the **Leads** screen, once there is more than one of you:
+
+- an **Owner** column shows whose lead each one is (yours highlighted),
+- a **Found today** line reads "You 5 · Bea 5 · Cy 5",
+- the **owner dropdown** filters to *Mine*, *Unassigned*, or a named rep,
+- ticking leads and choosing **Assign to…** hands a batch to someone else.
+
+A lead you add by hand is yours. Anyone can reassign any lead — handy for
+handing a hot one to whoever is free.
+
 ---
 
 ## What you need

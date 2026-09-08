@@ -16,7 +16,7 @@ import { Router } from 'express';
 import { db } from '../db.js';
 import { wrap, badRequest, notFound } from '../lib/http.js';
 import {
-  countUsers, createUser, getUserByEmail, getUserById, listUsers,
+  countUsers, createUser, getUserByEmail, getUserById, listUsers, teamRoster,
   setUserActive, setUserPassword, setUserPhone, verifyPassword, publicUser,
   createSession, destroySession, sessionCookie, clearCookie, isSecure,
   SESSION_COOKIE, readCookie,
@@ -108,6 +108,12 @@ router.patch('/me', wrap((req, res) => {
     startSession(res, req, req.user);
   }
   res.json({ user: publicUser(getUserById(req.user.id)) });
+}));
+
+/** The team roster (id + name) — any signed-in rep, for the owner dropdowns. */
+router.get('/roster', wrap((req, res) => {
+  if (!req.user) throw unauthorized('Not signed in.');
+  res.json({ roster: teamRoster() });
 }));
 
 /* --------------------------------------------------------------- admin */

@@ -1360,6 +1360,16 @@ Thanks so much, and have a lovely day.
       ALTER TABLE maintenance_plans ADD COLUMN dd_status TEXT NOT NULL DEFAULT 'none';
     `,
   },
+  {
+    name: '037_lead_assignment',
+    up: `
+      -- Who owns a lead. The daily hunt round-robins its finds across the
+      -- active team so each rep gets their own share (e.g. 5 each of 15 a day);
+      -- a lead added by hand belongs to whoever added it. NULL is unassigned.
+      ALTER TABLE leads ADD COLUMN assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL;
+      CREATE INDEX idx_leads_assigned ON leads(assigned_to);
+    `,
+  },
 ];
 
 function migrate() {

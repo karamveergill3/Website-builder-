@@ -95,8 +95,21 @@ function parseLeadBody(body, { partial = false } = {}) {
   }
   if (!partial || has('opted_out')) out.opted_out = bool(body.opted_out) ? 1 : 0;
   if (has('last_contacted_at')) out.last_contacted_at = str(body.last_contacted_at);
+  // Reassigning a lead: an id of an existing user, or null to unassign.
+  if (has('assigned_to')) out.assigned_to = normAssignee(body.assigned_to);
 
   return out;
+}
+
+/** A lead owner is a real user id, or null (unassigned). */
+function normAssignee(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const id = Number(v);
+  if (!Number.isInteger(id)) throw badRequest('assigned_to must be a team member id.');
+  if (!db.prepare('SELECT 1 FROM users WHERE id = ?').get(id)) {
+    throw badRequest('No such team member.');
+  }
+  return id;
 }
 
 /**
@@ -150,6 +163,19 @@ router.get('/', wrap((req, res) => {
   }
   if (bool(req.query.has_email)) where.push("email IS NOT NULL AND email <> ''");
 
+  // Owner filter: "me" (this rep's own leads), "none" (unassigned), or a
+  // specific team member's id.
+  const who = str(req.query.assigned_to);
+  if (who === 'none') {
+    where.push('assigned_to IS NULL');
+  } else if (who === 'me') {
+    where.push('assigned_to = @me');
+    params.me = req.user?.id ?? -1;
+  } else if (who) {
+    where.push('assigned_to = @assignee');
+    params.assignee = Number(who) || -1;
+  }
+
   const sql = `SELECT * FROM leads
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY ${Object.hasOwn(SORTS, req.query.sort ?? '') ? SORTS[req.query.sort] : SORTS.created}
@@ -192,6 +218,14 @@ router.get('/stats', wrap((_req, res) => {
     corporate:      one("SELECT COUNT(*) n FROM leads WHERE entity_type = 'corporate'"),
     individual:     one("SELECT COUNT(*) n FROM leads WHERE entity_type = 'individual'"),
     suppressed:     one('SELECT COUNT(*) n FROM suppression_list'),
+    // How many leads each rep has been given today, keyed by user id (plus
+    // "none" for unassigned). The Leads screen turns this into "You 5 · …".
+    by_assignee_today: Object.fromEntries(
+      db.prepare(
+        `SELECT COALESCE(assigned_to, 'none') AS id, COUNT(*) AS n FROM leads
+          WHERE substr(created_at, 1, 10) = ? GROUP BY assigned_to`
+      ).all(nowIso().slice(0, 10)).map((r) => [String(r.id), r.n])
+    ),
   });
 }));
 
@@ -209,6 +243,8 @@ router.post('/', wrap((req, res) => {
   requireCorporateEvidence(lead);
   lead.created_at = nowIso();
   lead.last_contacted_at = lead.last_contacted_at ?? null;
+  // A lead added by hand belongs to whoever added it, unless one was named.
+  if (!('assigned_to' in lead)) lead.assigned_to = req.user?.id ?? null;
 
   const cols = Object.keys(lead);
   try {
@@ -406,6 +442,18 @@ router.post('/bulk-status', wrap((req, res) => {
   });
   run(ids);
   res.json({ updated: ids.length, status });
+}));
+
+/** POST /api/leads/bulk-assign — hand a batch of leads to a team member. */
+router.post('/bulk-assign', wrap((req, res) => {
+  const assignee = normAssignee(req.body?.assigned_to); // id, or null to unassign
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isFinite) : [];
+  if (ids.length === 0) throw badRequest('ids must be a non-empty array');
+
+  const stmt = db.prepare('UPDATE leads SET assigned_to = ? WHERE id = ?');
+  const run = db.transaction((rows) => { for (const id of rows) stmt.run(assignee, id); });
+  run(ids);
+  res.json({ updated: ids.length, assigned_to: assignee });
 }));
 
 /**

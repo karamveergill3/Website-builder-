@@ -107,14 +107,24 @@ export default async function leadsView(root, params, { refresh }) {
   const sort = params.sort ?? 'created';
 
   const view = params.view ?? '';
-  const [{ leads: allLeads }, stats, gmail, ch] = await Promise.all([
-    api.leads.list({ status, q, sort, limit: 1000 }),
+  const who = params.who ?? '';
+  const [{ leads: allLeads }, stats, gmail, ch, rosterRes, meRes] = await Promise.all([
+    api.leads.list({ status, q, sort, assigned_to: who || undefined, limit: 1000 }),
     api.leads.stats(),
     api.get('/api/gmail/status').catch(() => null),
     api.get('/api/companies/status').catch(() => null),
+    api.auth.roster().catch(() => ({ roster: [] })),
+    api.auth.me().catch(() => ({ user: null })),
   ]);
   const canQueue = gmail?.connected === true;
   const canCheck = ch?.configured === true;
+
+  // The team, for the owner column, filter and reassignment. With more than
+  // one person, leads get shared out and "whose is this" starts to matter.
+  const roster = rosterRes.roster ?? [];
+  const me = meRes.user ?? null;
+  const nameOf = (id) => roster.find((u) => u.id === id)?.name ?? null;
+  const isTeam = roster.filter((u) => u.active).length > 1;
 
   // Working views: what needs doing, rather than what state it is in.
   const VIEWS = {
@@ -137,12 +147,23 @@ export default async function leadsView(root, params, { refresh }) {
   const filtered = Boolean(q) || status !== 'all' || Boolean(view);
 
   const go = (key, value) => {
-    const next = new URLSearchParams({ status, q, sort, view });
+    const next = new URLSearchParams({ status, q, sort, view, who });
     if (!value || value === 'all') next.delete(key); else next.set(key, value);
     for (const [k, v] of [...next]) if (!v) next.delete(k);
     const s = next.toString();
     location.hash = `/leads${s ? `?${s}` : ''}`;
   };
+
+  // "Today: You 5 · Cailan 5 · Javier 5" — the day's finds, per rep. Only
+  // worth showing once there is a team to share them between.
+  const today = stats.by_assignee_today ?? {};
+  const todayLine = isTeam
+    ? roster.filter((u) => u.active).map((u) => {
+        const n = today[String(u.id)] ?? 0;
+        const mine = me && u.id === me.id;
+        return html`<span style="${mine ? 'font-weight:600' : ''}">${mine ? 'You' : u.name} <b>${n}</b></span>`;
+      })
+    : [];
 
   mount(root, html`
     <div class="readout">
@@ -154,6 +175,12 @@ export default async function leadsView(root, params, { refresh }) {
       ${stats.unclassified ? html`
         <div data-accent="warn"><b class="num">${stats.unclassified}</b><span>Need checking</span></div>` : ''}
     </div>
+
+    ${isTeam ? html`
+      <div class="meta" style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:-4px 2px 12px">
+        <span style="opacity:.6;text-transform:uppercase;letter-spacing:.04em;font-size:.7rem">Found today</span>
+        ${todayLine}
+      </div>` : ''}
 
     <div class="bar">
       <div class="pills">
@@ -174,6 +201,14 @@ export default async function leadsView(root, params, { refresh }) {
           <button class="pill" data-view="nosite" aria-pressed="${view === 'nosite'}">no website <b>${counts.nosite}</b></button>` : ''}
       </div>
       <div class="grow"></div>
+      ${isTeam ? html`
+        <select id="owner" style="max-width:150px" title="Whose leads to show">
+          <option value=""     ${who === ''     ? 'selected' : ''}>Everyone</option>
+          <option value="me"   ${who === 'me'   ? 'selected' : ''}>Mine</option>
+          <option value="none" ${who === 'none' ? 'selected' : ''}>Unassigned</option>
+          ${roster.filter((u) => u.active && !(me && u.id === me.id)).map((u) => html`
+            <option value="${u.id}" ${who === String(u.id) ? 'selected' : ''}>${u.name}</option>`)}
+        </select>` : ''}
       <input type="search" id="q" placeholder="Search  /" value="${q}" style="max-width:200px" autocomplete="off">
       <select id="sort" style="max-width:150px">
         <option value="created"   ${sort === 'created'   ? 'selected' : ''}>Newest</option>
@@ -196,6 +231,13 @@ export default async function leadsView(root, params, { refresh }) {
         <option value="">Set status…</option>
         ${STATUSES.map((s) => html`<option value="${s}">${s}</option>`)}
       </select>
+      ${isTeam ? html`
+        <select id="bulk-owner" style="max-width:150px">
+          <option value="">Assign to…</option>
+          ${roster.filter((u) => u.active).map((u) => html`
+            <option value="${u.id}">${me && u.id === me.id ? 'Me' : u.name}</option>`)}
+          <option value="none">Unassign</option>
+        </select>` : ''}
       ${canCheck ? html`<button data-act="bulk-check">Check register</button>` : ''}
       <button data-act="paste-emails">Paste emails</button>
       <button data-act="bulk-site">Check websites</button>
@@ -217,7 +259,7 @@ export default async function leadsView(root, params, { refresh }) {
         <table class="rows">
           <thead><tr>
             <th class="c-pick"><input type="checkbox" id="pick-all" class="pick" aria-label="Select all"></th>
-            <th>Business</th><th>Contact</th><th>Trade</th><th>Status</th><th class="nw">Contacted</th><th></th>
+            <th>Business</th><th>Contact</th><th>Trade</th>${isTeam ? html`<th>Owner</th>` : ''}<th>Status</th><th class="nw">Contacted</th><th></th>
           </tr></thead>
           <tbody>
             ${leads.map((l) => html`
@@ -239,6 +281,9 @@ export default async function leadsView(root, params, { refresh }) {
                 <td class="meta">${l.category ?? '—'}
                   ${l.has_website === 0 ? html`<span class="flag" data-ok
                         title="Google returned no website">no site</span>` : ''}</td>
+                ${isTeam ? html`<td class="meta nw">${nameOf(l.assigned_to)
+                  ? html`<span class="flag"${me && l.assigned_to === me.id ? ' data-ok' : ''}>${nameOf(l.assigned_to)}</span>`
+                  : '—'}</td>` : ''}
                 <td>
                   ${statusPill(l.status)}
                   ${!l.can_email && l.block_code !== 'NO_EMAIL'
@@ -275,6 +320,7 @@ export default async function leadsView(root, params, { refresh }) {
   on(root, 'click', '[data-filter]', (_e, el) => go('status', el.dataset.filter));
   on(root, 'click', '[data-view]', (_e, el) => go('view', view === el.dataset.view ? '' : el.dataset.view));
   $('#sort', root)?.addEventListener('change', (e) => go('sort', e.target.value));
+  $('#owner', root)?.addEventListener('change', (e) => go('who', e.target.value));
 
   const search = $('#q', root);
   if (search) {
@@ -489,6 +535,17 @@ export default async function leadsView(root, params, { refresh }) {
     const ids = picked().map((c) => Number(c.value));
     await api.leads.bulkStatus(ids, ev.target.value);
     toast(`${ids.length} marked ${ev.target.value}`);
+    refresh();
+  });
+
+  $('#bulk-owner', root)?.addEventListener('change', async (ev) => {
+    if (!ev.target.value) return;
+    const ids = picked().map((c) => Number(c.value));
+    if (!ids.length) { ev.target.value = ''; return toast('Pick some leads first', { error: true }); }
+    const userId = ev.target.value === 'none' ? null : Number(ev.target.value);
+    await api.leads.bulkAssign(ids, userId);
+    const label = userId === null ? 'unassigned' : `assigned to ${nameOf(userId) ?? 'them'}`;
+    toast(`${ids.length} ${label}`);
     refresh();
   });
 

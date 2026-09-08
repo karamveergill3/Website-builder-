@@ -65,7 +65,7 @@ export const DEFAULTS = {
   hunt_enabled: '0',
   hunt_trades: '',
   hunt_areas: '',
-  hunt_daily_target: '10',
+  hunt_daily_target: '15',
   hunt_hour: '8',
   // The register is free, so read plenty of it: most high-street trades are
   // sole traders the register does not hold, so it takes a lot of pages to

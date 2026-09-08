@@ -33,6 +33,7 @@ import {
 } from './places.js';
 import { normalisePhone } from './handoff.js';
 import { recordFound, knownCompanyNumbers } from './recontact.js';
+import { nextAssignee } from './assign.js';
 
 const PAGE = 100;
 /** Re-open an exhausted trade/town after this long; new companies incorporate. */
@@ -49,7 +50,7 @@ export function huntConfig() {
     enabled: getSetting('hunt_enabled', '0') === '1',
     trades: lines(getSetting('hunt_trades', '')),
     areas: lines(getSetting('hunt_areas', getSetting('default_areas', ''))),
-    target: num('hunt_daily_target', 20),
+    target: num('hunt_daily_target', 15),
     hour: num('hunt_hour', 8),
     maxPlacesRequests: num('hunt_max_places_requests', 120),
     maxRegisterPages: num('hunt_max_register_pages', 200),
@@ -299,16 +300,18 @@ function importLead(company, verdict, trade) {
        (business_name, category, location, phone, status, source, opted_out, entity_type,
         company_number, registered_name, registered_address, company_status, company_type,
         incorporated_on, sic_codes, entity_note, checked_at,
-        has_website, website_checked_at, website_evidence, created_at)
+        has_website, website_checked_at, website_evidence, assigned_to, created_at)
      VALUES (@name, @trade, @town, @phone, 'new', 'Daily hunt', 0, 'corporate',
              @number, @name, @address, @status, @type,
              @inc, @sic, @note, @now,
-             @has_website, @checked, @evidence, @now)`
+             @has_website, @checked, @evidence, @assigned, @now)`
   ).run({
     name: company.company_name,
     trade,
     town: company.locality ?? null,
     phone: verdict.phone ?? null,
+    // Share the day's finds out across the active team (5 each of 15, say).
+    assigned: nextAssignee(),
     number: company.company_number,
     address: company.address_snippet ?? null,
     status: company.company_status ?? null,

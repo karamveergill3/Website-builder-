@@ -76,6 +76,17 @@ export function listUsers() {
 }
 
 /**
+ * The team roster any signed-in rep may read: just id, name and whether the
+ * account is still active — enough to show who owns a lead and to reassign it,
+ * without exposing emails or roles the way the admin-only listing does.
+ */
+export function teamRoster() {
+  return db.prepare(
+    `SELECT id, name, active FROM users ORDER BY active DESC, name COLLATE NOCASE`
+  ).all().map((u) => ({ id: u.id, name: u.name, active: u.active === 1 }));
+}
+
+/**
  * Create an account. Throws with a `.status` a route can pass straight to the
  * client for the two things a human gets wrong: a weak password and a
  * duplicate email.

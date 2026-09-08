@@ -45,6 +45,8 @@ export const api = {
     remove:  (id)         => request('DELETE', `/api/leads/${id}`),
     bulkStatus: (ids, status) => request('POST', '/api/leads/bulk-status', { ids, status }),
     bulkDelete: (body)        => request('POST', '/api/leads/bulk-delete', body),
+    assign:     (id, userId)  => request('PATCH', `/api/leads/${id}`, { assigned_to: userId }),
+    bulkAssign: (ids, userId) => request('POST', '/api/leads/bulk-assign', { ids, assigned_to: userId }),
   },
   templates: {
     list:   ()          => request('GET', '/api/templates'),
@@ -99,6 +101,7 @@ export const api = {
     login:    (body)         => request('POST', '/api/auth/login', body),
     logout:   ()             => request('POST', '/api/auth/logout', {}),
     updateMe: (body)         => request('PATCH','/api/auth/me', body),
+    roster:   ()             => request('GET',  '/api/auth/roster'),
     users:    ()             => request('GET',  '/api/auth/users'),
     addUser:  (body)         => request('POST', '/api/auth/users', body),
     setUser:  (id, body)     => request('PATCH', `/api/auth/users/${id}`, body),

@@ -15,8 +15,9 @@ import mockups, { MOCKUP_ROOT } from './routes/mockups.js';
 import { seedIdentityFromEnv } from './lib/identity.js';
 import authRouter from './routes/auth.js';
 import invoices from './routes/invoices.js';
-import { getInvoiceByToken, renderInvoicePage, setPayPalOrder, markPaid } from './lib/invoicing.js';
+import { getInvoiceByToken, renderInvoicePage, setPayPalOrder, setStripeSession, markPaid } from './lib/invoicing.js';
 import { configured as paypalConfigured, createOrder, captureOrder, PayPalError } from './lib/paypal.js';
+import { configured as stripeConfigured, createCheckoutSession, retrieveSession, StripeError } from './lib/stripe.js';
 import { userForToken, readCookie, SESSION_COOKIE } from './lib/auth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -186,6 +187,59 @@ app.get('/i/:token/paypal/return', async (req, res) => {
     else console.error('[paypal] capture not applied', { status: cap.status, amount: cap.amount_pence, expected: invoice.total_pence });
   } catch (err) {
     console.error('[paypal] capture:', err.message);
+  }
+  res.redirect(`/i/${invoice.token}`);
+});
+
+/**
+ * Start a Stripe Checkout payment for an invoice. Public (the client has no
+ * login); the amount is taken from the stored invoice, never the request, and
+ * we remember the session id so the return can be matched back to this invoice.
+ */
+app.post('/i/:token/pay/stripe', express.urlencoded({ extended: false }), async (req, res) => {
+  const invoice = getInvoiceByToken(req.params.token);
+  if (!invoice || invoice.status === 'void') { res.status(404).send('Invoice not found'); return; }
+  if (invoice.status === 'paid') { res.redirect(`/i/${invoice.token}`); return; }
+  if (!stripeConfigured()) { res.redirect(`/i/${invoice.token}`); return; }
+  try {
+    const base = publicBase(req);
+    const session = await createCheckoutSession(invoice, {
+      successUrl: `${base}/i/${invoice.token}/stripe/return?session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${base}/i/${invoice.token}`,
+    });
+    setStripeSession(invoice.id, session.id);
+    res.redirect(303, session.url);
+  } catch (err) {
+    console.error('[stripe] create session:', err.message);
+    res.status(err instanceof StripeError ? err.status : 502)
+      .type('html').send('<h1>Could not start the payment</h1><p>Please try again shortly.</p>');
+  }
+});
+
+/**
+ * Stripe returns the client here after Checkout. Look the session up and — only
+ * if Stripe reports it PAID, it is the session we created for THIS invoice, and
+ * the amount and currency match the invoice to the penny — mark it paid.
+ * Anything else leaves it unpaid.
+ */
+app.get('/i/:token/stripe/return', async (req, res) => {
+  const invoice = getInvoiceByToken(req.params.token);
+  if (!invoice) { res.status(404).send('Invoice not found'); return; }
+  if (invoice.status === 'paid') { res.redirect(`/i/${invoice.token}`); return; }
+
+  const sessionId = String(req.query.session_id ?? '');
+  if (!sessionId || sessionId !== invoice.stripe_session_id) {
+    res.redirect(`/i/${invoice.token}`); return; // not the session we issued
+  }
+  try {
+    const s = await retrieveSession(sessionId);
+    const ok = s.paid
+      && s.amount_pence === invoice.total_pence
+      && (s.currency ?? invoice.currency) === invoice.currency;
+    if (ok) markPaid(invoice.id, 'stripe', s.payment_ref);
+    else console.error('[stripe] session not applied', { status: s.status, amount: s.amount_pence, expected: invoice.total_pence });
+  } catch (err) {
+    console.error('[stripe] retrieve:', err.message);
   }
   res.redirect(`/i/${invoice.token}`);
 });

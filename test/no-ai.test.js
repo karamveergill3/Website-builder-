@@ -113,6 +113,9 @@ test('every outbound host is one of the services this tool uses', () => {
     // the team hub is reached from anywhere (a quick tunnel), not called by
     // the server.
     'paypal.me', 'www.paypal.com', 'api-m.paypal.com', 'api-m.sandbox.paypal.com',
+    // Stripe's REST API, used by automated Stripe Checkout (card / Klarna /
+    // Clearpay). One host for both test and live — the key prefix decides which.
+    'api.stripe.com',
   ]);
 
   const found = new Set();

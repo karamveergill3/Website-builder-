@@ -27,6 +27,7 @@ import { db, getSetting, setSetting, getSettings } from '../db.js';
 import { nowIso } from './http.js';
 import { esc, safeUrl } from './site-builder.js';
 import { configured as paypalConfigured } from './paypal.js';
+import { configured as stripeConfigured } from './stripe.js';
 
 /* ------------------------------------------------------------------ money */
 
@@ -184,12 +185,12 @@ export function markSent(id) {
   return getInvoice(id);
 }
 
-/** Record a payment. method ∈ full | bank | paypal | klarna. ref is a receipt
- * reference (e.g. the PayPal capture id) when there is one. */
+/** Record a payment. method ∈ full | bank | paypal | klarna | stripe. ref is a
+ * receipt reference (e.g. the PayPal capture id or Stripe payment id). */
 export function markPaid(id, method, ref = null) {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
   if (!inv) throw notFoundErr('Invoice not found.');
-  const m = ['full', 'bank', 'paypal', 'klarna'].includes(method) ? method : 'other';
+  const m = ['full', 'bank', 'paypal', 'klarna', 'stripe'].includes(method) ? method : 'other';
   db.prepare(
     "UPDATE invoices SET status = 'paid', paid_at = ?, paid_method = ?, payment_ref = COALESCE(?, payment_ref) WHERE id = ?"
   ).run(nowIso(), m, ref, id);
@@ -200,6 +201,13 @@ export function markPaid(id, method, ref = null) {
  * can be matched back to it. */
 export function setPayPalOrder(id, orderId) {
   db.prepare('UPDATE invoices SET paypal_order_id = ? WHERE id = ?').run(String(orderId), id);
+  return getInvoice(id);
+}
+
+/** Remember the Stripe Checkout session created for an invoice, so its return
+ * redirect can be matched back to it. */
+export function setStripeSession(id, sessionId) {
+  db.prepare('UPDATE invoices SET stripe_session_id = ? WHERE id = ?').run(String(sessionId), id);
   return getInvoice(id);
 }
 
@@ -353,6 +361,21 @@ export function renderInvoicePage(inv, settings = getSettings()) {
   // Klarna (they pay us in full, the client repays them); maintenance is a
   // straight monthly charge.
   const payBlocks = [];
+  // Live card / Klarna / Clearpay when Stripe is connected: a form that posts
+  // back to us, we create the Checkout session server-side and redirect to
+  // Stripe's hosted page. Which methods appear (card, Klarna Pay in 3, Clearpay
+  // Pay in 4, wallets) is set in the Stripe Dashboard, not here. No script, so
+  // it works under the locked-down CSP (which allows form-action 'self').
+  if (stripeConfigured()) {
+    payBlocks.push(`
+      <div class="pay">
+        <h4>Card${isBuild ? ', Klarna or Clearpay' : ''}</h4>
+        <form method="POST" action="/i/${esc(inv.token)}/pay/stripe">
+          <button class="btn" type="submit">Pay ${money(inv.total_pence, inv.currency)} by card${isBuild ? ' or instalments' : ''}</button>
+        </form>
+        ${isBuild ? '<p class="fine">Pay by debit or credit card, or choose Klarna (Pay in 3) or Clearpay (Pay in 4) at checkout to spread the cost. Either way it settles the invoice in full.</p>' : ''}
+      </div>`);
+  }
   // Live "Pay now" when PayPal is connected: a form that posts back to us, we
   // create the order server-side and redirect to PayPal. No script, so it
   // works under the locked-down CSP (which allows form-action 'self'). Falls
@@ -360,18 +383,18 @@ export function renderInvoicePage(inv, settings = getSettings()) {
   if (paypalConfigured()) {
     payBlocks.push(`
       <div class="pay">
-        <h4>Card or PayPal${isBuild ? ' — pay now, or spread it monthly' : ''}</h4>
+        <h4>Card or PayPal${isBuild ? ', pay now or spread it monthly' : ''}</h4>
         <form method="POST" action="/i/${esc(inv.token)}/pay/paypal">
           <button class="btn" type="submit">Pay ${money(inv.total_pence, inv.currency)} with PayPal</button>
         </form>
-        ${isBuild ? '<p class="fine">At checkout you can pay the full amount or choose PayPal Pay in 3 to spread it over monthly instalments — either way it settles the invoice in full.</p>' : ''}
+        ${isBuild ? '<p class="fine">At checkout you can pay the full amount or choose PayPal Pay in 3 to spread it over monthly instalments, and either way it settles the invoice in full.</p>' : ''}
       </div>`);
   } else if (pay.paypal) {
     payBlocks.push(`
       <div class="pay">
-        <h4>Card or PayPal${isBuild ? ' — pay now, or spread it monthly' : ''}</h4>
+        <h4>Card or PayPal${isBuild ? ', pay now or spread it monthly' : ''}</h4>
         <p><a class="btn" href="${safeUrl(pay.paypal)}" target="_blank" rel="noopener">Pay ${money(inv.total_pence, inv.currency)} with PayPal</a></p>
-        ${isBuild ? '<p class="fine">At checkout you can pay the full amount or choose PayPal Pay in 3 to spread it over monthly instalments — either way it settles the invoice in full.</p>' : ''}
+        ${isBuild ? '<p class="fine">At checkout you can pay the full amount or choose PayPal Pay in 3 to spread it over monthly instalments, and either way it settles the invoice in full.</p>' : ''}
       </div>`);
   }
   if (pay.klarna && isBuild) {

@@ -1326,6 +1326,15 @@ Thanks so much, and have a lovely day.
       }
     },
   },
+  {
+    name: '034_invoice_stripe_session',
+    up: `
+      -- The Stripe Checkout session created for an invoice, so the return
+      -- redirect can be matched back to it (the same role paypal_order_id
+      -- plays for PayPal).
+      ALTER TABLE invoices ADD COLUMN stripe_session_id TEXT;
+    `,
+  },
 ];
 
 function migrate() {

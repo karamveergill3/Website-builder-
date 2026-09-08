@@ -126,11 +126,17 @@ export default async function leadsView(root, params, { refresh }) {
   const nameOf = (id) => roster.find((u) => u.id === id)?.name ?? null;
   const isTeam = roster.filter((u) => u.active).length > 1;
 
+  const has = (v) => Boolean(v && String(v).trim());
   // Working views: what needs doing, rather than what state it is in.
   const VIEWS = {
     unchecked: (l) => l.block_code === 'UNCLASSIFIED',
     noemail:   (l) => l.can_email === false && l.block_code === 'NO_EMAIL',
     nosite:    (l) => l.has_website === 0,
+    // Something to contact them by at all — a phone or an email. This is the
+    // "phone and/or email" filter: it only means anything once Find contacts
+    // has run, because the hunt files a company before either is known.
+    reachable: (l) => has(l.phone) || has(l.email),
+    nocontact: (l) => !has(l.phone) && !has(l.email),
     // "Ready" has to mean ready to APPROACH. It meant "lawful to email",
     // which is a different question, so every lead emailed yesterday counted
     // as ready again this morning — and the bulk queue took the lot.
@@ -187,7 +193,13 @@ export default async function leadsView(root, params, { refresh }) {
         <button class="pill" data-filter="all" aria-pressed="${status === 'all'}">All <b>${stats.total}</b></button>
         ${STATUSES.map((s) => html`
           <button class="pill" data-filter="${s}" aria-pressed="${status === s}">${s} <b>${stats.by_status[s] ?? 0}</b></button>`)}
-        ${(counts.unchecked || counts.noemail || counts.nosite || view) ? html`<span class="sep"></span>` : ''}
+        ${(counts.unchecked || counts.noemail || counts.nosite || counts.reachable || counts.nocontact || view) ? html`<span class="sep"></span>` : ''}
+        ${counts.reachable ? html`
+          <button class="pill" data-view="reachable" aria-pressed="${view === 'reachable'}"
+            title="Has a phone number or an email — something to contact them by">reachable <b>${counts.reachable}</b></button>` : ''}
+        ${counts.nocontact ? html`
+          <button class="pill" data-view="nocontact" aria-pressed="${view === 'nocontact'}"
+            title="No phone and no email yet — run Find contacts on these">no contact <b>${counts.nocontact}</b></button>` : ''}
         ${counts.ready ? html`
           <button class="pill" data-view="ready" aria-pressed="${view === 'ready'}">ready <b>${counts.ready}</b></button>` : ''}
         ${counts.contacted ? html`

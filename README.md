@@ -25,6 +25,13 @@ npm test                  # tests
 npm run lint
 ```
 
+### Running it as a team hub
+
+To let a team of reps reach it from anywhere — their own phones included —
+for free, see [docs/HUB.md](docs/HUB.md): one PC hosts it, a free Cloudflare
+tunnel gives a public HTTPS link, and everyone signs in. There's a one-click
+launcher at `scripts/start-hub.cmd` (Windows) / `scripts/start-hub.sh`.
+
 ### Reaching it from your phone
 
 By default the app answers only on the machine it runs on

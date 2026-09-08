@@ -93,6 +93,9 @@ const configure = (over = {}) => put('/api/settings', {
   hunt_max_per_trade: '3',
   hunt_require_phone: '0',
   hunt_require_mobile: '0',
+  // These tests exercise the Companies House path; the Google-direct source
+  // has its own tests. Off here so the register behaviour is what's measured.
+  hunt_include_places: '0',
   ...over,
 });
 
@@ -146,6 +149,44 @@ test('a company absent from Google is a prospect, flagged as such', () => {
 test('unlisted companies can be excluded', () => {
   const v = judge(company('NOWHERE ROOFING LTD', '01'), new Map(), { includeUnlisted: false });
   assert.equal(v.prospect, false);
+});
+
+test('the Google-direct source files no-website Google businesses, with a phone', async () => {
+  stub();
+  await clearLeads();
+  await configure({ hunt_include_places: '1', hunt_daily_target: '5', hunt_require_no_website: '1' });
+
+  // The register returns one company so the trade/town target is processed;
+  // the point is the Google listings — two with no website (kept, with their
+  // phone) and one with a website (skipped).
+  register = [{ body: { hits: 1, items: [company('SOME ROOFING LIMITED', '10000010')] } }];
+  places = [{ places: [
+    place('Otley Roofing', { phone: '07700 900001' }),                 // no website, mobile
+    place('Chevin Roofing', { phone: '01943 555123' }),                // no website, landline
+    place('Big Brand Roofing', { website: 'https://bigbrand.co.uk' }), // has a website -> skipped
+  ] }];
+
+  await runAndWait();
+  const leads = (await get('/api/leads')).body.leads;
+  const google = leads.filter((l) => l.source === 'Daily hunt (Google)');
+  assert.deepEqual(google.map((l) => l.business_name).sort(), ['Chevin Roofing', 'Otley Roofing']);
+  for (const l of google) {
+    assert.ok(l.phone, `${l.business_name} arrived with a phone`);
+    assert.ok(l.google_place_id, 'and a Google place id, so it dedupes');
+    assert.equal(l.has_website, 0);
+  }
+});
+
+test('the Google-direct source is off when the box is unticked', async () => {
+  stub();
+  await clearLeads();
+  await configure({ hunt_include_places: '0', hunt_daily_target: '5' });
+  register = [{ body: { hits: 1, items: [company('SOME ROOFING LIMITED', '10000011')] } }];
+  places = [{ places: [place('Some Other Roofing', { phone: '07700 900002' })] }];
+
+  await runAndWait();
+  const leads = (await get('/api/leads')).body.leads;
+  assert.equal(leads.filter((l) => l.source === 'Daily hunt (Google)').length, 0);
 });
 
 /* -------------------------------------------------------------- the hunt */

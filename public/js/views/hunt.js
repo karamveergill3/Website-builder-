@@ -223,6 +223,17 @@ export default async function huntView(root, _p, { refresh }) {
             <label for="h-enabled">Run automatically every day</label>
           </div>
           <div class="check" style="margin-top:8px">
+            <input id="h-places" name="hunt_include_places" type="checkbox"
+                   ${s.places_configured && c.includePlaces ? 'checked' : ''}
+                   ${s.places_configured ? '' : 'disabled'}>
+            <label for="h-places">Also find businesses straight from Google
+              <span class="tip" style="display:block;font-weight:400">
+                On top of the Companies House register, pull Google's own listings for
+                each trade and town and file the no-website ones — they come <b>with a
+                phone number</b>, so these are the leads you can actually WhatsApp.
+                ${!s.places_configured ? html`<span class="flag">needs a Google key</span>` : ''}</span></label>
+          </div>
+          <div class="check" style="margin-top:8px">
             <input id="h-nosite" name="hunt_require_no_website" type="checkbox"
                    ${s.places_configured && c.requireNoWebsite ? 'checked' : ''}
                    ${s.places_configured ? '' : 'disabled'}>

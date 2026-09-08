@@ -32,7 +32,7 @@ import {
   configured as placesConfigured,
 } from './places.js';
 import { normalisePhone } from './handoff.js';
-import { recordFound, knownCompanyNumbers } from './recontact.js';
+import { recordFound, knownCompanyNumbers, ledgerFor } from './recontact.js';
 import { nextAssignee } from './assign.js';
 import { expandAreas } from './towns.js';
 
@@ -69,6 +69,10 @@ export function huntConfig() {
       || getSetting('hunt_require_mobile', '0') === '1',
     requireMobile: getSetting('hunt_require_mobile', '0') === '1',
     includeUnlisted: getSetting('hunt_include_unlisted', '1') === '1',
+    // Also pull businesses straight from Google (not just the register), and
+    // file the no-website ones as leads with their phone. This is the source
+    // that actually finds contactable, WhatsApp-able businesses.
+    includePlaces: getSetting('hunt_include_places', '1') === '1',
   };
 }
 
@@ -192,13 +196,16 @@ export function spreadByTrade(targets) {
 }
 
 /**
- * One or two Places pages for a trade/town, reduced to what we need: a map
- * from normalised business name to whether Google holds a website. Listing
- * content is never stored — only the derived flag, per Google's terms.
+ * One or two Places pages for a trade/town. Returns both a map from normalised
+ * business name to Google's website/phone verdict (used to check the register
+ * companies), and the raw normalised rows (used by the Google-direct source to
+ * file no-website businesses straight as leads). Only the derived website flag
+ * is stored in place_cache — never the listing content, per Google's terms.
  */
 async function websiteMap(trade, area, counters) {
   const query = area ? `${trade} in ${area}` : trade;
   const byName = new Map();
+  const rows = [];
   let pageToken;
 
   const remember = db.prepare(
@@ -223,13 +230,44 @@ async function websiteMap(trade, area, counters) {
         has_website: row.has_website === 1,
         phone: row.phone,
       });
+      rows.push(row);
       remember.run(row.place_id, row.has_website, nowIso(), nowIso(), area ?? trade);
     }
 
     if (!nextPageToken) break;
     pageToken = nextPageToken;
   }
-  return byName;
+  return { byName, rows };
+}
+
+/**
+ * File a business found straight on Google (no register lookup) as a lead —
+ * the Google-direct source. It arrives with a phone, which is the whole point:
+ * these are the ones you can WhatsApp. Started unclassified (entity_type
+ * unknown), exactly like a manual Places import, so it never auto-unblocks a
+ * cold email — that still needs a Companies House match.
+ */
+function importPlaceLead(place, trade, area) {
+  const info = db.prepare(
+    `INSERT INTO leads
+       (business_name, category, location, phone, google_place_id, status,
+        notes, source, opted_out, entity_type, has_website, website_checked_at,
+        details_source, details_imported_at, assigned_to, created_at)
+     VALUES (@name, @trade, @town, @phone, @place_id, 'new', @notes, 'Daily hunt (Google)', 0,
+             'unknown', 0, @now, 'google_places', @now, @assigned, @now)`
+  ).run({
+    name: place.display_name ?? '(unnamed business)',
+    trade,
+    town: area ?? null,
+    phone: place.phone ?? null,
+    place_id: place.place_id,
+    notes: place.address ? `Address: ${place.address}` : null,
+    assigned: nextAssignee(),
+    now: nowIso(),
+  });
+  recordFound({ business_name: place.display_name ?? null, location: area ?? null, company_number: null });
+  db.prepare('UPDATE place_cache SET imported = 1 WHERE place_id = ?').run(place.place_id);
+  return Number(info.lastInsertRowid);
 }
 
 /**
@@ -471,7 +509,8 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
       // Before the register call, not after: a trade that has had its share
       // must not cost a request to discover that.
       if (taken(t.trade) >= maxPerTrade) continue;
-      if (cfg.requireNoWebsite && counters.places_requests >= cfg.maxPlacesRequests) break;
+      if ((cfg.requireNoWebsite || cfg.includePlaces)
+          && counters.places_requests >= cfg.maxPlacesRequests) break;
 
       let page;
       try {
@@ -500,6 +539,37 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
         continue;
       }
       covered.add(t.area ? `${t.trade} · ${t.area}` : t.trade);
+
+      // Google-direct source. Fetch Google's own listings for this trade/town
+      // once, and — when the source is on — file the no-website ones straight
+      // as leads. They come WITH a phone, which is the point: these are the
+      // businesses you can actually WhatsApp, and the register alone never
+      // finds them. The same fetch also feeds the register website-check below,
+      // so Google is only called once per town.
+      let placesByName = null;
+      if (cfg.includePlaces && placesConfigured()
+          && counters.places_requests < cfg.maxPlacesRequests) {
+        const pl = await websiteMap(t.trade, t.area, counters);
+        placesByName = pl.byName;
+        for (const row of pl.rows) {
+          if (counters.found >= want) break;
+          if (taken(t.trade) >= maxPerTrade) break;
+          if (row.has_website !== 0) continue;         // no-website businesses only
+          counters.companies_seen++;
+          if (row.has_website === 0 && !row.phone) { counters.no_contact++; continue; }
+          if (cfg.requireMobile && !isMobileNumber(row.phone)) { counters.not_mobile++; continue; }
+          if (db.prepare('SELECT 1 FROM leads WHERE google_place_id = ?').get(row.place_id)) {
+            counters.already_known++; continue;
+          }
+          if (ledgerFor({ business_name: row.display_name, location: t.area })) {
+            counters.already_known++; continue;
+          }
+          importPlaceLead(row, t.trade, t.area);
+          counters.found++;
+          takenPerTrade.set(t.trade, taken(t.trade) + 1);
+        }
+        save();
+      }
 
       // Only spend a Places request on companies we do not already hold.
       //
@@ -547,9 +617,10 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
       // short of posting a letter to a registered office that is often the
       // accountant's.
       const needPlaces = cfg.requireNoWebsite || cfg.requirePhone;
-      const byName = needPlaces
-        ? await websiteMap(t.trade, t.area, counters)
-        : new Map();
+      // Reuse the Google fetch from the direct source above when there was one,
+      // so a town is only looked up on Google once.
+      const byName = placesByName
+        ?? (needPlaces ? (await websiteMap(t.trade, t.area, counters)).byName : new Map());
 
       for (const company of fresh) {
         if (counters.found >= want) break;

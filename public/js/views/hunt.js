@@ -25,17 +25,38 @@ export default async function huntView(root, _p, { refresh }) {
   const last = s.runs[0];
   const short = last && !last.error && last.found < last.target;
 
-  // Why a run came up short, told honestly. The old message always blamed
-  // "the towns are worked through", which is usually the one thing that did
-  // NOT happen: a run stops the moment it hits its per-run budget, with
-  // thousands of trade/town combinations still untried. Saying so — and
-  // naming the exact cap to raise — is the difference between "this is
-  // broken" and "turn this number up".
+  // The funnel, in plain words: of everything the last run looked at, where
+  // did it go? Surfaced on every run, because "1,355 looked at, 1 filed" with
+  // no breakdown reads as broken, when the truth is usually one filter doing
+  // exactly what it was ticked to do.
+  const drops = (r) => {
+    if (!r) return [];
+    const out = [];
+    const add = (n, label) => { if (n > 0) out.push({ n, label }); };
+    add(r.had_website, 'already had a website');
+    add((r.no_contact ?? 0) + (r.not_mobile ?? 0),
+      c.requireMobile ? 'had no mobile on Google' : 'had no phone on Google');
+    add(r.wrong_town, 'registered in another town');
+    add(r.already_known, 'already seen before');
+    return out.sort((a, b) => b.n - a.n);
+  };
+  const lastDrops = drops(last);
+  const funnelLine = last && last.companies_seen
+    ? `Of ${last.companies_seen.toLocaleString()} looked at: ${last.found} filed`
+      + lastDrops.map((d) => ` · ${d.n.toLocaleString()} ${d.label}`).join('')
+    : '';
+
+  // Why a run came up short, told honestly. A run stops the moment it hits its
+  // per-run budget (with thousands of combinations still untried), OR because
+  // one filter discarded almost everything. Name whichever it was — and the
+  // exact control to change — rather than always blaming "worked through".
   let shortReason = '';
   if (short) {
     const areasLeft = s.coverage.total - s.coverage.exhausted;
     const hitPages = (last.register_requests ?? 0) >= c.maxRegisterPages;
     const hitLookups = (last.places_requests ?? 0) >= c.maxPlacesRequests;
+    const phoneDrop = (last.no_contact ?? 0) + (last.not_mobile ?? 0);
+    const biggest = lastDrops[0];
     if (hitPages) {
       shortReason = `It read its limit of ${c.maxRegisterPages} register pages `
         + `and stopped, with ${areasLeft.toLocaleString()} trade/town combinations `
@@ -45,6 +66,20 @@ export default async function huntView(root, _p, { refresh }) {
       shortReason = `It used its budget of ${c.maxPlacesRequests} Google lookups `
         + `and stopped, with ${areasLeft.toLocaleString()} combinations still to try. `
         + 'Raise “Google lookups, max” below and run again (5,000 free a month).';
+    } else if ((c.requirePhone || c.requireMobile) && phoneDrop >= last.found && phoneDrop > 0) {
+      shortReason = `Nearly everything was dropped for having no `
+        + `${c.requireMobile ? 'mobile' : 'phone'} number on Google `
+        + `(${phoneDrop.toLocaleString()} of them). Businesses with no website often `
+        + `aren't on Google at all, so there is no number to read — and this filter `
+        + `then discards them, which is why so few come through. Untick `
+        + `“Only businesses with a phone number”${c.requireMobile ? ' and “only mobiles”' : ''} `
+        + `below, run again, and pull numbers afterwards with Find contacts on the Reach screen.`;
+    } else if (biggest && biggest.label === 'already had a website' && biggest.n >= last.found) {
+      shortReason = `Most already had a website (${biggest.n.toLocaleString()}), which is `
+        + `the filter working — but it leaves fewer to find. Add more towns or trades to reach the target.`;
+    } else if (biggest && biggest.label === 'registered in another town' && biggest.n >= last.found) {
+      shortReason = `Most were registered in a different town (${biggest.n.toLocaleString()}). `
+        + `Check the town spellings match how an address is written, or add a region with the buttons below.`;
     } else if (areasLeft <= 0) {
       shortReason = 'It has worked through every trade and town you listed. '
         + 'Add more towns or trades — worked-through ones re-open after a month.';
@@ -94,6 +129,10 @@ export default async function huntView(root, _p, { refresh }) {
       <div class="msg msg-warn" style="margin-bottom:10px"><div class="grow">
         Last run found ${last.found} of ${last.target}. ${shortReason}
       </div></div>` : ''}
+
+    ${!s.active && funnelLine ? html`
+      <div class="msg msg-info" style="margin-bottom:10px"><div class="grow">
+        ${funnelLine}.</div></div>` : ''}
 
     ${c.enabled && !s.active ? html`
       <div class="msg msg-info" style="margin-bottom:10px"><div class="grow">

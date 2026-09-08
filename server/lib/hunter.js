@@ -34,6 +34,7 @@ import {
 import { normalisePhone } from './handoff.js';
 import { recordFound, knownCompanyNumbers } from './recontact.js';
 import { nextAssignee } from './assign.js';
+import { expandAreas } from './towns.js';
 
 const PAGE = 100;
 /** Re-open an exhausted trade/town after this long; new companies incorporate. */
@@ -49,7 +50,10 @@ export function huntConfig() {
   return {
     enabled: getSetting('hunt_enabled', '0') === '1',
     trades: lines(getSetting('hunt_trades', '')),
-    areas: lines(getSetting('hunt_areas', getSetting('default_areas', ''))),
+    // A region typed by hand ('West Midlands') becomes its towns, so the
+    // register and town checks — which work on towns, not counties — actually
+    // match. Without this, a whole-region line finds almost nobody.
+    areas: expandAreas(lines(getSetting('hunt_areas', getSetting('default_areas', '')))),
     target: num('hunt_daily_target', 15),
     hour: num('hunt_hour', 8),
     maxPlacesRequests: num('hunt_max_places_requests', 120),

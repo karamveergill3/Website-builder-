@@ -11,7 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const { REGIONS, regionList, townsFor, mergeTowns } =
+const { REGIONS, regionList, townsFor, mergeTowns, regionTownsForName, expandAreas } =
   await import('../server/lib/towns.js');
 
 test('every region has a key, a label and towns', () => {
@@ -140,4 +140,32 @@ test('merging tolerates empty and missing input', () => {
   assert.deepEqual(mergeTowns(), []);
   assert.deepEqual(mergeTowns(['Stafford']), ['Stafford']);
   assert.deepEqual(mergeTowns([], ['', '   ']), [], 'blank lines are not towns');
+});
+
+/* ------------------------------------------- region names typed by hand */
+
+test('a region name resolves to its towns', () => {
+  assert.deepEqual(regionTownsForName('West Midlands'), townsFor('west-midlands'));
+  assert.deepEqual(regionTownsForName('west midlands'), townsFor('west-midlands'), 'loosely matched');
+  assert.deepEqual(regionTownsForName('Staffordshire'), townsFor('staffordshire'));
+  assert.deepEqual(regionTownsForName('west-midlands'), townsFor('west-midlands'), 'the key works too');
+  assert.equal(regionTownsForName('Stafford'), null, 'a town is not a region');
+  assert.equal(regionTownsForName(''), null);
+});
+
+test('expandAreas turns a typed region into its towns', () => {
+  // This is the bug behind "80 trades, 5 companies": a whole-region line was
+  // sent to the register as one location and the town check then binned it.
+  const out = expandAreas(['West Midlands', 'Stafford']);
+  assert.ok(out.includes('Birmingham'), 'the region became its towns');
+  assert.ok(out.includes('Wolverhampton'));
+  assert.ok(out.includes('Stafford'), 'a genuine town is kept');
+  assert.ok(!out.includes('West Midlands'), 'the region name itself is gone');
+});
+
+test('expandAreas leaves plain towns alone and de-dupes', () => {
+  assert.deepEqual(expandAreas(['Stafford', 'Rugeley']), ['Stafford', 'Rugeley']);
+  // Stafford is in the Staffordshire preset, so it must not appear twice.
+  const out = expandAreas(['Stafford', 'Staffordshire']);
+  assert.equal(out.filter((t) => t.toLowerCase() === 'stafford').length, 1);
 });

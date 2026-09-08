@@ -6,7 +6,7 @@ process.env.GOOGLE_MAPS_API_KEY = 'test-places-key';
 
 const { get, post, patch, put, del, teardown } = await import('./helpers.js');
 const { db } = await import('../server/db.js');
-const { judge, spreadByTrade, sameTown } = await import('../server/lib/hunter.js');
+const { judge, spreadByTrade, sameTown, huntConfig } = await import('../server/lib/hunter.js');
 const { normaliseName } = await import('../server/lib/companies-house.js');
 
 test.after(teardown);
@@ -963,6 +963,19 @@ test('a missing town on either side is not treated as a mismatch', () => {
   assert.equal(sameTown('Stafford', null), true);
   assert.equal(sameTown('Stafford', ''), true);
   assert.equal(sameTown('', ''), true);
+});
+
+test('the hunt expands a region typed in the areas box into towns', async () => {
+  // The "80 trades, 5 companies" bug: a whole region as one location line
+  // matches almost nobody, because the town check bins everything whose
+  // locality is not literally "West Midlands". huntConfig now expands it.
+  await configure({ hunt_areas: 'West Midlands\nStafford' });
+  const { areas } = huntConfig();
+  assert.ok(areas.includes('Birmingham'), 'the region became real towns');
+  assert.ok(areas.includes('Wolverhampton'));
+  assert.ok(areas.includes('Stafford'), 'a genuine town is kept');
+  assert.ok(!areas.includes('West Midlands'), 'the un-searchable region line is gone');
+  await configure(); // restore the default single-town setup for later tests
 });
 
 test('the hunt files only companies actually in the town, and counts the rest', async () => {

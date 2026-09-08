@@ -208,3 +208,45 @@ export function mergeTowns(existing = [], adding = []) {
   }
   return out;
 }
+
+const regionKey = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/**
+ * If this typed area is really a whole region — 'West Midlands',
+ * 'Staffordshire', or a region key — return its towns; otherwise null.
+ * Matched loosely (case- and punctuation-insensitively) so 'west midlands'
+ * and 'West-Midlands' both resolve.
+ */
+export function regionTownsForName(name) {
+  const k = regionKey(name);
+  if (!k) return null;
+  const region = REGIONS.find((r) => regionKey(r.label) === k || regionKey(r.key) === k);
+  return region ? [...region.towns] : null;
+}
+
+/**
+ * Turn what the user put in the Hunt's areas box into actual towns to search.
+ *
+ * The Companies House location filter and the town check both work on TOWNS —
+ * 'Birmingham', 'Wolverhampton' — not counties. Typing a whole region like
+ * 'West Midlands' as one line matches almost nothing (no town's name starts
+ * with "West"), so the run comes back nearly empty. The region-preset buttons
+ * expand for you; this does the same for a region name typed by hand, so
+ * either way the hunt searches real towns. Anything that is not a known region
+ * is passed through unchanged, and duplicates are dropped.
+ */
+export function expandAreas(areas = []) {
+  const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const seen = new Set();
+  const out = [];
+  const push = (t) => {
+    const k = norm(t);
+    if (k && !seen.has(k)) { seen.add(k); out.push(t); }
+  };
+  for (const area of areas) {
+    const towns = regionTownsForName(area);
+    if (towns) towns.forEach(push);
+    else push(area);
+  }
+  return out;
+}

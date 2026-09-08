@@ -4,6 +4,11 @@ This turns the tool from something on one laptop into a shared hub your reps
 reach from anywhere — their own phones included — for free. One PC runs it;
 everyone else just opens a link and signs in.
 
+> **Want it online even when your PC is off?** This page covers running the hub
+> from your own PC (it's offline whenever the PC sleeps). To put it on a free
+> server that stays on 24/7 at a permanent link, follow **[DEPLOY.md](DEPLOY.md)**
+> instead — same app, same logins, but always reachable.
+
 Everyone who signs in shares one lead pool and one "already contacted"
 memory, so no business is ever approached twice across the team. Each rep
 uses their own phone for WhatsApp; the emails carry the Keylo Studios name.

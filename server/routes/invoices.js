@@ -11,9 +11,11 @@ import { wrap, badRequest, notFound, str, int, bool } from '../lib/http.js';
 import {
   createClient, listClients,
   createInvoice, getInvoice, listInvoices, markSent, markPaid, voidInvoice,
-  createMaintenancePlan, listPlans, setPlanActive, billPlan,
+  createMaintenancePlan, listPlans, setPlanActive, billPlan, getPlan,
+  ensurePlanToken, startPlanDirectDebit,
   toPence,
 } from '../lib/invoicing.js';
+import { configured as gcConfigured, createMandateFlow } from '../lib/gocardless.js';
 import { db } from '../db.js';
 
 const router = Router();
@@ -157,6 +159,37 @@ router.post('/maintenance/plans/:id/active', wrap((req, res) => {
 router.post('/maintenance/plans/:id/bill', wrap((req, res) => {
   const invoice = billPlan(int(req.params.id), { created_by: req.user?.id ?? null });
   res.status(201).json({ invoice });
+}));
+
+/**
+ * Set a plan up for Direct Debit (GoCardless). Creates an authorisation flow
+ * and hands back the link to send the client. They fill in their bank details
+ * on GoCardless's own page; on their return we finish the mandate and start the
+ * monthly collection (see GET /dd/:token/return in index.js). Env-gated: with
+ * no GOCARDLESS_ACCESS_TOKEN set, the option never appears in the UI and this
+ * route says so plainly.
+ */
+router.post('/maintenance/plans/:id/direct-debit', wrap(async (req, res) => {
+  if (!gcConfigured()) {
+    throw badRequest('Direct Debit is not connected. Add GOCARDLESS_ACCESS_TOKEN in .env.');
+  }
+  const plan = getPlan(int(req.params.id));
+  if (!plan) throw notFound('Plan not found');
+  if (plan.dd_status === 'active') throw badRequest('This plan is already on Direct Debit.');
+
+  const proto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim()
+    || (req.secure ? 'https' : 'http');
+  const base = `${proto}://${req.get('host')}`;
+  const client = db.prepare('SELECT name FROM clients WHERE id = ?').get(plan.client_id);
+
+  const token = ensurePlanToken(plan.id);
+  const flow = await createMandateFlow({
+    returnUrl: `${base}/dd/${token}/return`,
+    exitUrl: `${base}/dd/${token}/return`,
+    name: client?.name,
+  });
+  startPlanDirectDebit(plan.id, { billingRequestId: flow.billingRequestId });
+  res.json({ authorisation_url: flow.authorisationUrl });
 }));
 
 export default router;

@@ -15,9 +15,11 @@ import mockups, { MOCKUP_ROOT } from './routes/mockups.js';
 import { seedIdentityFromEnv } from './lib/identity.js';
 import authRouter from './routes/auth.js';
 import invoices from './routes/invoices.js';
-import { getInvoiceByToken, renderInvoicePage, setPayPalOrder, setStripeSession, markPaid } from './lib/invoicing.js';
+import { getInvoiceByToken, renderInvoicePage, setPayPalOrder, setStripeSession, markPaid,
+  getPlanByToken, activatePlanDirectDebit } from './lib/invoicing.js';
 import { configured as paypalConfigured, createOrder, captureOrder, PayPalError } from './lib/paypal.js';
 import { configured as stripeConfigured, createCheckoutSession, retrieveSession, StripeError } from './lib/stripe.js';
+import { configured as gcConfigured, mandateFor, createSubscription, GoCardlessError } from './lib/gocardless.js';
 import { userForToken, readCookie, SESSION_COOKIE } from './lib/auth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -244,6 +246,85 @@ app.get('/i/:token/stripe/return', async (req, res) => {
     console.error('[stripe] retrieve:', err.message);
   }
   res.redirect(`/i/${invoice.token}`);
+});
+
+/* ---------------------------------------------------- Direct Debit return */
+
+/** A small, script-free branded page for the Direct Debit outcome. */
+function ddPage(heading, message) {
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">`
+    + `<meta name="viewport" content="width=device-width, initial-scale=1">`
+    + `<title>${esc(heading)}</title><style>`
+    + `body{margin:0;font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;`
+    + `background:#0b1b33;color:#e9eef7;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px}`
+    + `.card{background:#fff;color:#12233f;max-width:460px;width:100%;border-radius:16px;padding:36px 32px;`
+    + `box-shadow:0 24px 60px rgba(0,0,0,.35);text-align:center}`
+    + `.mark{font-size:34px;font-weight:800;color:#0b1b33;letter-spacing:.02em}`
+    + `.mark span{color:#c8a24b}`
+    + `h1{font-size:22px;margin:18px 0 8px}p{margin:0;color:#4a5a72}`
+    + `</style></head><body><div class="card">`
+    + `<div class="mark"><span>&lt;</span> KEYLO STUDIOS</div>`
+    + `<h1>${esc(heading)}</h1><p>${esc(message)}</p></div></body></html>`;
+}
+
+function ddHeaders(res) {
+  res.setHeader('Content-Security-Policy',
+    "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'");
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+  res.setHeader('Cache-Control', 'no-store');
+}
+
+/**
+ * GoCardless returns the client here after they authorise (or leave) the Direct
+ * Debit. Public and outside the login — the unguessable plan token is what
+ * matches the return to the right plan. We fulfil the mandate, create the
+ * monthly subscription for the plan amount, and mark the plan active. Safe to
+ * hit twice: once a subscription exists we just show the confirmation again.
+ */
+app.get('/dd/:token/return', async (req, res) => {
+  ddHeaders(res);
+  const plan = getPlanByToken(req.params.token);
+  if (!plan) { res.status(404).type('html').send(ddPage('Not found', 'This Direct Debit link is not valid.')); return; }
+
+  // Already set up (e.g. a refresh) — show the confirmation, do nothing more.
+  if (plan.gc_subscription_id) {
+    res.type('html').send(ddPage('Direct Debit set up', 'Your monthly payment is all set. Thank you.'));
+    return;
+  }
+  if (!gcConfigured() || !plan.gc_billing_request_id) {
+    res.type('html').send(ddPage('Nothing to confirm',
+      'We could not find a Direct Debit in progress. Please use the link we sent you again.'));
+    return;
+  }
+
+  try {
+    const { mandateId } = await mandateFor(plan.gc_billing_request_id);
+    if (!mandateId) {
+      // The client exited before finishing, or the bank has not confirmed yet.
+      res.type('html').send(ddPage('Not completed',
+        'It looks like the Direct Debit was not finished. Please use the link we sent you to try again.'));
+      return;
+    }
+    const day = Math.min(28, Math.max(1, Number(String(plan.started_on ?? '').slice(8, 10)) || 1));
+    const { subscriptionId } = await createSubscription({
+      mandateId,
+      pence: plan.monthly_pence,
+      name: plan.description,
+      dayOfMonth: day,
+      idempotencyKey: plan.dd_token,
+    });
+    activatePlanDirectDebit(plan.id, { mandateId, subscriptionId });
+    res.type('html').send(ddPage('Direct Debit set up',
+      'Your monthly payment is all set and will be collected automatically. Thank you.'));
+  } catch (err) {
+    console.error('[gocardless] return:', err.message);
+    res.status(err instanceof GoCardlessError ? err.status : 502).type('html').send(ddPage(
+      'Something went wrong', 'We could not finish setting up your Direct Debit. Please try again shortly.'));
+  }
 });
 
 app.use('/m', (_req, res, next) => {

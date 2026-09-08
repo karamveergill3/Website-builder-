@@ -116,6 +116,9 @@ test('every outbound host is one of the services this tool uses', () => {
     // Stripe's REST API, used by automated Stripe Checkout (card / Klarna /
     // Clearpay). One host for both test and live — the key prefix decides which.
     'api.stripe.com',
+    // GoCardless's REST API, used by Direct Debit for maintenance plans. The
+    // token prefix (live_ vs sandbox_) decides which host is called.
+    'api.gocardless.com', 'api-sandbox.gocardless.com',
   ]);
 
   const found = new Set();

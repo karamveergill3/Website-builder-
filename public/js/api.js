@@ -90,6 +90,7 @@ export const api = {
     addPlan:  (body)       => request('POST', '/api/invoices/maintenance/plans', body),
     billPlan: (id)         => request('POST', `/api/invoices/maintenance/plans/${id}/bill`, {}),
     setPlan:  (id, active) => request('POST', `/api/invoices/maintenance/plans/${id}/active`, { active }),
+    directDebit: (id)      => request('POST', `/api/invoices/maintenance/plans/${id}/direct-debit`, {}),
   },
   auth: {
     status:   ()             => request('GET',  '/api/auth/status'),

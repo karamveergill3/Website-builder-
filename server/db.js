@@ -1345,6 +1345,21 @@ Thanks so much, and have a lovely day.
       ALTER TABLE invoices ADD COLUMN deposit_pence INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    name: '036_maintenance_direct_debit',
+    up: `
+      -- Direct Debit (GoCardless) for a maintenance plan. dd_token is the
+      -- unguessable id in the client's authorisation return URL; the gc_* ids
+      -- are the GoCardless billing request, mandate and monthly subscription.
+      -- dd_status: none -> pending (link sent, awaiting authorisation) ->
+      -- active (mandate authorised, subscription collecting).
+      ALTER TABLE maintenance_plans ADD COLUMN dd_token TEXT;
+      ALTER TABLE maintenance_plans ADD COLUMN gc_billing_request_id TEXT;
+      ALTER TABLE maintenance_plans ADD COLUMN gc_mandate_id TEXT;
+      ALTER TABLE maintenance_plans ADD COLUMN gc_subscription_id TEXT;
+      ALTER TABLE maintenance_plans ADD COLUMN dd_status TEXT NOT NULL DEFAULT 'none';
+    `,
+  },
 ];
 
 function migrate() {

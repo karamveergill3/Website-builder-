@@ -7,6 +7,13 @@ const gbp = (pence) => new Intl.NumberFormat('en-GB', { style: 'currency', curre
 
 const clientLink = (inv) => `${location.origin}/i/${inv.token}`;
 
+/** The Direct Debit column for a plan row. */
+function ddStatusCell(p) {
+  if (p.dd_status === 'active') return html`<span class="flag" data-ok>on Direct Debit</span>`;
+  if (p.dd_status === 'pending') return html`<span class="flag">awaiting client</span>`;
+  return html`<span class="meta">—</span>`;
+}
+
 async function copy(text) {
   try { await navigator.clipboard.writeText(text); return true; } catch { /* insecure ctx */ }
   const ta = document.createElement('textarea');
@@ -170,6 +177,7 @@ export default async function invoicesView(root, _params, { refresh }) {
   ]);
   const clients = (await api.invoices.clients().catch(() => ({ clients: [] }))).clients;
   const s = settings.settings ?? {};
+  const ddOn = settings.integrations?.direct_debit_configured === true;
 
   const due = (i) => i.amount_due_pence ?? i.total_pence;
   const outstanding = invoices.filter((i) => i.status === 'sent')
@@ -237,16 +245,20 @@ export default async function invoicesView(root, _params, { refresh }) {
       ${plans.length === 0 ? html`<div class="blank"><strong>No plans</strong>
         A plan bills a client the same amount each month.</div>` : html`
         <div class="scroll-x"><table class="rows">
-          <thead><tr><th>Client</th><th class="num">Monthly</th><th>Status</th><th class="nw">Next due</th><th></th></tr></thead>
+          <thead><tr><th>Client</th><th class="num">Monthly</th><th>Status</th><th>Direct Debit</th><th class="nw">Next due</th><th></th></tr></thead>
           <tbody>
             ${plans.map((p) => html`
               <tr data-plan="${p.id}" style="${p.active ? '' : 'opacity:.55'}">
                 <td class="c-name"><span class="name">${p.client_name}</span></td>
                 <td class="num">${gbp(p.monthly_pence)}</td>
                 <td>${p.active ? html`<span class="flag" data-ok>active</span>` : 'paused'}</td>
+                <td>${ddStatusCell(p)}</td>
                 <td class="meta nw">${p.next_due_on ?? '—'}</td>
                 <td class="c-act">
-                  ${p.active ? html`<button class="mini" data-act="bill" data-id="${p.id}">Bill this month</button>` : ''}
+                  ${p.active && p.dd_status !== 'active'
+                    ? html`<button class="mini" data-act="bill" data-id="${p.id}">Bill this month</button>` : ''}
+                  ${ddOn && p.dd_status !== 'active'
+                    ? html`<button class="mini" data-act="dd" data-id="${p.id}">${p.dd_status === 'pending' ? 'Resend Direct Debit' : 'Set up Direct Debit'}</button>` : ''}
                   <button class="mini" data-act="toggle-plan" data-id="${p.id}" data-active="${p.active ? '0' : '1'}">
                     ${p.active ? 'Pause' : 'Resume'}</button>
                 </td>
@@ -368,6 +380,34 @@ export default async function invoicesView(root, _params, { refresh }) {
 
   on(root, 'click', '[data-act="toggle-plan"]', async (_e, el) => {
     await api.invoices.setPlan(el.dataset.id, el.dataset.active === '1');
+    refresh();
+  });
+
+  on(root, 'click', '[data-act="dd"]', async (_e, el) => {
+    let res;
+    try {
+      res = await api.invoices.directDebit(el.dataset.id);
+    } catch (err) { toast(err.message, { error: true, ms: 6000 }); return; }
+    const link = res.authorisation_url;
+    await modal({
+      title: 'Direct Debit link ready',
+      body: html`
+        <p class="meta">Send this secure link to the client. They enter their bank
+        details on GoCardless's own page (we never see them), and from then on the
+        monthly payment is collected automatically. Nothing to chase.</p>
+        <div class="f"><label>Client link</label>
+          <input id="dd-link" readonly value="${link}" style="font-family:ui-monospace,monospace"></div>`,
+      footer: html`
+        <button type="button" class="primary" data-copy>Copy link</button>
+        <button type="button" data-close>Done</button>`,
+      onMount(r) {
+        const input = $('#dd-link', r);
+        input?.focus(); input?.select();
+        $('[data-copy]', r)?.addEventListener('click', async () => {
+          if (await copy(link)) toast('Link copied');
+        });
+      },
+    });
     refresh();
   });
 

@@ -251,6 +251,39 @@ export function setPlanActive(id, active) {
   return getPlan(id);
 }
 
+export const getPlanByToken = (token) =>
+  db.prepare('SELECT * FROM maintenance_plans WHERE dd_token = ?').get(String(token ?? '')) ?? null;
+
+/** Give the plan an unguessable token for the client's Direct Debit return
+ * URL (once), returning it. Generated before the GoCardless flow so the return
+ * URL can carry it. */
+export function ensurePlanToken(id) {
+  const plan = getPlan(id);
+  if (!plan) throw notFoundErr('Plan not found.');
+  if (plan.dd_token) return plan.dd_token;
+  const token = randomBytes(16).toString('hex');
+  db.prepare('UPDATE maintenance_plans SET dd_token = ? WHERE id = ?').run(token, id);
+  return token;
+}
+
+/** Begin Direct Debit setup: remember the GoCardless billing request and mark
+ * the plan pending (awaiting the client's authorisation). */
+export function startPlanDirectDebit(id, { billingRequestId } = {}) {
+  db.prepare(
+    "UPDATE maintenance_plans SET gc_billing_request_id = ?, dd_status = 'pending' WHERE id = ?"
+  ).run(String(billingRequestId), id);
+  return getPlan(id);
+}
+
+/** Finish Direct Debit setup: store the mandate and monthly subscription and
+ * mark the plan active (GoCardless now collects on its own). */
+export function activatePlanDirectDebit(id, { mandateId, subscriptionId } = {}) {
+  db.prepare(
+    "UPDATE maintenance_plans SET gc_mandate_id = ?, gc_subscription_id = ?, dd_status = 'active' WHERE id = ?"
+  ).run(String(mandateId), String(subscriptionId), id);
+  return getPlan(id);
+}
+
 /**
  * Raise this month's maintenance invoice for a plan and advance next_due_on by
  * a month. Idempotent-ish: refuses if the plan already has an invoice dated in

@@ -1077,6 +1077,138 @@ If you'd rather I didn't message again, just say and I won't.`,
       }
     },
   },
+  {
+    name: '032_drop_the_question',
+    // The first warm rewrite (031) still opened WhatsApp/SMS with "Hi, is this
+    // {{business}}?" — but we already know who they are, so asking reads weak
+    // and a little robotic. Open confidently instead, introducing the sender
+    // and naming the business in the first line. Only rewrites a body still
+    // holding the 031 text, so a hand-edited one is left alone. Runs after 031,
+    // so a database that skipped straight from the original text to the newest
+    // (via 031) simply sees this as a no-op.
+    run: () => {
+      const OLD = {
+        'First message — WhatsApp':
+`Hi, is this {{business}}?
+
+My name is {{my_name}} and I'm from {{my_business}}. I came across you while looking around {{location}} and noticed you don't have a website yet, so I thought I'd reach out and say hello.
+
+We build simple, great looking one page websites for local businesses. Just a clear page with what you do, a few photos, and a button so people can call or message you straight from their phone.
+
+I'd be really happy to put together a free mock up for {{business}} so you can see exactly how it could look, with no cost and no obligation at all.
+
+Would that be something you'd like me to do for you?
+
+Thanks so much, and have a great day.
+{{my_name}}, {{my_business}}
+
+(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
+        'First message — WhatsApp · Salons & beauty':
+`Hi, is this {{business}}?
+
+My name is {{my_name}} and I'm from {{my_business}}. I came across you in {{location}} and noticed you don't have a website yet. For a salon that's so often the first place a new client looks before they book, so I wanted to reach out.
+
+We build simple, beautiful one page websites: your treatments, lovely photos of your work, and a button so someone can call or book you straight from their phone. They're really easy to keep updated too.
+
+I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
+
+Would you like me to do that for you?
+
+Thanks so much, and have a lovely day.
+{{my_name}}, {{my_business}}
+
+(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
+        'First message — WhatsApp · Trades':
+`Hi, is this {{business}}?
+
+My name is {{my_name}} and I'm from {{my_business}}. I came across you in {{location}} and noticed you don't have a website yet, so I thought I'd get in touch.
+
+For a trade, most people just want to see a few jobs you've done and be able to tap to call. That's exactly what we build: a clean one page site with photos of your work, the areas you cover, and a call button, so new customers can find you and get straight through.
+
+I'd be happy to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
+
+Would you like me to do that for you?
+
+Cheers, and all the best with the work.
+{{my_name}}, {{my_business}}
+
+(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
+        'First message — WhatsApp · Food & drink':
+`Hi, is this {{business}}?
+
+My name is {{my_name}} and I'm from {{my_business}}. I came across you in {{location}} and noticed you don't have a website yet, so I wanted to say hello.
+
+For a place like yours, a website is usually where people check the menu, your opening hours and how to order, so it can make a real difference. We build simple, tasty looking one page sites with your menu, a few photos and a tap to call button.
+
+I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
+
+Would you like me to do that for you?
+
+Thanks so much, and hope you're keeping busy.
+{{my_name}}, {{my_business}}
+
+(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
+        'First message — WhatsApp · Motor':
+`Hi, is this {{business}}?
+
+My name is {{my_name}} and I'm from {{my_business}}. I came across you in {{location}} and noticed you don't have a website yet, so I thought I'd reach out.
+
+For a garage, a website is where people check what you do and book their car in. We build simple, straightforward one page sites with your services, your opening hours and a tap to call button, so customers can find you and get booked in easily.
+
+I'd be happy to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
+
+Would you like me to do that for you?
+
+Cheers, and all the best.
+{{my_name}}, {{my_business}}
+
+(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
+        'First message — WhatsApp · Health & fitness':
+`Hi, is this {{business}}?
+
+My name is {{my_name}} and I'm from {{my_business}}. I came across you in {{location}} and noticed you don't have a website yet, so I wanted to introduce myself.
+
+For somewhere like yours, a website is usually the first place people look before they commit to booking. We build simple, welcoming one page sites with what you offer, your prices or timetable, and a tap to book or call button.
+
+I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
+
+Would you like me to do that for you?
+
+Thanks so much, and have a great day.
+{{my_name}}, {{my_business}}
+
+(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
+        'First message — WhatsApp · Shops':
+`Hi, is this {{business}}?
+
+My name is {{my_name}} and I'm from {{my_business}}. I came across you in {{location}} and noticed you don't have a website yet, so I thought I'd say hello.
+
+For a shop, a website is where people check what you stock, where you are and when you're open. We build simple, welcoming one page sites with photos, your location and a tap to call button, so new customers can find you easily.
+
+I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
+
+Would you like me to do that for you?
+
+Thanks so much, and have a lovely day.
+{{my_name}}, {{my_business}}
+
+(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)`,
+        'First message — SMS':
+`Hi, is this {{business}}? I'm {{my_name}} from {{my_business}}. I noticed you don't have a website yet, and I'd be happy to build you a free one page mock up to look at, with no obligation. Would you like me to put one together? If it's not for you, just let me know and I won't message again.`,
+      };
+
+      const byName = new Map(STARTERS.map((s) => [s.name, s]));
+      const now = new Date().toISOString();
+      for (const [name, oldBody] of Object.entries(OLD)) {
+        const cur = db.prepare('SELECT id, body FROM templates WHERE name = ?').get(name);
+        const next = byName.get(name);
+        if (cur && next && cur.body === oldBody) {
+          db.prepare('UPDATE templates SET subject = ?, body = ?, updated_at = ? WHERE id = ?')
+            .run(next.subject, next.body, now, cur.id);
+        }
+      }
+    },
+  },
 ];
 
 function migrate() {

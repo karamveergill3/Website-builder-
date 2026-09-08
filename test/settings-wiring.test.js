@@ -41,7 +41,7 @@ test('every settings field on a form is a key the server will accept', () => {
   for (const file of viewFiles) {
     for (const name of namedFields(file)) {
       // Only the settings namespaces; forms post plenty of other things.
-      if (!/^(hunt|biz|gmail|window|warmup|daily|send|spam|verify|domain|list|default|optout|marketing|source)_/.test(name)) continue;
+      if (!/^(hunt|biz|gmail|window|warmup|daily|send|spam|verify|domain|list|default|optout|marketing|source|invoice|pay)_/.test(name)) continue;
       assert.ok(ALLOWED_KEYS.has(name),
         `${file}: "${name}" is on a form but not in ALLOWED_KEYS — the PUT `
         + 'carrying it will be rejected, taking every other field with it');

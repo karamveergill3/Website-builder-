@@ -14,6 +14,7 @@ import outboxView    from './views/outbox.js';
 import complianceView from './views/compliance.js';
 import repliesView   from './views/replies.js';
 import teamView, { loginView, setupView, openAccount } from './views/auth.js';
+import invoicesView from './views/invoices.js';
 import { api } from './api.js';
 
 const ROUTES = {
@@ -30,6 +31,7 @@ const ROUTES = {
   '/settings':  settingsView,
   '/compliance': complianceView,
   '/deliverability': deliverView,
+  '/invoices':  invoicesView,
   '/team':      teamView,
 };
 

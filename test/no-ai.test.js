@@ -107,6 +107,12 @@ test('every outbound host is one of the services this tool uses', () => {
     // Appears only in the install instructions inside a comment. The tool
     // never calls it: Ollama is reached at 127.0.0.1, enforced below.
     'ollama.com',
+    // Invoicing / payments. paypal.me is the pay-link format shown to a
+    // client on an invoice; the api-m hosts are PayPal's REST API used by
+    // automated PayPal Checkout (Phase B). Cloudflare's cloudflared is how
+    // the team hub is reached from anywhere (a quick tunnel), not called by
+    // the server.
+    'paypal.me', 'www.paypal.com', 'api-m.paypal.com', 'api-m.sandbox.paypal.com',
   ]);
 
   const found = new Set();

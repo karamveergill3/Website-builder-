@@ -133,10 +133,19 @@ function interpret(status, body) {
       break;
   }
 
-  // A 403 carrying no ErrorInfo is the "no API key sent at all" case.
+  // A 403 with no ErrorInfo reason. A key IS always sent (apiKey() throws
+  // before the request otherwise), so this is not "no key" — it is Google
+  // refusing the caller, which for Places API (New) almost always means the
+  // API is not enabled on the key's project, or the key is wrong/for another
+  // project. Google's own words ("unregistered caller" / "missing a valid API
+  // key") are the most useful part, so pass them through.
   if (status === 403 && !reason) {
-    return of('No API key reached Google. Check GOOGLE_MAPS_API_KEY is set and the server ' +
-              'was restarted after setting it.', 'NO_API_KEY', { status: 503 });
+    return of(
+      `Google refused the request (it said: "${message}"). The key is being sent, so this is `
+      + 'almost always because "Places API (New)" is not enabled on the key\'s Google Cloud '
+      + 'project (or billing is off), or the key belongs to a different project. Enable '
+      + 'Places API (New) and billing, or paste a fresh key from that project.',
+      'NO_API_KEY', { status: 503 });
   }
   if (status === 400 && /field mask/i.test(message)) {
     return of(`Invalid field mask: ${message}`, 'BAD_FIELD_MASK', { status: 500 });

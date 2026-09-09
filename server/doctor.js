@@ -155,8 +155,12 @@ async function checkPlaces() {
         + 'space is the usual cause. Check there is no # at the start of the '
         + 'line in .env.',
       NO_API_KEY:
-        'The key never reached Google. Check the line in .env reads '
-        + 'GOOGLE_MAPS_API_KEY=... with no quotes and no spaces around the =.',
+        `Your key IS loaded and was sent — Google refused it as an unregistered `
+        + `caller. That is not a .env problem. Almost always it means "Places API `
+        + `(New)" is not enabled on the key's project: ${CONSOLE} → make sure the `
+        + `project in the top bar owns this key → search "Places API (New)" → Enable, `
+        + `and check Billing has a card. If it still fails, the key is for a different `
+        + `project or is wrong — create a fresh key in the right project and paste that.`,
       QUOTA_EXHAUSTED:
         'The allocation is spent for now. Nothing to fix in the tool.',
       RATE_LIMITED: 'Too many requests just now — wait a moment and run again.',

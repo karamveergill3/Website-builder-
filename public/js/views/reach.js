@@ -327,7 +327,7 @@ function messagePanel(state) {
           </select>
           ${!forChannel.length ? html`
             <p class="tip">No ${CHANNEL_LABEL[channel]} templates yet.
-              <a href="#/templates" data-act="tpl-hop">Add one</a> — same placeholders as email.</p>` : ''}
+              <a href="#/templates" data-act="tpl-hop">Add the starters</a> on the Templates screen.</p>` : ''}
         </div>
         <div class="f">
           <label for="reach-text">Text</label>

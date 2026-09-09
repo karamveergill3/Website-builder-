@@ -125,10 +125,9 @@ export default async function templatesView(root, _p, { refresh }) {
     <div class="bar">
       <h2>Templates</h2>
       <div class="grow"></div>
-      <button data-act="starters" title="Puts back any of the shipped messages you have deleted">
+      <button class="primary" data-act="starters" title="Puts back any of the shipped messages you have deleted">
         ${templates.length === 0 ? 'Add the starters' : 'Restore missing starters'}
       </button>
-      <button class="primary" data-act="new">New template</button>
     </div>
 
     ${templates.length === 0 ? html`
@@ -163,8 +162,6 @@ export default async function templatesView(root, _p, { refresh }) {
           </div>
         </div>`)}`)}
   `);
-
-  on(root, 'click', '[data-act="new"]', async () => { if (await openEditor(null, me)) refresh(); });
 
   on(root, 'click', '[data-act="edit"]', async (_e, el) => {
     const t = templates.find((x) => String(x.id) === el.dataset.id);

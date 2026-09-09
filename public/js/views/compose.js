@@ -52,7 +52,7 @@ export default async function composeView(root, params, { navigate }) {
       <div class="bar"><h2>Compose</h2></div>
       <div class="panel"><div class="blank">
         <strong>${needTemplate ? 'No email templates yet' : 'No leads yet'}</strong>
-        <a href="${needTemplate ? '#/templates' : '#/leads'}">${needTemplate ? 'Write one, or add the starters' : 'Add a lead'}</a>
+        <a href="${needTemplate ? '#/templates' : '#/leads'}">${needTemplate ? 'Add the starters' : 'Add a lead'}</a>
       </div></div>`);
     return;
   }

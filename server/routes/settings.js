@@ -23,7 +23,7 @@ export const ALLOWED_KEYS = new Set([
   'daily_cap', 'send_delay_seconds', 'send_delay_min_seconds', 'send_delay_max_seconds',
   'warmup_enabled', 'window_enabled', 'window_start_hour', 'window_end_hour',
   'window_weekdays_only', 'domain_cooldown_days', 'list_unsubscribe_enabled',
-  'verify_addresses', 'spam_check_enabled', 'outreach_allow_uncleared',
+  'verify_addresses', 'spam_check_enabled',
   // Daily hunt
   'hunt_enabled', 'hunt_trades', 'hunt_areas', 'hunt_daily_target', 'hunt_hour',
   'hunt_max_places_requests', 'hunt_max_register_pages', 'hunt_max_per_trade',
@@ -91,10 +91,6 @@ export const DEFAULTS = {
   // no-website ones (with their phone). This is what finds contactable,
   // WhatsApp-able leads; the register alone mostly finds firms with no number.
   hunt_include_places: '1',
-  // Off by default, and deliberately so: the corporate-only PECR gate on
-  // WhatsApp/SMS/calls protects the owner. Turning this on lets them message
-  // any business regardless of legal form — their risk to take, not a default.
-  outreach_allow_uncleared: '0',
   // Invoicing
   invoice_prefix: 'INV',
   invoice_terms: 'Payment is due within 24 hours of the invoice date.',

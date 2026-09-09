@@ -10,7 +10,7 @@
  */
 
 import { Router } from 'express';
-import { db, getSetting } from '../db.js';
+import { db } from '../db.js';
 import { wrap, badRequest, notFound, nowIso, requiredStr } from '../lib/http.js';
 import { sendability } from '../lib/pecr.js';
 import { recontactCheck, recordContact } from '../lib/recontact.js';
@@ -193,9 +193,6 @@ router.post('/outreach/prepare', wrap((req, res) => {
   const verdict = sendability(lead, {
     channel,
     suppressed: isSuppressed(lead.email),
-    // Owner override: message any business regardless of legal form. Still
-    // never lifts opt-out or suppression — those are the recipient's own "no".
-    allowUncleared: getSetting('outreach_allow_uncleared', '0') === '1',
   });
   if (!verdict.allowed) {
     return res.status(422).json({

@@ -33,10 +33,6 @@ export async function openReachDialog(leadId) {
   const lead = await api.leads.get(leadId);
   const leadRow = lead.lead ?? lead;
   const templates = (await api.templates.list()).templates;
-  // Owner override: message any business regardless of legal form. When on,
-  // the WhatsApp/SMS/call buttons open for sole traders and unchecked leads too.
-  const settings = (await api.settings.get().catch(() => ({}))).settings ?? {};
-  const allowUncleared = settings.outreach_allow_uncleared === '1';
   // Default channel picks itself from what the lead actually has. Hunt
   // leads have no website AND usually no email; they arrive with a phone
   // from Google Places, so WhatsApp / call are the honest default.
@@ -47,7 +43,6 @@ export async function openReachDialog(leadId) {
 
   let state = {
     lead: leadRow,
-    allowUncleared,
     signals: [],
     finds: [],
     templates,
@@ -237,21 +232,18 @@ function signalsPanel(state) {
 }
 
 function channelPicker(state) {
-  const { lead, allowUncleared } = state;
-  // With the override on, a phone is all a phone-channel needs; the legal-form
-  // gate is lifted (the owner has taken that on). The email gate is unchanged.
-  const phoneOk = (reg) => (allowUncleared
-    ? { ok: Boolean(lead.phone), why: lead.phone ? '' : 'No phone number.' }
-    : {
-      ok: Boolean(lead.phone) && lead.entity_type === 'corporate',
-      why: !lead.phone ? 'No phone number.' : lead.entity_type !== 'corporate'
-        ? `Only corporate subscribers may be cold-${reg} (PECR reg ${reg === 'called' ? 21 : 22}).` : '',
-    });
+  const { lead } = state;
   const options = [
     { c: 'email',    ok: lead.can_email,   why: lead.block_reason },
-    { c: 'whatsapp', ...phoneOk('messaged') },
-    { c: 'sms',      ...phoneOk('messaged') },
-    { c: 'call',     ...phoneOk('called') },
+    { c: 'whatsapp', ok: Boolean(lead.phone) && lead.entity_type === 'corporate',
+      why: !lead.phone ? 'No phone number.' : lead.entity_type !== 'corporate'
+        ? 'Only corporate subscribers may be cold-messaged (PECR reg 22).' : '' },
+    { c: 'sms',      ok: Boolean(lead.phone) && lead.entity_type === 'corporate',
+      why: !lead.phone ? 'No phone number.' : lead.entity_type !== 'corporate'
+        ? 'Only corporate subscribers may be cold-messaged (PECR reg 22).' : '' },
+    { c: 'call',     ok: Boolean(lead.phone) && lead.entity_type === 'corporate',
+      why: !lead.phone ? 'No phone number.' : lead.entity_type !== 'corporate'
+        ? 'Only corporate subscribers may be cold-called (PECR reg 21).' : '' },
   ];
   return html`
     <div class="panel">
@@ -266,9 +258,6 @@ function channelPicker(state) {
               ${CHANNEL_LABEL[o.c]}${!o.ok ? ' — blocked' : ''}
             </button>`)}
         </div>
-        ${allowUncleared ? html`
-          <p class="tip" style="color:var(--clay)">Legal-form check is off — you're messaging
-            regardless of whether the business is a limited company. Opt-outs are still honoured.</p>` : ''}
         <p class="tip">
           WhatsApp and SMS open on your phone with the message pre-filled —
           you tap Send once. Nothing is sent by the tool: there is no free API

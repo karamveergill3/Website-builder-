@@ -80,7 +80,7 @@ export const looksCorporate = (businessName) => CORPORATE_NAME.test(String(busin
  */
 export function sendability(lead, arg = {}) {
   const opts = typeof arg === 'string' ? { channel: arg } : arg;
-  const { channel = 'email', suppressed = false, allowUncleared = false } = opts;
+  const { channel = 'email', suppressed = false } = opts;
   const no = (code, reason) => ({ allowed: false, code, reason, channel });
 
   if (!lead) return no('NO_LEAD', 'That lead no longer exists.');
@@ -112,28 +112,19 @@ export function sendability(lead, arg = {}) {
     return no('BAD_CHANNEL', `Unknown channel: ${channel}`);
   }
 
-  // The corporate-vs-individual gate. `allowUncleared` is a deliberate,
-  // owner-set override (Settings → "message every business regardless of legal
-  // form") that lifts ONLY this gate — the hard stops above (opted out,
-  // suppressed, no contact detail) are never overridable, because those are a
-  // recipient's own "no", not a classification. With the override on, a sole
-  // trader or an unchecked business is treated as contactable; the legal risk
-  // sits with the owner, which is why it is off by default and off in the code.
-  if (!allowUncleared) {
-    if (lead.entity_type === 'individual') {
-      const noun = channel === 'call' ? 'unsolicited marketing call'
-        : channel === 'email' ? 'unsolicited marketing email'
-        : 'unsolicited marketing message';
-      return no('INDIVIDUAL_SUBSCRIBER',
-        `${lead.business_name} is marked as a sole trader or ordinary partnership. Under PECR ` +
-        `regulation 22 these are individual subscribers, so ${noun} needs their prior consent.`);
-    }
-    if (lead.entity_type !== 'corporate') {
-      return no('UNCLASSIFIED',
-        `${lead.business_name} has not been checked yet. Confirm whether it is a limited company ` +
-        'or LLP (which may be contacted) or a sole trader (which may not) before sending. ' +
-        'Search the name on the Companies House register if you are unsure.');
-    }
+  if (lead.entity_type === 'individual') {
+    const noun = channel === 'call' ? 'unsolicited marketing call'
+      : channel === 'email' ? 'unsolicited marketing email'
+      : 'unsolicited marketing message';
+    return no('INDIVIDUAL_SUBSCRIBER',
+      `${lead.business_name} is marked as a sole trader or ordinary partnership. Under PECR ` +
+      `regulation 22 these are individual subscribers, so ${noun} needs their prior consent.`);
+  }
+  if (lead.entity_type !== 'corporate') {
+    return no('UNCLASSIFIED',
+      `${lead.business_name} has not been checked yet. Confirm whether it is a limited company ` +
+      'or LLP (which may be contacted) or a sole trader (which may not) before sending. ' +
+      'Search the name on the Companies House register if you are unsure.');
   }
   const advice = channel === 'call'
     ? 'Corporate subscribers are exempt from TPS but not from CTPS: check the number on ' +

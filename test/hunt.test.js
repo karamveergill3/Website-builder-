@@ -14,19 +14,28 @@ test.after(teardown);
 /* ---- Stub both registers so nothing is called and nothing is spent ---- */
 
 const realFetch = globalThis.fetch;
-let register = [];      // queued Companies House replies
+let register = [];      // queued Companies House advanced-search replies
+let search = [];        // queued Companies House name-search replies (findCompany)
 let places = [];        // queued Places replies
-let calls = { register: 0, places: 0 };
+let calls = { register: 0, search: 0, places: 0 };
 
 function stub() {
   register = [];
+  search = [];
   places = [];
-  calls = { register: 0, places: 0 };
+  calls = { register: 0, search: 0, places: 0 };
   globalThis.fetch = async (url, opts = {}) => {
     const u = String(url);
     const reply = (body, status = 200) => new Response(JSON.stringify(body), {
       status, headers: { 'Content-Type': 'application/json' },
     });
+    // Name search (findCompany) — its own queue, so a test can control what the
+    // register "confirms" without disturbing the advanced-search page above it.
+    if (u.includes('/search/companies')) {
+      calls.search++;
+      const next = search.shift() ?? { items: [] };
+      return reply(next.body ?? next, next.status ?? 200);
+    }
     if (u.includes('company-information.service.gov.uk')) {
       calls.register++;
       const next = register.shift();
@@ -193,39 +202,53 @@ test('the Google-direct source is off when the box is unticked', async () => {
   assert.equal(leads.filter((l) => l.source === 'Daily hunt (Google)').length, 0);
 });
 
-test('messageable-only files corporates with a mobile, and nothing you cannot message', async () => {
+test('messageable-only confirms Google businesses against the register, keeping only companies', async () => {
   stub();
   await clearLeads();
   // The production default. It overrides the individual require_* flags and
-  // turns the Google-direct source off, whatever those are set to.
+  // turns the Google-direct source from "file unconfirmed" into "confirm on the
+  // register first", whatever those flags are set to.
   await configure({
     hunt_messageable_only: '1', hunt_include_places: '1', hunt_daily_target: '5',
     hunt_require_mobile: '0', hunt_require_no_website: '0',
   });
 
-  register = [{ body: { hits: 3, items: [
-    company('OTLEY ROOFING LIMITED', '70000001'),      // Google: no website + mobile -> filed
-    company('CHEVIN ROOFING LIMITED', '70000002'),     // Google: no website + landline -> skipped
-    company('WHARFEDALE ROOFING LIMITED', '70000003'), // not on Google -> no number -> skipped
-  ] } }];
+  // One register company that is NOT on Google, so the register path files
+  // nothing (no number to reach it) and the confirm path is what's measured.
+  register = [{ body: { hits: 1, items: [company('BRANFORD ROOFING LIMITED', '70000009')] } }];
+
+  // Google's own listings for the town: no website, various phones.
   places = [{ places: [
-    place('Otley Roofing', { phone: '07700 900123' }),   // mobile, no website
-    place('Chevin Roofing', { phone: '01943 555123' }),  // landline, no website
-    place('Wolverhampton Cafe', { phone: '07700 111222' }), // unrelated Google listing
+    place('Otley Roofing', { phone: '07700 900123' }),      // mobile -> looked up -> confirmed -> filed
+    place('Chevin Roofing', { phone: '01943 555123' }),     // landline -> dropped before any lookup
+    place('Wolverhampton Cafe', { phone: '07700 111222' }), // mobile -> looked up -> not on register -> dropped
   ] }];
+
+  // The register confirms Otley Roofing is an active limited company; it has
+  // no match for the cafe. (Chevin is never looked up — it's a landline.)
+  search = [
+    { body: { items: [{
+      company_number: '70000021', title: 'OTLEY ROOFING LIMITED', company_status: 'active',
+      company_type: 'ltd', date_of_creation: '2015-01-01',
+      address_snippet: '1 High St, Otley', address: { locality: 'Otley', postal_code: 'LS21 1AA' },
+    }] } },
+    { body: { items: [] } },   // the cafe: nothing on the register
+  ];
 
   const run = await runAndWait();
   assert.equal(run.error, null, run.error ?? '');
 
   const leads = (await get('/api/leads')).body.leads;
-  // Only the confirmed limited company that has a mobile is filed.
-  assert.deepEqual(leads.map((l) => l.business_name), ['OTLEY ROOFING LIMITED']);
-  assert.equal(leads[0].entity_type, 'corporate', 'a confirmed limited company');
-  assert.equal(leads[0].source, 'Daily hunt');
-  assert.ok(isMobileNumber(leads[0].phone), 'with a mobile you can WhatsApp');
-  // The unrelated Google business is NOT filed as an unconfirmed lead.
+  assert.deepEqual(leads.map((l) => l.business_name), ['Otley Roofing'],
+    'only the Google business the register confirms as a company is filed');
+  const otley = leads[0];
+  assert.equal(otley.entity_type, 'corporate', 'filed as a confirmed limited company');
+  assert.equal(otley.company_number, '70000021', 'with the register identity attached');
+  assert.equal(otley.source, 'Daily hunt');
+  assert.ok(isMobileNumber(otley.phone), 'and the mobile you can WhatsApp');
+  assert.ok(run.not_confirmed >= 1, 'the cafe that is not on the register is counted, not filed');
   assert.equal(leads.filter((l) => l.source === 'Daily hunt (Google)').length, 0,
-    'the Google-direct source is off — it can only produce unconfirmed leads');
+    'nothing is filed unconfirmed');
 });
 
 /* -------------------------------------------------------------- the hunt */

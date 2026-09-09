@@ -24,7 +24,7 @@
 import { db, getSetting } from '../db.js';
 import { nowIso } from './http.js';
 import {
-  advancedSearch, isBodyCorporate, normaliseName, CompaniesHouseError,
+  advancedSearch, findCompany, isBodyCorporate, normaliseName, CompaniesHouseError,
 } from './companies-house.js';
 import { resolveTrade } from './sic.js';
 import {
@@ -291,6 +291,100 @@ function importPlaceLead(place, trade, area) {
 }
 
 /**
+ * File a Google business that the register CONFIRMS is a limited company.
+ *
+ * The Google listing gives the phone you can WhatsApp; the register entry
+ * gives the legal form that makes it lawful to. Filed as 'corporate' with the
+ * company's register details, so it lands ready to message rather than blocked
+ * and waiting on a check. `company` is the auto-match from findCompany.
+ */
+function importConfirmedPlaceLead(row, company, trade, area) {
+  const info = db.prepare(
+    `INSERT INTO leads
+       (business_name, category, location, phone, google_place_id, status, source, opted_out,
+        entity_type, company_number, registered_name, registered_address, company_status,
+        company_type, incorporated_on, sic_codes, entity_note, checked_at,
+        has_website, website_checked_at, website_evidence, details_source, details_imported_at,
+        assigned_to, created_at)
+     VALUES (@name, @trade, @town, @phone, @place_id, 'new', 'Daily hunt', 0,
+             'corporate', @number, @regname, @address, @status,
+             @type, @inc, @sic, @note, @now,
+             0, @now, 'places-no-website', 'google_places', @now,
+             @assigned, @now)`
+  ).run({
+    name: row.display_name ?? company.company_name,
+    trade,
+    town: company.locality ?? area ?? null,
+    phone: row.phone ?? null,
+    place_id: row.place_id,
+    number: company.company_number,
+    regname: company.company_name,
+    address: company.address_snippet ?? null,
+    status: company.company_status ?? null,
+    type: company.company_type ?? null,
+    inc: company.date_of_creation ?? null,
+    sic: (company.sic_codes ?? []).join(',') || null,
+    note: `Companies House ${company.company_number} — found on Google, confirmed on the register`,
+    assigned: nextAssignee(),
+    now: nowIso(),
+  });
+  const leadId = Number(info.lastInsertRowid);
+
+  if (row.phone) {
+    try {
+      const n = normalisePhone(row.phone);
+      if (n.ok) {
+        db.prepare(
+          `INSERT INTO contact_signals
+             (lead_id, kind, value, source, confidence, first_seen_at, last_seen_at)
+           VALUES (?, 'phone', ?, 'places', 90, ?, ?)
+           ON CONFLICT(lead_id, kind, value) DO NOTHING`
+        ).run(leadId, n.e164, nowIso(), nowIso());
+      }
+    } catch { /* not fatal */ }
+  }
+  db.prepare('UPDATE place_cache SET imported = 1 WHERE place_id = ?').run(row.place_id);
+  return leadId;
+}
+
+/**
+ * Look a Google business up on the register and, only if it is unambiguously
+ * an active limited company, file it as a confirmed corporate lead. Returns
+ * { filed, reason }: 'known' if already held, 'unconfirmed' if the register
+ * could not clearly match it to a company (a sole trader, or too fuzzy a name
+ * to be sure — left off rather than guessed at, because guessing wrong means
+ * messaging someone you may not).
+ */
+async function confirmAndImportPlaceLead(row, trade, area, seen) {
+  const { auto } = await findCompany(row.display_name, { location: area });
+  if (!auto) return { filed: false, reason: 'unconfirmed' };
+
+  const number = String(auto.company_number ?? '').trim().toUpperCase();
+  if (!number) return { filed: false, reason: 'unconfirmed' };
+  if (seen.has(number)) return { filed: false, reason: 'known' };
+  if (db.prepare('SELECT 1 FROM leads WHERE company_number = ?').get(auto.company_number)) {
+    return { filed: false, reason: 'known' };
+  }
+  if (db.prepare('SELECT 1 FROM company_ledger WHERE company_number = ?').get(auto.company_number)) {
+    return { filed: false, reason: 'known' };
+  }
+
+  try {
+    importConfirmedPlaceLead(row, auto, trade, area);
+  } catch (err) {
+    if (String(err.message).includes('leads.company_number')) return { filed: false, reason: 'known' };
+    throw err;
+  }
+  recordFound({
+    company_number: auto.company_number,
+    business_name: auto.company_name,
+    location: auto.locality ?? area ?? null,
+  });
+  seen.add(number);
+  return { filed: true, reason: 'filed' };
+}
+
+/**
  * Is this company actually in the town we asked for?
  *
  * The register's `location` filter partial-matches the WHOLE registered
@@ -459,6 +553,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
     found: 0, companies_seen: 0, already_known: 0, had_website: 0,
     no_contact: 0,
     not_mobile: 0,
+    not_confirmed: 0,
     wrong_town: 0,
     places_requests: 0, register_requests: 0,
     maxPlacesRequests: cfg.maxPlacesRequests,
@@ -471,7 +566,8 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
     db.prepare(
       `UPDATE hunt_runs SET found=@found, companies_seen=@companies_seen,
          already_known=@already_known, had_website=@had_website,
-         no_contact=@no_contact, not_mobile=@not_mobile, wrong_town=@wrong_town,
+         no_contact=@no_contact, not_mobile=@not_mobile, not_confirmed=@not_confirmed,
+         wrong_town=@wrong_town,
          places_requests=@places_requests, register_requests=@register_requests,
          areas_covered=@areas, finished_at=@finished, error=@error
        WHERE id=@id`
@@ -482,6 +578,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
       had_website: counters.had_website,
       no_contact: counters.no_contact,
       not_mobile: counters.not_mobile,
+      not_confirmed: counters.not_confirmed,
       wrong_town: counters.wrong_town,
       places_requests: counters.places_requests,
       register_requests: counters.register_requests,
@@ -562,36 +659,58 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
       }
       covered.add(t.area ? `${t.trade} · ${t.area}` : t.trade);
 
-      // Google-direct source. Fetch Google's own listings for this trade/town
-      // once, and — when the source is on — file the no-website ones straight
-      // as leads. They come WITH a phone, which is the point: these are the
-      // businesses you can actually WhatsApp, and the register alone never
-      // finds them. The same fetch also feeds the register website-check below,
-      // so Google is only called once per town.
+      // Google source. Fetch Google's own listings for this trade/town once.
+      // The no-website ones come WITH a phone — the businesses you can actually
+      // WhatsApp, which the register alone never surfaces. What happens to them
+      // depends on the mode:
+      //   messageable only → confirm each against the register and file only
+      //     the ones it proves are limited companies (corporate, ready to
+      //     message). Google finds them; the register makes them lawful.
+      //   plain Google-direct → file the no-website ones as unconfirmed leads.
+      // Either way the same fetch feeds the register website-check below, so
+      // Google is only called once per town.
       let placesByName = null;
-      if (cfg.includePlaces && placesConfigured()
+      if ((cfg.includePlaces || cfg.messageableOnly) && placesConfigured()
           && counters.places_requests < cfg.maxPlacesRequests) {
         const pl = await websiteMap(t.trade, t.area, counters);
         placesByName = pl.byName;
-        // Only file straight-from-Google businesses when that source is on.
-        // With "messageable only" set it is off, because Google cannot tell us
-        // the legal form and an unconfirmed lead can never be cold-messaged —
-        // but the fetch above still qualifies the register companies below.
-        if (cfg.fileGoogleDirect) {
+        if (cfg.fileGoogleDirect || cfg.messageableOnly) {
           for (const row of pl.rows) {
             if (counters.found >= want) break;
             if (taken(t.trade) >= maxPerTrade) break;
             if (row.has_website !== 0) continue;         // no-website businesses only
             counters.companies_seen++;
-            if (row.has_website === 0 && !row.phone) { counters.no_contact++; continue; }
+            if (!row.phone) { counters.no_contact++; continue; }
             if (cfg.requireMobile && !isMobileNumber(row.phone)) { counters.not_mobile++; continue; }
             if (db.prepare('SELECT 1 FROM leads WHERE google_place_id = ?').get(row.place_id)) {
               counters.already_known++; continue;
             }
-            if (ledgerFor({ business_name: row.display_name, location: t.area })) {
-              counters.already_known++; continue;
+
+            if (cfg.messageableOnly) {
+              // One register search per business. Count it against the register
+              // budget so a town of no-hopers cannot run the API dry, and stop
+              // if that budget is spent.
+              if (counters.register_requests >= cfg.maxRegisterPages) break;
+              counters.register_requests++;
+              let outcome;
+              try {
+                outcome = await confirmAndImportPlaceLead(row, t.trade, t.area, seen);
+              } catch (err) {
+                if (err instanceof CompaniesHouseError && err.retryable) throw err;
+                counters.not_confirmed++;
+                continue;
+              }
+              if (!outcome.filed) {
+                if (outcome.reason === 'known') counters.already_known++;
+                else counters.not_confirmed++;
+                continue;
+              }
+            } else {
+              if (ledgerFor({ business_name: row.display_name, location: t.area })) {
+                counters.already_known++; continue;
+              }
+              importPlaceLead(row, t.trade, t.area);
             }
-            importPlaceLead(row, t.trade, t.area);
             counters.found++;
             takenPerTrade.set(t.trade, taken(t.trade) + 1);
           }

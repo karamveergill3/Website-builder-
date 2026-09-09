@@ -1394,6 +1394,17 @@ Thanks so much, and have a lovely day.
       CREATE INDEX idx_archived_sites_at ON archived_sites(archived_at DESC);
     `,
   },
+  {
+    name: '039_hunt_runs_not_confirmed',
+    up: `
+      -- "Messageable only" discovers businesses on Google and confirms each
+      -- against the register, keeping only clear limited-company matches. The
+      -- ones Google found but the register could not confirm as a company are
+      -- counted here, so the funnel can say "found 4, 30 not confirmed on the
+      -- register" instead of leaving an unexplained gap that reads as broken.
+      ALTER TABLE hunt_runs ADD COLUMN not_confirmed INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 function migrate() {

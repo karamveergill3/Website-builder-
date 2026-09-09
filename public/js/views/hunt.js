@@ -40,6 +40,7 @@ export default async function huntView(root, _p, { refresh }) {
     add(r.had_website, 'already had a website');
     add((r.no_contact ?? 0) + (r.not_mobile ?? 0),
       c.requireMobile ? 'had no mobile on Google' : 'had no phone on Google');
+    add(r.not_confirmed ?? 0, 'not confirmed a limited company on the register');
     add(r.wrong_town, 'registered in another town');
     add(r.already_known, 'already seen before');
     return out.sort((a, b) => b.n - a.n);

@@ -71,20 +71,30 @@ a:hover { color: var(--green-deep); }
   background: var(--raised);
   position: sticky; top: 0; z-index: 40;
 }
+/* Brand + user chip share the top line; the tabs get their own full-width
+   row beneath, so all of them stay visible no matter how many there are. */
 .masthead-inner {
   max-width: 1240px; margin: 0 auto; padding: 0 20px;
-  display: flex; align-items: stretch; gap: 22px; min-height: 46px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: "brand . user" "nav nav nav";
+  align-items: center; column-gap: 22px;
 }
-.wordmark { display: flex; align-items: center; gap: 9px; padding: 8px 0; }
+.wordmark { grid-area: brand; display: flex; align-items: center; gap: 9px; padding: 8px 0; }
 .wordmark h1 { font-size: 1.05rem; font-variation-settings: "SOFT" 30, "WONK" 1; white-space: nowrap; }
 .wordmark .mark {
   width: 17px; height: 17px; border-radius: 3px; background: var(--green-deep); flex: none;
 }
 
-nav.tabs { display: flex; margin-left: auto; overflow-x: auto; scrollbar-width: none; }
+nav.tabs {
+  grid-area: nav; display: flex; flex-wrap: wrap;
+  overflow-x: auto; scrollbar-width: none;
+  border-top: 1px solid var(--rule);
+}
 nav.tabs::-webkit-scrollbar { display: none; }
 nav.tabs a {
-  display: flex; align-items: center; padding: 0 11px; font-size: .82rem; font-weight: 500;
+  display: flex; align-items: center; padding: 9px 12px 9px 0; margin-right: 12px;
+  font-size: .82rem; font-weight: 500;
   color: var(--ink-3); text-decoration: none; white-space: nowrap;
   border-bottom: 2px solid transparent; margin-bottom: -1px;
   transition: color .1s ease;
@@ -345,7 +355,8 @@ kbd {
 /* ---- Auth gate (login / first-run setup) + signed-in user chip ---- */
 .masthead-inner { position: relative; }
 .userbox {
-  display: flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 12px;
+  grid-area: user; justify-self: end;
+  display: flex; align-items: center; gap: 8px; padding-left: 12px;
 }
 .userbox .who { font-size: .8rem; color: var(--ink-2); font-weight: 600; white-space: nowrap; }
 

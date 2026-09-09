@@ -70,6 +70,12 @@ export default async function huntView(root, _p, { refresh }) {
       shortReason = `It used its budget of ${c.maxPlacesRequests} Google lookups `
         + `and stopped, with ${areasLeft.toLocaleString()} combinations still to try. `
         + 'Raise “Google lookups, max” below and run again (5,000 free a month).';
+    } else if (c.messageableOnly && phoneDrop >= last.found && phoneDrop > 0) {
+      shortReason = `That's this mode doing its job: ${phoneDrop.toLocaleString()} were `
+        + `dropped for having no mobile you could message today. Only confirmed limited `
+        + `companies with a mobile and no website are filed, and they're a smaller pool. `
+        + `To find more, add more towns and trades — or untick “Only find businesses I can `
+        + `message right now” to also gather ones you'd check or find a number for by hand.`;
     } else if ((c.requirePhone || c.requireMobile) && phoneDrop >= last.found && phoneDrop > 0) {
       shortReason = `Nearly everything was dropped for having no `
         + `${c.requireMobile ? 'mobile' : 'phone'} number on Google `
@@ -223,6 +229,22 @@ export default async function huntView(root, _p, { refresh }) {
       <div class="panel">
         <div class="panel-hd"><h3>How it runs</h3></div>
         <div class="panel-bd">
+          <div class="check" style="margin-bottom:12px">
+            <input id="h-messageable" name="hunt_messageable_only" type="checkbox" ${c.messageableOnly ? 'checked' : ''}>
+            <label for="h-messageable"><b>Only find businesses I can message right now</b>
+              <span class="tip" style="display:block;font-weight:400">
+                Files only the leads that sail straight past the compliance block:
+                a <b>confirmed limited company</b>, with <b>no website</b>, carrying a
+                real <b>07 mobile</b> you can WhatsApp today. Sole traders, firms with
+                no number, and Google listings whose legal form can't be confirmed are
+                left off the list, so nothing you open shows “blocked”. Leave it on for a
+                clean, all-actionable list. Turn it off to also gather ones you'd have to
+                check or find a number for first — more leads, more sifting.</span></label>
+          </div>
+          <div id="govern-note" class="tip" style="margin:-4px 0 10px;color:var(--ink-3)" hidden>
+            The three filters below are set for you while “Only find businesses I can
+            message right now” is on.
+          </div>
           <div class="cols-3">
             <div class="f">
               <label for="h-target">Find per day</label>
@@ -548,16 +570,35 @@ export default async function huntView(root, _p, { refresh }) {
     }
   });
 
+  // The master switch governs the three filters below it. While it's on they
+  // are set for the user (and shown disabled), so ticking them by hand can't
+  // contradict it. The save still reads their checked state, so their last
+  // manual values are kept for when the master is turned back off.
+  const governed = ['hunt_require_no_website', 'hunt_require_phone', 'hunt_require_mobile',
+    'hunt_include_places', 'hunt_include_unlisted']
+    .map((n) => root.querySelector(`input[name="${n}"]`)).filter(Boolean);
+  const baseDisabled = new Map(governed.map((b) => [b, b.disabled]));
+
   // Live warning: the phone/mobile filters are the usual reason a run finds
-  // almost nothing, so say so the moment either is ticked, not just after a
-  // wasted run.
+  // almost nothing, so say so the moment either is ticked — unless the master
+  // switch is on, where filing only messageable leads is the whole point.
   const phoneWarn = () => {
     const warn = $('#phone-filter-warn', root);
     if (!warn) return;
-    warn.hidden = !($('#h-phone', root)?.checked || $('#h-mobile', root)?.checked);
+    const master = $('#h-messageable', root)?.checked;
+    warn.hidden = master || !($('#h-phone', root)?.checked || $('#h-mobile', root)?.checked);
   };
+  const govern = () => {
+    const on = $('#h-messageable', root)?.checked;
+    for (const b of governed) b.disabled = on || baseDisabled.get(b);
+    const note = $('#govern-note', root);
+    if (note) note.hidden = !on;
+    phoneWarn();
+  };
+  $('#h-messageable', root)?.addEventListener('change', govern);
   $('#h-phone', root)?.addEventListener('change', phoneWarn);
   $('#h-mobile', root)?.addEventListener('change', phoneWarn);
+  govern();
 
   on(root, 'click', '[data-act="add-all-trades"]', async (_e, btn) => {
     btn.disabled = true;

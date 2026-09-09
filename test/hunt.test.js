@@ -6,7 +6,7 @@ process.env.GOOGLE_MAPS_API_KEY = 'test-places-key';
 
 const { get, post, patch, put, del, teardown } = await import('./helpers.js');
 const { db } = await import('../server/db.js');
-const { judge, spreadByTrade, sameTown, huntConfig } = await import('../server/lib/hunter.js');
+const { judge, spreadByTrade, sameTown, huntConfig, isMobileNumber } = await import('../server/lib/hunter.js');
 const { normaliseName } = await import('../server/lib/companies-house.js');
 
 test.after(teardown);
@@ -96,6 +96,10 @@ const configure = (over = {}) => put('/api/settings', {
   // These tests exercise the Companies House path; the Google-direct source
   // has its own tests. Off here so the register behaviour is what's measured.
   hunt_include_places: '0',
+  // Off here so each individual filter is what's under test. "Messageable
+  // only" (default on in production) would override the three require_* flags
+  // and disable the Google-direct source; it has its own tests below.
+  hunt_messageable_only: '0',
   ...over,
 });
 
@@ -187,6 +191,41 @@ test('the Google-direct source is off when the box is unticked', async () => {
   await runAndWait();
   const leads = (await get('/api/leads')).body.leads;
   assert.equal(leads.filter((l) => l.source === 'Daily hunt (Google)').length, 0);
+});
+
+test('messageable-only files corporates with a mobile, and nothing you cannot message', async () => {
+  stub();
+  await clearLeads();
+  // The production default. It overrides the individual require_* flags and
+  // turns the Google-direct source off, whatever those are set to.
+  await configure({
+    hunt_messageable_only: '1', hunt_include_places: '1', hunt_daily_target: '5',
+    hunt_require_mobile: '0', hunt_require_no_website: '0',
+  });
+
+  register = [{ body: { hits: 3, items: [
+    company('OTLEY ROOFING LIMITED', '70000001'),      // Google: no website + mobile -> filed
+    company('CHEVIN ROOFING LIMITED', '70000002'),     // Google: no website + landline -> skipped
+    company('WHARFEDALE ROOFING LIMITED', '70000003'), // not on Google -> no number -> skipped
+  ] } }];
+  places = [{ places: [
+    place('Otley Roofing', { phone: '07700 900123' }),   // mobile, no website
+    place('Chevin Roofing', { phone: '01943 555123' }),  // landline, no website
+    place('Wolverhampton Cafe', { phone: '07700 111222' }), // unrelated Google listing
+  ] }];
+
+  const run = await runAndWait();
+  assert.equal(run.error, null, run.error ?? '');
+
+  const leads = (await get('/api/leads')).body.leads;
+  // Only the confirmed limited company that has a mobile is filed.
+  assert.deepEqual(leads.map((l) => l.business_name), ['OTLEY ROOFING LIMITED']);
+  assert.equal(leads[0].entity_type, 'corporate', 'a confirmed limited company');
+  assert.equal(leads[0].source, 'Daily hunt');
+  assert.ok(isMobileNumber(leads[0].phone), 'with a mobile you can WhatsApp');
+  // The unrelated Google business is NOT filed as an unconfirmed lead.
+  assert.equal(leads.filter((l) => l.source === 'Daily hunt (Google)').length, 0,
+    'the Google-direct source is off — it can only produce unconfirmed leads');
 });
 
 /* -------------------------------------------------------------- the hunt */

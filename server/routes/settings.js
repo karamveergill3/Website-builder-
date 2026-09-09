@@ -28,7 +28,7 @@ export const ALLOWED_KEYS = new Set([
   'hunt_enabled', 'hunt_trades', 'hunt_areas', 'hunt_daily_target', 'hunt_hour',
   'hunt_max_places_requests', 'hunt_max_register_pages', 'hunt_max_per_trade',
   'hunt_require_no_website', 'hunt_include_unlisted', 'hunt_require_phone',
-  'hunt_require_mobile', 'hunt_include_places',
+  'hunt_require_mobile', 'hunt_include_places', 'hunt_messageable_only',
   // Lead search defaults (Phase 2)
   'default_areas', 'default_region_code',
   // Places pricing, so Google's repricing does not need a code change
@@ -91,6 +91,11 @@ export const DEFAULTS = {
   // no-website ones (with their phone). This is what finds contactable,
   // WhatsApp-able leads; the register alone mostly finds firms with no number.
   hunt_include_places: '1',
+  // On by default: file only businesses you can lawfully message today —
+  // confirmed limited companies, no website, with a mobile. Keeps blocked
+  // leads (sole traders, unconfirmed Google listings, no-number firms) off
+  // the list entirely. Governs the three filters above when set.
+  hunt_messageable_only: '1',
   // Invoicing
   invoice_prefix: 'INV',
   invoice_terms: 'Payment is due within 24 hours of the invoice date.',

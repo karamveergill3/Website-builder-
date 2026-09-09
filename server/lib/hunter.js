@@ -47,7 +47,16 @@ export function huntConfig() {
     const n = Number(getSetting(k, String(d)));
     return Number.isFinite(n) ? n : d;
   };
-  return {
+
+  // The headline choice. On, the hunt files ONLY businesses you can lawfully
+  // WhatsApp today: a confirmed limited company (the register guarantees the
+  // legal form), with no website, carrying a real 07 mobile. Everything else —
+  // sole traders, companies with no number, and Google listings whose legal
+  // form is unknown — never reaches the list, so nothing lands blocked.
+  const messageableOnly = getSetting('hunt_messageable_only', '1') === '1';
+  const includePlaces = getSetting('hunt_include_places', '1') === '1';
+
+  const cfg = {
     enabled: getSetting('hunt_enabled', '0') === '1',
     trades: lines(getSetting('hunt_trades', '')),
     // A region typed by hand ('West Midlands') becomes its towns, so the
@@ -69,11 +78,22 @@ export function huntConfig() {
       || getSetting('hunt_require_mobile', '0') === '1',
     requireMobile: getSetting('hunt_require_mobile', '0') === '1',
     includeUnlisted: getSetting('hunt_include_unlisted', '1') === '1',
-    // Also pull businesses straight from Google (not just the register), and
-    // file the no-website ones as leads with their phone. This is the source
-    // that actually finds contactable, WhatsApp-able businesses.
-    includePlaces: getSetting('hunt_include_places', '1') === '1',
+    includePlaces,
+    messageableOnly,
+    // Whether to file businesses found straight on Google. They arrive with an
+    // unconfirmed legal form (entity_type 'unknown'), which the PECR gate never
+    // lets you cold-message — so in "messageable only" mode they are not filed;
+    // Google is still read for website status and phone numbers to qualify the
+    // register companies.
+    fileGoogleDirect: includePlaces && !messageableOnly,
   };
+
+  if (messageableOnly) {
+    cfg.requireNoWebsite = true;
+    cfg.requirePhone = true;
+    cfg.requireMobile = true;
+  }
+  return cfg;
 }
 
 /**
@@ -422,9 +442,11 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
     ].filter(Boolean).join(' and ');
     throw new Error(
       `The hunt is set to find ${wanted}, and Google is the only source for `
-      + 'either — but GOOGLE_MAPS_API_KEY is not set. Add the key, or turn '
-      + 'those options off and the hunt will file every company it finds for '
-      + 'you to check yourself.'
+      + 'either — but GOOGLE_MAPS_API_KEY is not set. Add the key, or '
+      + (cfg.messageableOnly
+        ? 'untick “Only find businesses I can message right now” '
+        : 'turn those options off ')
+      + 'and the hunt will file every company it finds for you to check yourself.'
     );
   }
   syncTargets(cfg);
@@ -551,22 +573,28 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
           && counters.places_requests < cfg.maxPlacesRequests) {
         const pl = await websiteMap(t.trade, t.area, counters);
         placesByName = pl.byName;
-        for (const row of pl.rows) {
-          if (counters.found >= want) break;
-          if (taken(t.trade) >= maxPerTrade) break;
-          if (row.has_website !== 0) continue;         // no-website businesses only
-          counters.companies_seen++;
-          if (row.has_website === 0 && !row.phone) { counters.no_contact++; continue; }
-          if (cfg.requireMobile && !isMobileNumber(row.phone)) { counters.not_mobile++; continue; }
-          if (db.prepare('SELECT 1 FROM leads WHERE google_place_id = ?').get(row.place_id)) {
-            counters.already_known++; continue;
+        // Only file straight-from-Google businesses when that source is on.
+        // With "messageable only" set it is off, because Google cannot tell us
+        // the legal form and an unconfirmed lead can never be cold-messaged —
+        // but the fetch above still qualifies the register companies below.
+        if (cfg.fileGoogleDirect) {
+          for (const row of pl.rows) {
+            if (counters.found >= want) break;
+            if (taken(t.trade) >= maxPerTrade) break;
+            if (row.has_website !== 0) continue;         // no-website businesses only
+            counters.companies_seen++;
+            if (row.has_website === 0 && !row.phone) { counters.no_contact++; continue; }
+            if (cfg.requireMobile && !isMobileNumber(row.phone)) { counters.not_mobile++; continue; }
+            if (db.prepare('SELECT 1 FROM leads WHERE google_place_id = ?').get(row.place_id)) {
+              counters.already_known++; continue;
+            }
+            if (ledgerFor({ business_name: row.display_name, location: t.area })) {
+              counters.already_known++; continue;
+            }
+            importPlaceLead(row, t.trade, t.area);
+            counters.found++;
+            takenPerTrade.set(t.trade, taken(t.trade) + 1);
           }
-          if (ledgerFor({ business_name: row.display_name, location: t.area })) {
-            counters.already_known++; continue;
-          }
-          importPlaceLead(row, t.trade, t.area);
-          counters.found++;
-          takenPerTrade.set(t.trade, taken(t.trade) + 1);
         }
         save();
       }

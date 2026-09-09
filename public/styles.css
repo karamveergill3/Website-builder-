@@ -184,6 +184,12 @@ main { max-width: 1240px; margin: 0 auto; padding: 18px 20px 80px; }
 .panel-hd .grow { flex: 1; }
 .panel-bd { padding: 14px; }
 
+/* A panel that collapses. The whole header row is the toggle. */
+details.panel > summary { cursor: pointer; list-style: none; }
+details.panel > summary::-webkit-details-marker { display: none; }
+details.panel > summary .caret { color: var(--ink-3); font-size: .7rem; transition: transform .15s ease; }
+details.panel[open] > summary .caret { transform: rotate(90deg); }
+
 /* ---------- Tables ---------- */
 
 .rows { width: 100%; border-collapse: collapse; font-size: .84rem; }

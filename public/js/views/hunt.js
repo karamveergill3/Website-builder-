@@ -1,12 +1,16 @@
 /* Hunt: the tool finding companies on its own, every day. */
 import { api } from '../api.js';
 import {
-  html, mount, on, $, toast, fmtDateTime, relative, registerInterval, confirmDialog,
+  html, mount, on, $, $$, toast, fmtDateTime, relative, registerInterval, confirmDialog,
 } from '../dom.js';
 
 export default async function huntView(root, _p, { refresh }) {
-  const s = await api.get('/api/hunt/status').catch(() => null);
-  const { ledger } = await api.get('/api/hunt/ledger').catch(() => ({ ledger: null }));
+  const [s, ledgerRes, cstatus] = await Promise.all([
+    api.get('/api/hunt/status').catch(() => null),
+    api.get('/api/hunt/ledger').catch(() => ({ ledger: null })),
+    api.get('/api/companies/status').catch(() => null),
+  ]);
+  const { ledger } = ledgerRes;
 
   if (!s?.configured) {
     mount(root, html`
@@ -140,6 +144,37 @@ export default async function huntView(root, _p, { refresh }) {
         at ${String(c.hour).padStart(2, '0')}:00, if the server is running.
         For a machine that sleeps, put <code class="mono">npm run hunt</code> in cron instead.
       </div></div>` : ''}
+
+    <details class="panel" id="finder">
+      <summary class="panel-hd">
+        <span class="caret" aria-hidden="true">▸</span>
+        <h3 class="grow">Search a trade &amp; town right now</h3>
+        <span class="meta">one-off, hand-picked — the daily hunt does this on a schedule</span>
+      </summary>
+      <div class="panel-bd">
+        <div class="cols">
+          <div class="f">
+            <label for="f-trade">Trade</label>
+            <input id="f-trade" list="f-trades" type="text" placeholder="roofers" autocomplete="off">
+            <datalist id="f-trades">
+              ${(cstatus?.trades ?? []).map((t) => html`<option value="${t.example}">${t.label}</option>`)}
+            </datalist>
+            <p class="tip" id="f-sic"></p>
+          </div>
+          <div class="f">
+            <label for="f-town">Town <span class="opt">optional</span></label>
+            <input id="f-town" type="text" placeholder="Otley" autocomplete="off">
+            <p class="tip">Matches whole words in the registered office — a town or a
+              full postcode, not a partial one like LS21.</p>
+          </div>
+        </div>
+        <div class="bar" style="margin:0">
+          <button type="button" class="primary" data-act="find-run">Search the register</button>
+          <span class="meta">Free, and every result is an active company you may lawfully email.</span>
+        </div>
+        <div id="find-out"></div>
+      </div>
+    </details>
 
     <form id="cfg">
       <div class="panel">
@@ -359,6 +394,133 @@ export default async function huntView(root, _p, { refresh }) {
         </table></div>
       </div>` : ''}
   `);
+
+  // The one-off register search, folded in from the old Find screen. Same
+  // source the daily hunt works through — here as a hand-picked "get me these
+  // right now". Kept out of #cfg so its inputs are never saved as settings.
+  wireFinder();
+
+  function wireFinder() {
+    const tradeEl = $('#f-trade', root);
+    if (!tradeEl) return;
+    let results = null;
+
+    const showSic = async () => {
+      const el = $('#f-sic', root);
+      const q = tradeEl.value.trim();
+      if (!el) return;
+      if (!q) { el.textContent = ''; return; }
+      try {
+        const t = await api.get('/api/companies/trade', { q });
+        el.textContent = t.codes.length
+          ? `SIC ${t.codes.join(', ')}${t.label ? ` — ${t.label}` : ''}`
+          : 'No SIC code for that — try another word, or type a code such as 43910.';
+        el.style.color = t.codes.length ? '' : 'var(--clay)';
+      } catch { /* the hint is optional */ }
+    };
+    let deb;
+    tradeEl.addEventListener('input', () => { clearTimeout(deb); deb = setTimeout(showSic, 250); });
+
+    const picks = () => $$('.f-pick', root)
+      .filter((c) => c.checked && c.id !== 'f-pick-all').map((c) => c.value);
+    const sync = () => {
+      const add = $('[data-act="find-add"]', root);
+      if (!add) return;
+      const n = picks().length;
+      add.disabled = n === 0;
+      add.textContent = n ? `Add ${n} as leads` : 'Add selected';
+    };
+
+    const draw = () => {
+      const out = $('#find-out', root);
+      const fresh = results.companies.filter((cc) => !cc.already_a_lead);
+      mount(out, html`
+        <div class="panel" style="margin-top:12px">
+          <div class="panel-hd">
+            <h3 class="grow">${results.total.toLocaleString('en-GB')} active
+              ${results.trade.label ?? 'companies'}${results.location ? ` around ${results.location}` : ''}
+              <span class="meta">— showing ${results.companies.length}</span></h3>
+            <button class="primary" data-act="find-add" disabled>Add selected</button>
+          </div>
+          ${fresh.length === 0 ? html`
+            <div class="blank"><strong>All of these are already leads</strong>
+              Try another town, or a different trade.</div>` : html`
+            <div class="scroll-x"><table class="rows">
+              <thead><tr>
+                <th class="c-pick"><input type="checkbox" id="f-pick-all" class="f-pick" aria-label="Select all"></th>
+                <th>Company</th><th>Registered office</th><th class="nw">No.</th>
+                <th class="nw">Since</th><th>Website</th><th></th>
+              </tr></thead>
+              <tbody>
+                ${results.companies.map((cc) => html`
+                  <tr>
+                    <td class="c-pick">${cc.already_a_lead ? '' : html`
+                      <input type="checkbox" class="f-pick" value="${cc.company_number}"
+                             aria-label="Select ${cc.company_name}">`}</td>
+                    <td class="c-name"><span class="name">${cc.company_name}</span>
+                      <span class="meta">${cc.company_type}${cc.sic_codes.length ? ` · SIC ${cc.sic_codes.join(', ')}` : ''}</span></td>
+                    <td class="meta">${cc.address_snippet ?? '—'}</td>
+                    <td class="meta mono nw">${cc.company_number}</td>
+                    <td class="meta nw">${(cc.date_of_creation ?? '').slice(0, 4)}</td>
+                    <td>${cc.has_website === false ? html`<span class="flag">none found</span>`
+                        : cc.has_website === true ? html`<span class="meta">has one</span>`
+                        : html`<span class="meta">—</span>`}</td>
+                    <td class="c-act">${cc.already_a_lead ? html`<span class="flag" data-ok>a lead</span>` : ''}</td>
+                  </tr>`)}
+              </tbody>
+            </table></div>`}
+        </div>
+        <p class="tip">Neither Companies House nor Google holds an email address —
+          the <a href="#/leads">lead list</a> shows which of these still need one.</p>`);
+      sync();
+    };
+
+    const runSearch = async () => {
+      const out = $('#find-out', root);
+      const trade = tradeEl.value.trim();
+      if (!trade) { toast('Type a trade first'); return; }
+      mount(out, html`<div class="loading" style="margin-top:12px"><span class="spin"></span></div>`);
+      try {
+        results = await api.post('/api/companies/discover', {
+          trade, location: $('#f-town', root).value, size: 100,
+        });
+      } catch (err) {
+        mount(out, html`<div class="msg msg-bad" style="margin-top:12px"><div class="grow">${err.message}</div></div>`);
+        return;
+      }
+      draw();
+    };
+
+    for (const el of [tradeEl, $('#f-town', root)]) {
+      el?.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); runSearch(); }
+      });
+    }
+    on(root, 'click', '[data-act="find-run"]', runSearch);
+    on(root, 'change', '.f-pick', (ev) => {
+      if (ev.target.id === 'f-pick-all') {
+        $$('.rows tbody .f-pick', root).forEach((c) => { c.checked = ev.target.checked; });
+      }
+      sync();
+    });
+    on(root, 'click', '[data-act="find-add"]', async (_e, btn) => {
+      const chosen = picks();
+      if (!chosen.length) return;
+      btn.disabled = true;
+      try {
+        const res = await api.post('/api/companies/discover/import', {
+          company_numbers: chosen,
+          companies: results.companies,
+          category: results.trade.label ?? tradeEl.value,
+        });
+        toast(`Added ${res.imported}${res.skipped?.length ? ` · ${res.skipped.length} skipped` : ''} — on the Leads screen`);
+        await runSearch();
+      } catch (err) {
+        toast(err.message, { error: true, ms: 7000 });
+        btn.disabled = false;
+      }
+    });
+  }
 
   $('#cfg', root).addEventListener('submit', async (ev) => {
     ev.preventDefault();

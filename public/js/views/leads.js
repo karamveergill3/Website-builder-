@@ -276,8 +276,8 @@ export default async function leadsView(root, params, { refresh }) {
         <div class="blank">
           <strong>${q || status !== 'all' ? 'Nothing matches' : 'No leads yet'}</strong>
           ${q || status !== 'all' ? 'Try another filter.' : html`
-            Set up the <a href="#/hunt">daily hunt</a> to find them for you,
-            <a href="#/find">search the register</a> yourself, or add one by hand.`}
+            Set up the <a href="#/hunt">daily hunt</a> to find them for you
+            (or search a trade &amp; town there yourself), or add one by hand.`}
         </div>` : html`
         <div class="scroll-x">
         <table class="rows">

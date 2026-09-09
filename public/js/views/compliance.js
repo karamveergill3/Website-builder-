@@ -3,10 +3,12 @@ import { api } from '../api.js';
 import { html, mount, on, modal, toast, fmtDate, confirmDialog } from '../dom.js';
 
 export default async function complianceView(root, _p, { refresh }) {
-  const [stats, sup] = await Promise.all([
+  const [stats, sup, settingsRes] = await Promise.all([
     api.leads.stats(),
     api.get('/api/suppression').catch(() => ({ entries: [], total: 0 })),
+    api.settings.get().catch(() => ({ settings: {} })),
   ]);
+  const allowUncleared = (settingsRes.settings ?? {}).outreach_allow_uncleared === '1';
 
   mount(root, html`
     <div class="bar"><h2>Rules</h2>
@@ -45,6 +47,28 @@ export default async function complianceView(root, _p, { refresh }) {
           trading names — which is why marking a lead as a company needs its
           <b>company number</b>.
         </p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-hd"><h3>Cold-contact override</h3></div>
+      <div class="panel-bd">
+        <div class="check">
+          <input id="allow-uncleared" type="checkbox" ${allowUncleared ? 'checked' : ''}>
+          <label for="allow-uncleared">Message every business regardless of legal form
+            <span class="tip" style="display:block;font-weight:400">
+              By default WhatsApp, SMS and calls are only allowed to confirmed limited
+              companies — cold-messaging a sole trader without consent breaches PECR reg 22,
+              and WhatsApp bans numbers that get spam-reported. Tick this to send anyway, on
+              phone channels, to any business with a number. <b>Your legal risk to take.</b>
+              Opt-outs and the suppression list are still always honoured, and email keeps its
+              own rules.</span></label>
+        </div>
+        ${allowUncleared ? html`
+          <div class="msg msg-warn" style="margin-top:8px"><div class="grow">
+            Override is <b>on</b>. WhatsApp/SMS/calls will open for sole traders and
+            unchecked leads too. Keep the opt-out line in every message.
+          </div></div>` : ''}
       </div>
     </div>
 
@@ -110,6 +134,19 @@ export default async function complianceView(root, _p, { refresh }) {
       </div>
     </div>
   `);
+
+  root.querySelector('#allow-uncleared')?.addEventListener('change', async (ev) => {
+    try {
+      await api.settings.save({ outreach_allow_uncleared: ev.target.checked ? '1' : '0' });
+      toast(ev.target.checked
+        ? 'Override on — messaging any business, opt-outs still honoured'
+        : 'Override off — corporate-only on WhatsApp/SMS/calls', { ms: 5000 });
+      refresh();
+    } catch (err) {
+      toast(err.message ?? 'Could not save', { error: true });
+      ev.target.checked = !ev.target.checked;
+    }
+  });
 
   on(root, 'click', '[data-act="lift"]', async (_e, el) => {
     if (!await confirmDialog({

@@ -149,3 +149,45 @@ test('opt-out still beats every channel', () => {
     assert.equal(v.code, 'OPTED_OUT', channel);
   }
 });
+
+/* ----------------------- allowUncleared owner override ------------------- */
+
+test('allowUncleared lets a sole trader be messaged on phone channels', () => {
+  const v = sendability(
+    lead({ entity_type: 'individual', phone: '07123456789' }),
+    { channel: 'whatsapp', allowUncleared: true }
+  );
+  assert.equal(v.allowed, true);
+});
+
+test('allowUncleared lets an unchecked business be messaged', () => {
+  const v = sendability(
+    lead({ entity_type: 'unknown', phone: '07123456789' }),
+    { channel: 'sms', allowUncleared: true }
+  );
+  assert.equal(v.allowed, true);
+});
+
+test('allowUncleared never overrides an opt-out', () => {
+  const v = sendability(
+    lead({ entity_type: 'individual', phone: '07123456789', opted_out: 1 }),
+    { channel: 'whatsapp', allowUncleared: true }
+  );
+  assert.equal(v.allowed, false);
+  assert.equal(v.code, 'OPTED_OUT');
+});
+
+test('allowUncleared never overrides suppression', () => {
+  const v = sendability(lead(), { channel: 'email', suppressed: true, allowUncleared: true });
+  assert.equal(v.allowed, false);
+  assert.equal(v.code, 'SUPPRESSED');
+});
+
+test('allowUncleared still needs a phone to message', () => {
+  const v = sendability(
+    lead({ entity_type: 'individual' }),
+    { channel: 'whatsapp', allowUncleared: true }
+  );
+  assert.equal(v.allowed, false);
+  assert.equal(v.code, 'NO_PHONE');
+});

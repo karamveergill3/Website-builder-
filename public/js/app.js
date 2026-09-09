@@ -15,6 +15,7 @@ import complianceView from './views/compliance.js';
 import repliesView   from './views/replies.js';
 import teamView, { loginView, setupView, openAccount } from './views/auth.js';
 import invoicesView from './views/invoices.js';
+import websitesView from './views/websites.js';
 import { api } from './api.js';
 
 const ROUTES = {
@@ -32,6 +33,7 @@ const ROUTES = {
   '/compliance': complianceView,
   '/deliverability': deliverView,
   '/invoices':  invoicesView,
+  '/websites':  websitesView,
   '/team':      teamView,
 };
 

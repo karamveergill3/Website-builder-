@@ -15,6 +15,7 @@ import mockups, { MOCKUP_ROOT } from './routes/mockups.js';
 import { seedIdentityFromEnv } from './lib/identity.js';
 import authRouter from './routes/auth.js';
 import invoices from './routes/invoices.js';
+import websites from './routes/websites.js';
 import { getInvoiceByToken, renderInvoicePage, setPayPalOrder, setStripeSession, markPaid,
   getPlanByToken, activatePlanDirectDebit } from './lib/invoicing.js';
 import { configured as paypalConfigured, createOrder, captureOrder, PayPalError } from './lib/paypal.js';
@@ -76,6 +77,7 @@ app.use('/api/emails', emails);
 app.use('/api/settings', settings);
 app.use('/api/suppression', suppression);
 app.use('/api/invoices', invoices);
+app.use('/api/websites', websites);
 // The outreach module registers /api/leads/:id/... paths too, so it must be
 // mounted AT /api and after the leads router — Express matches most-specific
 // first only within one Router.

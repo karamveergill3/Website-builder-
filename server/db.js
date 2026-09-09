@@ -1370,6 +1370,30 @@ Thanks so much, and have a lovely day.
       CREATE INDEX idx_leads_assigned ON leads(assigned_to);
     `,
   },
+  {
+    name: '038_archived_sites',
+    up: `
+      -- The shared "Websites" library: a finished site's ZIP plus its handover
+      -- details, filed when a job is done so the whole team can pull it back
+      -- later. The ZIP lives on disk next to this database (file_path is its
+      -- stored name); only the metadata is here. Deliberately no passwords —
+      -- a shared table of client logins is a breach waiting to happen.
+      CREATE TABLE archived_sites (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id     INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+        business_name TEXT    NOT NULL,
+        domain        TEXT,
+        host          TEXT,
+        notes         TEXT,
+        file_name     TEXT,
+        file_path     TEXT    NOT NULL,
+        file_size     INTEGER NOT NULL DEFAULT 0,
+        archived_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        archived_at   TEXT    NOT NULL
+      );
+      CREATE INDEX idx_archived_sites_at ON archived_sites(archived_at DESC);
+    `,
+  },
 ];
 
 function migrate() {

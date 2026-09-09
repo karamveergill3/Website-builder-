@@ -94,6 +94,24 @@ export const api = {
     setPlan:  (id, active) => request('POST', `/api/invoices/maintenance/plans/${id}/active`, { active }),
     directDebit: (id)      => request('POST', `/api/invoices/maintenance/plans/${id}/direct-debit`, {}),
   },
+  websites: {
+    list:        ()      => request('GET', '/api/websites'),
+    remove:      (id)    => request('DELETE', `/api/websites/${id}`),
+    downloadUrl: (id)    => `/api/websites/${id}/download`,
+    // The ZIP is the raw request body; the details ride in the query string.
+    upload: async (file, meta) => {
+      const res = await fetch('/api/websites' + qs({ ...meta, file_name: file.name }), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/zip' },
+        body: file,
+      });
+      const text = await res.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
+      if (!res.ok) throw new Error(data?.error ?? `Upload failed (${res.status})`);
+      return data;
+    },
+  },
   auth: {
     status:   ()             => request('GET',  '/api/auth/status'),
     me:       ()             => request('GET',  '/api/auth/me'),

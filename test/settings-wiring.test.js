@@ -81,7 +81,7 @@ test('the hunt form covers the options the hunt actually reads', () => {
     'hunt_trades', 'hunt_areas', 'hunt_daily_target', 'hunt_hour',
     'hunt_max_per_trade', 'hunt_require_no_website', 'hunt_require_phone',
     'hunt_require_mobile', 'hunt_include_unlisted', 'hunt_enabled',
-    'hunt_messageable_only',
+    'hunt_messageable_only', 'hunt_include_sole_traders',
   ]) {
     assert.ok(names.has(key), `the Hunt screen has no control for ${key}`);
   }

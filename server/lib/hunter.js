@@ -80,6 +80,11 @@ export function huntConfig() {
     includeUnlisted: getSetting('hunt_include_unlisted', '1') === '1',
     includePlaces,
     messageableOnly,
+    // Also keep the Google businesses the register CAN'T confirm as a limited
+    // company (sole traders, mostly). Filed call-only — lawful to phone, and
+    // messaging opens once they agree on that call. Off by default: it widens
+    // who you're contacting, so it's a deliberate choice.
+    includeSoleTraders: getSetting('hunt_include_sole_traders', '0') === '1',
     // Whether to file businesses found straight on Google. They arrive with an
     // unconfirmed legal form (entity_type 'unknown'), which the PECR gate never
     // lets you cold-message — so in "messageable only" mode they are not filed;
@@ -701,9 +706,15 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
                 continue;
               }
               if (!outcome.filed) {
-                if (outcome.reason === 'known') counters.already_known++;
-                else counters.not_confirmed++;
-                continue;
+                if (outcome.reason === 'known') { counters.already_known++; continue; }
+                // The register can't confirm it's a limited company — a sole
+                // trader, most likely. File it call-only when that's switched
+                // on; otherwise leave it off the list.
+                if (!cfg.includeSoleTraders) { counters.not_confirmed++; continue; }
+                if (ledgerFor({ business_name: row.display_name, location: t.area })) {
+                  counters.already_known++; continue;
+                }
+                importPlaceLead(row, t.trade, t.area);
               }
             } else {
               if (ledgerFor({ business_name: row.display_name, location: t.area })) {

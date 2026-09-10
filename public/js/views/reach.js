@@ -6,7 +6,7 @@
  */
 /* eslint-disable require-atomic-updates */
 import { api } from '../api.js';
-import { html, modal, toast, on } from '../dom.js';
+import { html, modal, toast, on, fmtDateTime } from '../dom.js';
 
 const CHANNEL_LABEL = {
   email: 'Email',
@@ -36,9 +36,12 @@ export async function openReachDialog(leadId) {
   // Default channel picks itself from what the lead actually has. Hunt
   // leads have no website AND usually no email; they arrive with a phone
   // from Google Places, so WhatsApp / call are the honest default.
+  // A business you can't cold-message (not a confirmed company, no consent yet)
+  // opens on Call — the one channel that's lawful for it — not a blocked one.
+  const canMessageInit = leadRow.entity_type === 'corporate' || Boolean(leadRow.messaging_consent_at);
   const defaultChannel =
     leadRow.can_email ? 'email'
-    : leadRow.phone   ? 'whatsapp'
+    : leadRow.phone   ? (canMessageInit ? 'whatsapp' : 'call')
     : 'email';
 
   let state = {
@@ -233,18 +236,23 @@ function signalsPanel(state) {
 
 function channelPicker(state) {
   const { lead } = state;
+  // Messaging (WhatsApp/SMS) is open to a confirmed limited company, or to any
+  // business that has agreed to be messaged (consent recorded). Calling is a
+  // separate rule (reg 21) and lawful to any business number, so it is never
+  // blocked on legal form — only on there being a number.
+  const canMessage = lead.entity_type === 'corporate' || Boolean(lead.messaging_consent_at);
+  const messageWhy = !lead.phone ? 'No phone number.'
+    : 'Only limited companies can be cold-messaged. Call them first, and if they '
+      + 'agree, record it below — that unblocks WhatsApp, SMS and email.';
   const options = [
     { c: 'email',    ok: lead.can_email,   why: lead.block_reason },
-    { c: 'whatsapp', ok: Boolean(lead.phone) && lead.entity_type === 'corporate',
-      why: !lead.phone ? 'No phone number.' : lead.entity_type !== 'corporate'
-        ? 'Only corporate subscribers may be cold-messaged (PECR reg 22).' : '' },
-    { c: 'sms',      ok: Boolean(lead.phone) && lead.entity_type === 'corporate',
-      why: !lead.phone ? 'No phone number.' : lead.entity_type !== 'corporate'
-        ? 'Only corporate subscribers may be cold-messaged (PECR reg 22).' : '' },
-    { c: 'call',     ok: Boolean(lead.phone) && lead.entity_type === 'corporate',
-      why: !lead.phone ? 'No phone number.' : lead.entity_type !== 'corporate'
-        ? 'Only corporate subscribers may be cold-called (PECR reg 21).' : '' },
+    { c: 'whatsapp', ok: Boolean(lead.phone) && canMessage, why: messageWhy },
+    { c: 'sms',      ok: Boolean(lead.phone) && canMessage, why: messageWhy },
+    { c: 'call',     ok: Boolean(lead.phone),
+      why: !lead.phone ? 'No phone number.' : '' },
   ];
+  const consented = Boolean(lead.messaging_consent_at);
+  const showConsent = Boolean(lead.phone) && lead.entity_type !== 'corporate';
   return html`
     <div class="panel">
       <div class="panel-hd"><h3>Channel</h3></div>
@@ -258,10 +266,24 @@ function channelPicker(state) {
               ${CHANNEL_LABEL[o.c]}${!o.ok ? ' — blocked' : ''}
             </button>`)}
         </div>
+        ${showConsent ? html`
+          <div class="msg ${consented ? 'msg-info' : 'msg-warn'}" style="margin-top:10px">
+            <div class="grow">
+              ${consented ? html`
+                <b>Agreed to be messaged.</b> Recorded ${fmtDateTime(lead.messaging_consent_at)}.
+                WhatsApp, SMS and email are open for this business.
+                <button class="mini" data-act="unconsent" style="margin-left:8px">Undo</button>`
+              : html`
+                This isn't a confirmed limited company, so you can't cold-message it — but you
+                <b>can call it</b> (check TPS first). If you call and they say yes to a message,
+                tap below and messaging opens up, on the record.
+                <button class="mini primary" data-act="consent" style="margin-left:8px">
+                  They agreed on a call to be messaged</button>`}
+            </div>
+          </div>` : ''}
         <p class="tip">
-          WhatsApp and SMS open on your phone with the message pre-filled —
-          you tap Send once. Nothing is sent by the tool: there is no free API
-          for either channel, so the tool prepares them and you dispatch.
+          Calling is lawful to any business number that isn't on TPS/CTPS — check first.
+          WhatsApp and SMS open on your phone with the message pre-filled; you tap Send once.
           Email goes through your Gmail as normal.
         </p>
       </div>
@@ -384,6 +406,34 @@ function wire(dlg, state) {
   on(dlg, 'change', '[data-act="tpl"]', async (_e, el) => {
     await fillFrom(state, Number(el.value));
     rerender();
+  });
+
+  on(dlg, 'click', '[data-act="consent"]', async (_e, btn) => {
+    btn.disabled = true;
+    try {
+      const r = await api.leads.consent(state.lead.id);
+      state.lead = r.lead ?? r;
+      toast('Consent recorded — you can message them now');
+      rerender();
+    } catch (err) {
+      toast(err.message, { error: true });
+      btn.disabled = false;
+    }
+  });
+
+  on(dlg, 'click', '[data-act="unconsent"]', async (_e, btn) => {
+    btn.disabled = true;
+    try {
+      const r = await api.leads.unconsent(state.lead.id);
+      state.lead = r.lead ?? r;
+      // Messaging is blocked again, so drop back to the call channel.
+      if (state.channel !== 'call' && state.lead.entity_type !== 'corporate') state.channel = 'call';
+      toast('Consent removed');
+      rerender();
+    } catch (err) {
+      toast(err.message, { error: true });
+      btn.disabled = false;
+    }
   });
 
   on(dlg, 'input', '[data-act="text"]', (_e, el) => {

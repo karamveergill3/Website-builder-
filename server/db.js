@@ -1405,6 +1405,21 @@ Thanks so much, and have a lovely day.
       ALTER TABLE hunt_runs ADD COLUMN not_confirmed INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    name: '040_lead_messaging_consent',
+    up: `
+      -- Consent to be messaged, for businesses PECR would otherwise block from
+      -- cold email/SMS/WhatsApp (sole traders and unconfirmed leads). A live
+      -- phone call is lawful to any business number, so the flow is: call them,
+      -- and if they agree to be messaged, that agreement is recorded here and
+      -- unblocks the electronic-mail channels — consent is exactly what reg 22
+      -- asks for. Stamped so it can be shown ("agreed 12 Sep, by Karam") and
+      -- proven if ever challenged. NULL means no consent on record.
+      ALTER TABLE leads ADD COLUMN messaging_consent_at   TEXT;
+      ALTER TABLE leads ADD COLUMN messaging_consent_by   INTEGER REFERENCES users(id) ON DELETE SET NULL;
+      ALTER TABLE leads ADD COLUMN messaging_consent_note TEXT;
+    `,
+  },
 ];
 
 function migrate() {

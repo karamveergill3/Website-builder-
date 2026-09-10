@@ -90,6 +90,26 @@ export function sendability(lead, arg = {}) {
       `${lead.business_name} has opted out. Opted-out leads are excluded from every send.`);
   }
 
+  // A live phone call is PECR regulation 21, NOT regulation 22: it is lawful
+  // to any business number — a limited company or a sole trader alike — that
+  // is not registered with TPS/CTPS. We cannot bulk-check those registers for
+  // free, so the call is allowed and the response carries the reminder to
+  // screen the number first. This is the lawful way to reach a sole trader.
+  if (channel === 'call') {
+    if (!lead.phone) return no('NO_PHONE', `${lead.business_name} has no phone number.`);
+    return {
+      allowed: true, code: 'OK', reason: null, channel,
+      advice: 'Before calling, check the number is not on TPS (tpsonline.org.uk), or CTPS '
+        + '(ctpsonline.org.uk) for a limited company. A registered number must not be cold-called.',
+    };
+  }
+
+  // Everything else — email, SMS, WhatsApp — is "electronic mail" under PECR
+  // regulation 22. Consent recorded against the lead is exactly what reg 22
+  // asks for, so a business that agreed to be messaged (typically on a call)
+  // may be messaged whatever its legal form. Opt-out and suppression still win.
+  const consented = Boolean(lead.messaging_consent_at);
+
   if (channel === 'email') {
     if (suppressed) {
       return no('SUPPRESSED',
@@ -98,13 +118,13 @@ export function sendability(lead, arg = {}) {
     if (!lead.email) {
       return no('NO_EMAIL', `${lead.business_name} has no email address.`);
     }
-    if (isFreeMail(lead.email)) {
+    if (!consented && isFreeMail(lead.email)) {
       return no('FREE_MAIL',
         `${lead.email} is a personal mailbox (${emailDomain(lead.email)}). The subscriber is the ` +
         'individual, not the business, so PECR regulation 22 applies and cold email is not permitted ' +
         'without consent. Phone them instead, or find a company address.');
     }
-  } else if (channel === 'sms' || channel === 'whatsapp' || channel === 'call') {
+  } else if (channel === 'sms' || channel === 'whatsapp') {
     if (!lead.phone) {
       return no('NO_PHONE', `${lead.business_name} has no phone number.`);
     }
@@ -112,23 +132,23 @@ export function sendability(lead, arg = {}) {
     return no('BAD_CHANNEL', `Unknown channel: ${channel}`);
   }
 
+  // Recorded consent clears the reg 22 gate for any legal form.
+  if (consented) {
+    return { allowed: true, code: 'OK', reason: null, channel };
+  }
+
   if (lead.entity_type === 'individual') {
-    const noun = channel === 'call' ? 'unsolicited marketing call'
-      : channel === 'email' ? 'unsolicited marketing email'
-      : 'unsolicited marketing message';
+    const noun = channel === 'email' ? 'unsolicited marketing email' : 'unsolicited marketing message';
     return no('INDIVIDUAL_SUBSCRIBER',
       `${lead.business_name} is marked as a sole trader or ordinary partnership. Under PECR ` +
-      `regulation 22 these are individual subscribers, so ${noun} needs their prior consent.`);
+      `regulation 22 these are individual subscribers, so ${noun} needs their prior consent — ` +
+      'call them first, and record their agreement on the Reach screen.');
   }
   if (lead.entity_type !== 'corporate') {
     return no('UNCLASSIFIED',
       `${lead.business_name} has not been checked yet. Confirm whether it is a limited company ` +
-      'or LLP (which may be contacted) or a sole trader (which may not) before sending. ' +
-      'Search the name on the Companies House register if you are unsure.');
+      'or LLP (which may be messaged) or a sole trader (call first, then record consent) before ' +
+      'sending. Search the name on the Companies House register if you are unsure.');
   }
-  const advice = channel === 'call'
-    ? 'Corporate subscribers are exempt from TPS but not from CTPS: check the number on ' +
-      'ctpsonline.org.uk before calling.'
-    : null;
-  return { allowed: true, code: 'OK', reason: null, channel, advice };
+  return { allowed: true, code: 'OK', reason: null, channel };
 }

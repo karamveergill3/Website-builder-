@@ -47,6 +47,8 @@ export const api = {
     bulkDelete: (body)        => request('POST', '/api/leads/bulk-delete', body),
     assign:     (id, userId)  => request('PATCH', `/api/leads/${id}`, { assigned_to: userId }),
     bulkAssign: (ids, userId) => request('POST', '/api/leads/bulk-assign', { ids, assigned_to: userId }),
+    consent:    (id, note)    => request('POST', `/api/leads/${id}/consent`, { consent: true, note }),
+    unconsent:  (id)          => request('POST', `/api/leads/${id}/consent`, { consent: false }),
   },
   templates: {
     list:   ()          => request('GET', '/api/templates'),

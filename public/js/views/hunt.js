@@ -246,6 +246,15 @@ export default async function huntView(root, _p, { refresh }) {
             The three filters below are set for you while “Only find businesses I can
             message right now” is on.
           </div>
+          <div class="check" style="margin:-4px 0 12px 22px">
+            <input id="h-sole" name="hunt_include_sole_traders" type="checkbox" ${c.includeSoleTraders ? 'checked' : ''}>
+            <label for="h-sole">Also include sole traders (not just limited companies)
+              <span class="tip" style="display:block;font-weight:400">
+                Keeps the businesses the register can't confirm as a limited company too.
+                They come in <b>call-only</b> — it's lawful to phone them (check TPS first),
+                and WhatsApp/SMS/email unlock the moment they agree to it on that call, which
+                the Reach screen records for you. A bigger pool, a bit more legwork.</span></label>
+          </div>
           <div class="cols-3">
             <div class="f">
               <label for="h-target">Find per day</label>

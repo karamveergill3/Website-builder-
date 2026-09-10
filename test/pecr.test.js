@@ -124,6 +124,40 @@ test('sendability(call) allows a corporate but carries CTPS advice', () => {
   assert.match(v.advice, /CTPS/);
 });
 
+test('sendability(call) allows a sole trader too — calling is reg 21, with TPS advice', () => {
+  const v = sendability(
+    lead({ entity_type: 'individual', business_name: 'Dave the Roofer', phone: '07123456789' }),
+    { channel: 'call' }
+  );
+  assert.equal(v.allowed, true, 'a live call to a sole trader is lawful');
+  assert.match(v.advice, /TPS/);
+});
+
+test('recorded consent unblocks messaging a sole trader (reg 22 consent)', () => {
+  const consented = lead({
+    entity_type: 'individual', phone: '07123456789',
+    messaging_consent_at: '2026-09-10T10:00:00.000Z',
+  });
+  for (const channel of ['whatsapp', 'sms']) {
+    const v = sendability(consented, { channel });
+    assert.equal(v.allowed, true, `${channel} allowed once consent is on record`);
+  }
+  // ...but a sole trader with no consent is still blocked for messaging.
+  const cold = sendability(lead({ entity_type: 'individual', phone: '07123456789' }), { channel: 'whatsapp' });
+  assert.equal(cold.allowed, false);
+  assert.equal(cold.code, 'INDIVIDUAL_SUBSCRIBER');
+});
+
+test('opt-out beats consent — a consented but opted-out lead is still blocked', () => {
+  const v = sendability(
+    lead({ entity_type: 'individual', phone: '07123456789', opted_out: 1,
+           messaging_consent_at: '2026-09-10T10:00:00.000Z' }),
+    { channel: 'whatsapp' }
+  );
+  assert.equal(v.allowed, false);
+  assert.equal(v.code, 'OPTED_OUT');
+});
+
 test('sendability defaults to email when no channel is given (back-compat)', () => {
   const v = sendability(lead());
   assert.equal(v.allowed, true);

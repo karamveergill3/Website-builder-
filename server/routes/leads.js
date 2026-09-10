@@ -238,6 +238,32 @@ router.get('/:id', wrap((req, res) => {
   res.json({ lead: toApi(lead), history });
 }));
 
+/**
+ * POST /api/leads/:id/consent — record that a business agreed to be messaged.
+ *
+ * The lawful route to a sole trader: you call them (regulation 21), and if
+ * they say yes to a WhatsApp/text/email, that agreement is consent under
+ * regulation 22 and unblocks those channels for this lead. Stamped with who
+ * recorded it and when, so it can be shown and proven. Pass consent:false to
+ * withdraw it (they changed their mind).
+ */
+router.post('/:id/consent', wrap((req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+  if (!lead) throw notFound('Lead not found');
+
+  const granting = req.body?.consent !== false;
+  db.prepare(
+    `UPDATE leads SET messaging_consent_at = @at, messaging_consent_by = @by,
+       messaging_consent_note = @note WHERE id = @id`
+  ).run({
+    id: lead.id,
+    at: granting ? nowIso() : null,
+    by: granting ? (req.user?.id ?? null) : null,
+    note: granting ? (str(req.body?.note) ?? 'Agreed on a call to be messaged') : null,
+  });
+  res.json({ lead: toApi(db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)) });
+}));
+
 router.post('/', wrap((req, res) => {
   const lead = parseLeadBody(req.body);
   requireCorporateEvidence(lead);

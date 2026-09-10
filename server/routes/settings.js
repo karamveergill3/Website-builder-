@@ -29,6 +29,7 @@ export const ALLOWED_KEYS = new Set([
   'hunt_max_places_requests', 'hunt_max_register_pages', 'hunt_max_per_trade',
   'hunt_require_no_website', 'hunt_include_unlisted', 'hunt_require_phone',
   'hunt_require_mobile', 'hunt_include_places', 'hunt_messageable_only',
+  'hunt_include_sole_traders',
   // Lead search defaults (Phase 2)
   'default_areas', 'default_region_code',
   // Places pricing, so Google's repricing does not need a code change
@@ -96,6 +97,10 @@ export const DEFAULTS = {
   // leads (sole traders, unconfirmed Google listings, no-number firms) off
   // the list entirely. Governs the three filters above when set.
   hunt_messageable_only: '1',
+  // Off by default: also keep the businesses the register can't confirm as a
+  // limited company (sole traders). Filed call-only — lawful to phone, and
+  // messaging unlocks once they agree on the call. A deliberate opt-in.
+  hunt_include_sole_traders: '0',
   // Invoicing
   invoice_prefix: 'INV',
   invoice_terms: 'Payment is due within 24 hours of the invoice date.',

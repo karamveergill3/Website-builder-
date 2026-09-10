@@ -251,6 +251,47 @@ test('messageable-only confirms Google businesses against the register, keeping 
     'nothing is filed unconfirmed');
 });
 
+test('with sole traders on, the unconfirmed Google businesses are filed call-only', async () => {
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_messageable_only: '1', hunt_include_sole_traders: '1',
+    hunt_include_places: '1', hunt_daily_target: '5',
+  });
+
+  register = [{ body: { hits: 1, items: [company('BRANFORD ROOFING LIMITED', '71000009')] } }];
+  places = [{ places: [
+    place('Otley Roofing', { phone: '07700 900321' }),      // confirmed -> corporate
+    place('Dave the Roofer', { phone: '07700 111333' }),    // not on register -> sole trader, call-only
+  ] }];
+  search = [
+    { body: { items: [{
+      company_number: '71000021', title: 'OTLEY ROOFING LIMITED', company_status: 'active',
+      company_type: 'ltd', date_of_creation: '2015-01-01',
+      address_snippet: '1 High St, Otley', address: { locality: 'Otley' },
+    }] } },
+    { body: { items: [] } },   // Dave: nothing on the register
+  ];
+
+  const run = await runAndWait();
+  assert.equal(run.error, null, run.error ?? '');
+
+  const leads = (await get('/api/leads')).body.leads;
+  const dave = leads.find((l) => l.business_name === 'Dave the Roofer');
+  assert.ok(dave, 'the sole trader is filed, not dropped');
+  assert.notEqual(dave.entity_type, 'corporate', 'and not passed off as a limited company');
+  assert.equal(dave.can_email, false, "can't cold-email a sole trader");
+  // But it IS callable, and messaging opens once consent is recorded.
+  const { sendability } = await import('../server/lib/pecr.js');
+  assert.equal(sendability(dave, { channel: 'call' }).allowed, true, 'callable');
+  assert.equal(sendability(dave, { channel: 'whatsapp' }).allowed, false, 'not messageable cold');
+
+  const consented = (await post(`/api/leads/${dave.id}/consent`, {})).body.lead;
+  assert.ok(consented.messaging_consent_at, 'consent is recorded');
+  assert.equal(sendability(consented, { channel: 'whatsapp' }).allowed, true,
+    'and now it can be messaged');
+});
+
 /* -------------------------------------------------------------- the hunt */
 
 test('a hunt files qualified prospects with no website, and stops at the target', async () => {

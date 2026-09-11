@@ -231,16 +231,15 @@ export default async function huntView(root, _p, { refresh }) {
         <div class="panel-hd"><h3>How it runs</h3></div>
         <div class="panel-bd">
           <div class="check" style="margin-bottom:12px">
-            <input id="h-messageable" name="hunt_messageable_only" type="checkbox" ${c.messageableOnly ? 'checked' : ''}>
+            <input id="h-messageable" name="hunt_messageable_only" type="checkbox" checked disabled>
             <label for="h-messageable"><b>Only find businesses I can message right now</b>
+              <span class="flag" data-ok style="margin-left:6px">always on</span>
               <span class="tip" style="display:block;font-weight:400">
                 Files only the leads that sail straight past the compliance block:
                 a <b>confirmed limited company</b>, with <b>no website</b>, carrying a
-                real <b>07 mobile</b> you can WhatsApp today. Sole traders, firms with
-                no number, and Google listings whose legal form can't be confirmed are
-                left off the list, so nothing you open shows “blocked”. Leave it on for a
-                clean, all-actionable list. Turn it off to also gather ones you'd have to
-                check or find a number for first — more leads, more sifting.</span></label>
+                real <b>07 mobile</b> you can WhatsApp today. This stays on — it's what
+                keeps every lead one you can lawfully act on. To also bring in sole
+                traders (call-first), use the box below.</span></label>
           </div>
           <div id="govern-note" class="tip" style="margin:-4px 0 10px;color:var(--ink-3)" hidden>
             The three filters below are set for you while “Only find businesses I can

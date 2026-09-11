@@ -14,7 +14,8 @@
     "test": "node --test test/*.test.js",
     "lint": "eslint .",
     "hunt": "node server/hunt.js",
-    "doctor": "node server/doctor.js"
+    "doctor": "node server/doctor.js",
+    "backup": "node scripts/backup.js"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

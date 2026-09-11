@@ -163,6 +163,28 @@ export default async function leadsView(root, params, { refresh }) {
     Object.entries(VIEWS).map(([k, f]) => [k, allLeads.filter(f).length])
   );
 
+  // Sort each lead into the box that says what to DO with it, so the list
+  // reads as separate piles rather than one mixed table. Order is priority:
+  // a lead lands in the first box it qualifies for.
+  const messageableNow = (l) =>
+    (l.entity_type === 'corporate' || Boolean(l.messaging_consent_at))
+    && (has(l.phone) || l.can_email === true);
+  const bucketOf = (l) => {
+    if (l.contacted_before === true) return 'done';
+    if (messageableNow(l)) return 'message';
+    if (has(l.phone)) return 'call';
+    return 'nonumber';
+  };
+  const GROUPS = [
+    ['message',  'Ready to message',                          'var(--green-deep)'],
+    ['call',     'To call first — then message if they agree', 'var(--clay)'],
+    ['nonumber', 'Need a contact — run Find contacts',         'var(--ink-3)'],
+    ['done',     'Already contacted',                          'var(--ink-3)'],
+  ];
+  const grouped = new Map(GROUPS.map(([k]) => [k, []]));
+  for (const l of leads) grouped.get(bucketOf(l)).push(l);
+  const colspan = isTeam ? 8 : 7;
+
   // Whether the screen is showing a subset. It decides what "delete" means:
   // deleting what you can see is the only reading that cannot surprise you.
   const filtered = Boolean(q) || status !== 'all' || Boolean(view);
@@ -295,7 +317,15 @@ export default async function leadsView(root, params, { refresh }) {
             <th>Business</th><th>Contact</th><th>Trade</th>${isTeam ? html`<th>Owner</th>` : ''}<th>Status</th><th class="nw">Contacted</th><th></th>
           </tr></thead>
           <tbody>
-            ${leads.map((l) => html`
+            ${GROUPS.flatMap(([key, label, colour]) => {
+              const rows = grouped.get(key);
+              if (!rows.length) return [];
+              return [html`
+                <tr class="group-hd" aria-hidden="true"><td colspan="${colspan}"
+                    style="background:var(--sunk);padding:7px 10px;font-size:.72rem;font-weight:700;
+                           text-transform:uppercase;letter-spacing:.07em;color:${colour}">
+                  ${label} · ${rows.length}</td></tr>`,
+              ...rows.map((l) => html`
               <tr data-id="${l.id}">
                 <td class="c-pick"><input type="checkbox" class="pick" value="${l.id}"
                        data-ok="${l.can_email && l.can_contact}"
@@ -341,7 +371,8 @@ export default async function leadsView(root, params, { refresh }) {
                   <button class="mini danger" data-act="del" data-id="${l.id}"
                           data-name="${l.business_name}" aria-label="Delete">✕</button>
                 </td>
-              </tr>`)}
+              </tr>`)];
+            })}
           </tbody>
         </table>
         </div>`}

@@ -243,3 +243,13 @@ test('the identity seed reads .env and never overwrites a manual edit', async ()
   delete process.env.BIZ_TRADING_NAME;
   delete process.env.BIZ_PLACE_OF_REGISTRATION;
 });
+
+test('a phone-only lead with no legal form still counts as needing a check', async () => {
+  // The bug this guards: "unclassified" once required an email, so the
+  // phone-only leads the hunt files (no email, legal form unknown) read as
+  // zero — and the "Check register" dialog claimed there was nothing to check.
+  const before = (await get('/api/leads/stats')).body.unclassified;
+  await post('/api/leads', newLead({ email: '', phone: '07700 900900', entity_type: 'unknown' }));
+  const after = (await get('/api/leads/stats')).body.unclassified;
+  assert.equal(after, before + 1, 'a no-email unchecked lead is counted for checking');
+});

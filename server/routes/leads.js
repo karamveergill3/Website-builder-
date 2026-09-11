@@ -212,9 +212,13 @@ router.get('/stats', wrap((_req, res) => {
     // "Emailable" means lawfully emailable, not merely "has an address".
     emailable:      db.prepare('SELECT * FROM leads').all()
                       .filter((l) => sendability(l, { suppressed: isSuppressed(l.email) }).allowed).length,
+    // Everything whose legal form is not yet confirmed — this is what
+    // "Check register" actually looks up, so the count must match it. It used
+    // to also require an email (a leftover from when leads arrived with one),
+    // which read 0 for the phone-only leads the hunt files now and made the
+    // "Check register" dialog claim there was nothing to check.
     unclassified:   one(`SELECT COUNT(*) n FROM leads
-                         WHERE entity_type = 'unknown' AND opted_out = 0
-                           AND email IS NOT NULL AND email <> ''`),
+                         WHERE entity_type = 'unknown' AND opted_out = 0`),
     corporate:      one("SELECT COUNT(*) n FROM leads WHERE entity_type = 'corporate'"),
     individual:     one("SELECT COUNT(*) n FROM leads WHERE entity_type = 'individual'"),
     suppressed:     one('SELECT COUNT(*) n FROM suppression_list'),

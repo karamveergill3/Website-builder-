@@ -135,7 +135,13 @@ export default async function leadsView(root, params, { refresh }) {
   };
   // Working views: what needs doing, rather than what state it is in.
   const VIEWS = {
-    unchecked: (l) => l.block_code === 'UNCLASSIFIED',
+    // Legal form not confirmed yet — matches what "Check register" looks up,
+    // whether or not the lead has an email.
+    unchecked: (l) => (l.entity_type ?? 'unknown') === 'unknown',
+    // Your call list: has a number, but isn't a confirmed limited company and
+    // hasn't agreed to messaging — so calling is the lawful way to reach it.
+    tocall:    (l) => has(l.phone) && (l.entity_type ?? 'unknown') !== 'corporate'
+                      && !l.messaging_consent_at && !l.opted_out,
     noemail:   (l) => l.can_email === false && l.block_code === 'NO_EMAIL',
     nosite:    (l) => l.has_website === 0,
     // Has an 07 mobile — the ones you can actually WhatsApp. This is what you
@@ -202,7 +208,10 @@ export default async function leadsView(root, params, { refresh }) {
         <button class="pill" data-filter="all" aria-pressed="${status === 'all'}">All <b>${stats.total}</b></button>
         ${STATUSES.map((s) => html`
           <button class="pill" data-filter="${s}" aria-pressed="${status === s}">${s} <b>${stats.by_status[s] ?? 0}</b></button>`)}
-        ${(counts.unchecked || counts.noemail || counts.nosite || counts.mobile || counts.reachable || counts.nocontact || view) ? html`<span class="sep"></span>` : ''}
+        ${(counts.unchecked || counts.tocall || counts.noemail || counts.nosite || counts.mobile || counts.reachable || counts.nocontact || view) ? html`<span class="sep"></span>` : ''}
+        ${counts.tocall ? html`
+          <button class="pill" data-view="tocall" aria-pressed="${view === 'tocall'}"
+            title="Not a confirmed limited company — call these (then message if they agree on the call)">to call <b>${counts.tocall}</b></button>` : ''}
         ${counts.mobile ? html`
           <button class="pill" data-view="mobile" aria-pressed="${view === 'mobile'}"
             title="Has an 07 mobile — the ones you can WhatsApp">mobile <b>${counts.mobile}</b></button>` : ''}

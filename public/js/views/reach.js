@@ -295,10 +295,32 @@ function messagePanel(state) {
   if (channel === 'call') {
     return html`
       <div class="panel">
-        <div class="panel-hd"><h3>Ready to dial</h3></div>
+        <div class="panel-hd"><h3 class="grow">Ready to dial</h3>
+          ${lead.call_attempts ? html`<span class="meta">${lead.call_attempts} attempt${lead.call_attempts === 1 ? '' : 's'} so far</span>` : ''}
+        </div>
         <div class="panel-bd">
-          <p>Tap <b>Prepare call</b> to open your phone's dialler with the number filled in.</p>
+          ${lead.next_call_at ? html`
+            <div class="msg ${lead.callback_due ? 'msg-warn' : 'msg-info'}" style="margin-bottom:10px"><div class="grow">
+              Call-back ${lead.callback_due ? 'due' : 'set for'} ${fmtDateTime(lead.next_call_at)}.</div></div>` : ''}
+          <p>Tap <b>Prepare call</b> to open your phone's dialler with the number filled in.
+            Check the number isn't on TPS before you ring.</p>
           <button class="primary" data-act="prepare">Prepare call</button>
+
+          <div style="margin-top:14px;border-top:1px solid var(--rule);padding-top:12px">
+            <label class="meta" style="display:block;margin-bottom:6px">After the call, log how it went:</label>
+            <div class="bar" style="flex-wrap:wrap;gap:6px">
+              <button class="mini" data-act="call-outcome" data-outcome="no_answer">No answer</button>
+              <button class="mini" data-act="call-outcome" data-outcome="voicemail">Left voicemail</button>
+              <button class="mini" data-act="call-outcome" data-outcome="reached">Got through</button>
+            </div>
+            <div class="bar" style="flex-wrap:wrap;gap:6px;margin-top:8px">
+              <input type="date" id="reach-callback" class="mini" aria-label="Call-back date">
+              <button class="mini" data-act="call-outcome" data-outcome="callback">Arrange call-back</button>
+            </div>
+            ${lead.call_attempts >= 3 ? html`
+              <p class="tip" style="color:var(--clay);margin-top:8px">
+                Three tries with no answer — time to mark this one <b>Lost</b> and move on.</p>` : ''}
+          </div>
         </div>
       </div>`;
   }
@@ -406,6 +428,31 @@ function wire(dlg, state) {
   on(dlg, 'change', '[data-act="tpl"]', async (_e, el) => {
     await fillFrom(state, Number(el.value));
     rerender();
+  });
+
+  on(dlg, 'click', '[data-act="call-outcome"]', async (_e, btn) => {
+    const outcome = btn.dataset.outcome;
+    const body = { outcome };
+    if (outcome === 'callback') {
+      const when = dlg.querySelector('#reach-callback')?.value;
+      if (!when) { toast('Pick a call-back date first', { error: true }); return; }
+      body.next_call_at = new Date(`${when}T09:00:00`).toISOString();
+    }
+    btn.disabled = true;
+    try {
+      const r = await api.leads.callOutcome(state.lead.id, body);
+      state.lead = r.lead ?? r;
+      toast({
+        no_answer: 'Logged — no answer',
+        voicemail: 'Logged — voicemail left',
+        reached: 'Logged — got through',
+        callback: 'Call-back scheduled',
+      }[outcome] ?? 'Logged');
+      rerender();
+    } catch (err) {
+      toast(err.message, { error: true });
+      btn.disabled = false;
+    }
   });
 
   on(dlg, 'click', '[data-act="consent"]', async (_e, btn) => {

@@ -253,3 +253,33 @@ test('a phone-only lead with no legal form still counts as needing a check', asy
   const after = (await get('/api/leads/stats')).body.unclassified;
   assert.equal(after, before + 1, 'a no-email unchecked lead is counted for checking');
 });
+
+test('call outcomes track attempts and schedule a call-back', async () => {
+  const { body } = await post('/api/leads',
+    sendableLead({ phone: '07700 900123', company_number: '09000010' }));
+  const id = body.lead.id;
+
+  await post(`/api/leads/${id}/call-outcome`, { outcome: 'no_answer' });
+  const twice = await post(`/api/leads/${id}/call-outcome`, { outcome: 'voicemail' });
+  assert.equal(twice.body.lead.call_attempts, 2, 'no-answer and voicemail both count as a try');
+
+  const back = await post(`/api/leads/${id}/call-outcome`,
+    { outcome: 'callback', next_call_at: '2099-01-01T09:00:00.000Z' });
+  assert.equal(back.body.lead.next_call_at, '2099-01-01T09:00:00.000Z');
+  assert.equal(back.body.lead.callback_due, false, 'a future call-back is not due yet');
+  assert.equal(back.body.lead.call_attempts, 2, 'arranging a call-back is not a failed try');
+
+  const through = await post(`/api/leads/${id}/call-outcome`, { outcome: 'reached' });
+  assert.equal(through.body.lead.next_call_at, null, 'getting through clears the call-back');
+});
+
+test('a due call-back is flagged, and a bad outcome is refused', async () => {
+  const { body } = await post('/api/leads',
+    sendableLead({ phone: '07700 900124', company_number: '09000011' }));
+  const due = await post(`/api/leads/${body.lead.id}/call-outcome`,
+    { outcome: 'callback', next_call_at: '2000-01-01T09:00:00.000Z' });
+  assert.equal(due.body.lead.callback_due, true, 'a past call-back time reads as due');
+
+  const bad = await post(`/api/leads/${body.lead.id}/call-outcome`, { outcome: 'nope' });
+  assert.equal(bad.status, 400);
+});

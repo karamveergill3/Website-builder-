@@ -142,6 +142,8 @@ export default async function leadsView(root, params, { refresh }) {
     // hasn't agreed to messaging — so calling is the lawful way to reach it.
     tocall:    (l) => has(l.phone) && (l.entity_type ?? 'unknown') !== 'corporate'
                       && !l.messaging_consent_at && !l.opted_out,
+    // A call-back you arranged has come due — ring these first.
+    duecall:   (l) => l.callback_due === true,
     noemail:   (l) => l.can_email === false && l.block_code === 'NO_EMAIL',
     nosite:    (l) => l.has_website === 0,
     // Has an 07 mobile — the ones you can actually WhatsApp. This is what you
@@ -230,7 +232,10 @@ export default async function leadsView(root, params, { refresh }) {
         <button class="pill" data-filter="all" aria-pressed="${status === 'all'}">All <b>${stats.total}</b></button>
         ${STATUSES.map((s) => html`
           <button class="pill" data-filter="${s}" aria-pressed="${status === s}">${s} <b>${stats.by_status[s] ?? 0}</b></button>`)}
-        ${(counts.unchecked || counts.tocall || counts.noemail || counts.nosite || counts.mobile || counts.reachable || counts.nocontact || view) ? html`<span class="sep"></span>` : ''}
+        ${(counts.unchecked || counts.tocall || counts.duecall || counts.noemail || counts.nosite || counts.mobile || counts.reachable || counts.nocontact || view) ? html`<span class="sep"></span>` : ''}
+        ${counts.duecall ? html`
+          <button class="pill" data-view="duecall" aria-pressed="${view === 'duecall'}"
+            title="Call-backs you arranged that are now due">call-backs due <b>${counts.duecall}</b></button>` : ''}
         ${counts.tocall ? html`
           <button class="pill" data-view="tocall" aria-pressed="${view === 'tocall'}"
             title="Not a confirmed limited company — call these (then message if they agree on the call)">to call <b>${counts.tocall}</b></button>` : ''}
@@ -340,6 +345,9 @@ export default async function leadsView(root, params, { refresh }) {
                 <td>
                   ${l.email ? html`<a href="mailto:${l.email}">${l.email}</a>` : html`<span class="meta">no email</span>`}
                   ${l.phone ? html`<span class="meta mono" style="display:block">${l.phone}</span>` : ''}
+                  ${l.next_call_at ? html`<span class="flag${l.callback_due ? '' : ' '}" style="display:inline-block;margin-top:2px"
+                        title="Call-back arranged">call back ${relative(l.next_call_at)}</span>`
+                    : l.call_attempts ? html`<span class="meta" style="display:block">called ${l.call_attempts}×, no answer</span>` : ''}
                 </td>
                 <td class="meta">${l.category ?? '—'}
                   ${l.has_website === 0 ? html`<span class="flag" data-ok

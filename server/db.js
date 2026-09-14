@@ -1420,6 +1420,18 @@ Thanks so much, and have a lovely day.
       ALTER TABLE leads ADD COLUMN messaging_consent_note TEXT;
     `,
   },
+  {
+    name: '041_lead_call_tracking',
+    up: `
+      -- Cold-calling a sole trader who doesn't answer: track the attempts so a
+      -- lead is tried a sensible number of times (not once, not ten) and a
+      -- promised call-back resurfaces at the right time instead of being lost.
+      ALTER TABLE leads ADD COLUMN call_attempts INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE leads ADD COLUMN last_call_at  TEXT;
+      ALTER TABLE leads ADD COLUMN next_call_at  TEXT;  -- a scheduled call-back
+      ALTER TABLE leads ADD COLUMN call_note     TEXT;  -- the last call's outcome
+    `,
+  },
 ];
 
 function migrate() {

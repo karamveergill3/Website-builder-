@@ -49,6 +49,7 @@ export const api = {
     bulkAssign: (ids, userId) => request('POST', '/api/leads/bulk-assign', { ids, assigned_to: userId }),
     consent:    (id, note)    => request('POST', `/api/leads/${id}/consent`, { consent: true, note }),
     unconsent:  (id)          => request('POST', `/api/leads/${id}/consent`, { consent: false }),
+    callOutcome:(id, body)    => request('POST', `/api/leads/${id}/call-outcome`, body),
   },
   templates: {
     list:   ()          => request('GET', '/api/templates'),

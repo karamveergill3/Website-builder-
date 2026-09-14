@@ -51,6 +51,8 @@ function toApi(row) {
     contacted_at: again.previous ?? row.last_contacted_at ?? null,
     contacted_via: again.channel ?? null,
     contact_block_reason: again.allowed ? null : again.reason,
+    // A scheduled call-back that has come due (its time is now or past).
+    callback_due: Boolean(row.next_call_at) && row.next_call_at <= nowIso(),
   };
 }
 
@@ -264,6 +266,51 @@ router.post('/:id/consent', wrap((req, res) => {
     at: granting ? nowIso() : null,
     by: granting ? (req.user?.id ?? null) : null,
     note: granting ? (str(req.body?.note) ?? 'Agreed on a call to be messaged') : null,
+  });
+  res.json({ lead: toApi(db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)) });
+}));
+
+/**
+ * POST /api/leads/:id/call-outcome — record how a call went, so no-answers are
+ * tried a sensible number of times and promised call-backs come back round.
+ *
+ *   no_answer | voicemail → counts as an attempt (both are "tried, no luck")
+ *   callback              → schedules a call-back (next_call_at required)
+ *   reached               → got through; clears any pending call-back
+ */
+const CALL_OUTCOMES = new Set(['no_answer', 'voicemail', 'callback', 'reached']);
+router.post('/:id/call-outcome', wrap((req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+  if (!lead) throw notFound('Lead not found');
+
+  const outcome = str(req.body?.outcome);
+  if (!CALL_OUTCOMES.has(outcome)) {
+    throw badRequest(`outcome must be one of: ${[...CALL_OUTCOMES].join(', ')}`);
+  }
+  const now = nowIso();
+  const tried = outcome === 'no_answer' || outcome === 'voicemail';
+  const DEFAULT_NOTE = {
+    no_answer: 'No answer', voicemail: 'Left a voicemail',
+    callback: 'Call-back arranged', reached: 'Got through',
+  };
+
+  let nextCall = lead.next_call_at ?? null;
+  if (outcome === 'callback') {
+    nextCall = str(req.body?.next_call_at);
+    if (!nextCall) throw badRequest('next_call_at is required to arrange a call-back.');
+  } else if (outcome === 'reached') {
+    nextCall = null;
+  }
+
+  db.prepare(
+    `UPDATE leads SET call_attempts = @attempts, last_call_at = @now,
+       next_call_at = @next, call_note = @note WHERE id = @id`
+  ).run({
+    id: lead.id,
+    attempts: (lead.call_attempts ?? 0) + (tried ? 1 : 0),
+    now,
+    next: nextCall,
+    note: str(req.body?.note) ?? DEFAULT_NOTE[outcome],
   });
   res.json({ lead: toApi(db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)) });
 }));

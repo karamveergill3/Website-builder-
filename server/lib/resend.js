@@ -95,6 +95,47 @@ export async function sendEmail({ from, to, subject, text, replyTo }) {
 }
 
 /**
+ * Check all verified domains on this Resend account. Returns tracking state
+ * and DNS record status for each.
+ *
+ * @returns {Promise<Array<{ id: string, name: string, status: string,
+ *   open_tracking: boolean, click_tracking: boolean, records: object[] }>>}
+ */
+export async function listDomains() {
+  const key = process.env.RESEND_API_KEY?.trim();
+  if (!key) throw new ResendError('RESEND_API_KEY is not set.', { status: 503, code: 'NOT_CONFIGURED' });
+
+  const res = await fetch('https://api.resend.com/domains', {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ResendError(data?.message ?? `HTTP ${res.status}`, { status: res.status });
+  return data?.data ?? [];
+}
+
+/**
+ * Disable open and click tracking on a Resend domain. At low volume,
+ * tracking pixels and link rewrites hurt deliverability more than
+ * the metrics are worth.
+ */
+export async function disableTracking(domainId) {
+  const key = process.env.RESEND_API_KEY?.trim();
+  if (!key) throw new ResendError('RESEND_API_KEY is not set.', { status: 503, code: 'NOT_CONFIGURED' });
+
+  const res = await fetch(`https://api.resend.com/domains/${encodeURIComponent(domainId)}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ open_tracking: false, click_tracking: false }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ResendError(data?.message ?? `HTTP ${res.status}`, { status: res.status });
+  return data;
+}
+
+/**
  * The last event Resend knows about a message we sent — how the tool learns
  * that a message accepted an hour ago has since bounced or been reported.
  *

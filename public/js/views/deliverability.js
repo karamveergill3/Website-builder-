@@ -3,6 +3,56 @@
 import { api } from '../api.js';
 import { html, mount, $ } from '../dom.js';
 
+async function renderHealthCheck(container) {
+  mount(container, html`<p class="meta">Checking...</p>`);
+  try {
+    const hc = await api.get('/api/settings/deliverability');
+    mount(container, html`
+      <div class="scroll-x"><table class="rows"><tbody>
+        ${(hc.checks || []).map((c) => html`
+          <tr>
+            <td style="width:24px;text-align:center">
+              ${c.ok ? html`<span style="color:var(--green)">&#10003;</span>`
+                     : html`<span style="color:var(--red)">&#10007;</span>`}</td>
+            <td class="c-name">
+              <span class="name" style="font-size:.9rem">${c.label}</span>
+              ${c.detail ? html`<span class="meta">${c.detail}</span>` : ''}
+            </td>
+            <td class="c-act">
+              ${c.fixable ? html`<button class="btn mini" data-fix-tracking="${c.fixable}">Fix</button>` : ''}
+            </td>
+          </tr>`)}
+        ${(hc.manual || []).map((m) => html`
+          <tr>
+            <td style="width:24px;text-align:center">
+              <span style="color:var(--amber)">&#9679;</span></td>
+            <td class="c-name">
+              <span class="name" style="font-size:.9rem">${m.label}</span>
+              ${m.detail ? html`<span class="meta">${m.detail}</span>` : ''}
+            </td>
+            <td class="c-act"><span class="flag">manual</span></td>
+          </tr>`)}
+      </tbody></table></div>
+    `);
+    for (const btn of container.querySelectorAll('[data-fix-tracking]')) {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = '...';
+        try {
+          await api.post('/api/settings/deliverability/fix-tracking', { domain_id: btn.dataset.fixTracking });
+          btn.textContent = 'Done';
+          btn.closest('tr').querySelector('span[style*="red"]')?.replaceWith(
+            Object.assign(document.createElement('span'), { style: 'color:var(--green)', innerHTML: '&#10003;' }));
+        } catch (e) {
+          btn.textContent = 'Failed';
+        }
+      });
+    }
+  } catch (e) {
+    mount(container, html`<p class="meta">Could not load health check: ${e.message}</p>`);
+  }
+}
+
 export default async function deliverabilityView(root) {
   const [gmail, settings] = await Promise.all([
     api.get('/api/gmail/status').catch(() => null),
@@ -28,6 +78,11 @@ export default async function deliverabilityView(root) {
         <div><b class="num">${warm?.cap === null || !warm ? 'Full' : `Day ${warm.day}`}</b>
           <span>${warm?.cap === null || !warm ? 'Warm-up done' : 'Warm-up'}</span></div>
       </div>` : ''}
+
+    <div class="panel">
+      <div class="panel-hd"><h3>Health check</h3></div>
+      <div class="panel-bd" id="health-check"></div>
+    </div>
 
     <div class="panel">
       <div class="panel-hd"><h3>What is enforced before anything sends</h3></div>
@@ -108,6 +163,8 @@ export default async function deliverabilityView(root) {
       </div>
     </div>
   `);
+
+  renderHealthCheck($('#health-check', root));
 
   let t;
   const score = async () => {

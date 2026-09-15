@@ -426,8 +426,22 @@ export function lanUrls(port = PORT) {
  */
 async function startScheduler() {
   const { huntConfig, hunt, activeHunt, ranToday } = await import('./lib/hunter.js');
-  const { configured: resendReady } = await import('./lib/resend.js');
+  const { configured: resendReady, listDomains, disableTracking } = await import('./lib/resend.js');
   const { reconcile } = await import('./lib/delivery.js');
+
+  if (resendReady()) {
+    try {
+      const domains = await listDomains();
+      for (const d of domains) {
+        if (d.open_tracking || d.click_tracking) {
+          await disableTracking(d.id);
+          console.log(`[resend] disabled tracking on ${d.name}`);
+        }
+      }
+    } catch (err) {
+      console.error('[resend] startup tracking check failed:', err.message);
+    }
+  }
 
   const tick = async () => {
     try {

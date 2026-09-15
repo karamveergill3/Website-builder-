@@ -4,7 +4,9 @@ import { wrap, badRequest, looksLikeEmail } from '../lib/http.js';
 import { configured as paypalConfigured } from '../lib/paypal.js';
 import { configured as stripeConfigured } from '../lib/stripe.js';
 import { configured as gcConfigured } from '../lib/gocardless.js';
-import { configured as resendConfigured } from '../lib/resend.js';
+import {
+  configured as resendConfigured, listDomains, disableTracking,
+} from '../lib/resend.js';
 import {
   buildFooter, missingIdentityFields, REQUIRED_IDENTITY_FIELDS,
   OPTIONAL_IDENTITY_FIELDS, DEFAULT_OPTOUT_LINE,
@@ -207,6 +209,104 @@ router.put('/', wrap((req, res) => {
       footer_preview: buildFooter(stored).text,
     },
   });
+}));
+
+import { policyState } from '../lib/sending-policy.js';
+
+/**
+ * GET /api/settings/deliverability — a single call that checks everything the
+ * app can check from the server side: Resend domain status, tracking config,
+ * warm-up state, feedback halt, and what still needs manual action.
+ */
+router.get('/deliverability', wrap(async (_req, res) => {
+  const checks = [];
+  const manual = [];
+  let domains = [];
+
+  if (resendConfigured()) {
+    try {
+      domains = await listDomains();
+    } catch (e) {
+      checks.push({ id: 'resend_api', ok: false, label: 'Resend API reachable', detail: e.message });
+    }
+
+    if (domains.length) {
+      checks.push({ id: 'resend_api', ok: true, label: 'Resend API reachable' });
+      for (const d of domains) {
+        checks.push({
+          id: `domain_${d.id}`,
+          ok: d.status === 'verified',
+          label: `Domain ${d.name} verified`,
+          detail: d.status !== 'verified' ? `Status: ${d.status}` : undefined,
+        });
+        const trackingOn = d.open_tracking || d.click_tracking;
+        checks.push({
+          id: `tracking_${d.id}`,
+          ok: !trackingOn,
+          label: `Tracking off for ${d.name}`,
+          detail: trackingOn ? 'Open/click tracking hurts deliverability at low volume' : undefined,
+          fixable: trackingOn ? d.id : undefined,
+        });
+      }
+    }
+  } else {
+    checks.push({ id: 'resend_api', ok: false, label: 'Resend API key configured', detail: 'Set RESEND_API_KEY in .env' });
+  }
+
+  const policy = policyState();
+  checks.push({
+    id: 'warmup',
+    ok: policy.daily.warmup.active,
+    label: 'Warm-up ramp active',
+    detail: policy.daily.warmup.active
+      ? `Day ${policy.daily.warmup.day ?? 0}, cap ${policy.daily.warmup.cap}/day`
+      : policy.sending_domain
+        ? `Domain ${policy.sending_domain} past warm-up (day ${policy.daily.warmup.day})`
+        : 'No sending domain set',
+  });
+  checks.push({
+    id: 'halt',
+    ok: !policy.daily.halt.halted,
+    label: 'No feedback halt',
+    detail: policy.daily.halt.halted ? policy.daily.halt.reason : undefined,
+  });
+
+  const settings = getSettings();
+  const bizEmail = settings.biz_email ?? '';
+  if (!bizEmail) {
+    manual.push({ id: 'biz_email', label: 'Set a business email in Settings' });
+  }
+
+  manual.push({
+    id: 'gmail_send_as',
+    label: 'Gmail "Send mail as" must use smtp.resend.com',
+    detail: 'In Gmail Settings > Accounts > Send mail as, edit your @keylostudios.com address. '
+      + 'SMTP server: smtp.resend.com, port 587, username: resend, password: your Resend API key.',
+  });
+  manual.push({
+    id: 'namecheap_catchall',
+    label: 'Namecheap catch-all email forwarding',
+    detail: 'In Namecheap > Domain List > keylostudios.com > Email Forwarding, '
+      + 'add a catch-all rule: *@keylostudios.com forwards to karamveerg13@gmail.com.',
+  });
+  manual.push({
+    id: 'dmarc_rua',
+    label: 'Add DMARC reporting address (optional)',
+    detail: 'Update DMARC TXT record to include rua=mailto:dmarc@keylostudios.com for aggregate reports.',
+  });
+
+  res.json({ checks, manual, domains: domains.map((d) => ({ id: d.id, name: d.name, status: d.status })) });
+}));
+
+/**
+ * POST /api/settings/deliverability/fix-tracking — disable open+click tracking
+ * on a Resend domain. The body must include { domain_id }.
+ */
+router.post('/deliverability/fix-tracking', wrap(async (req, res) => {
+  const domainId = req.body?.domain_id;
+  if (!domainId) throw badRequest('domain_id is required');
+  await disableTracking(domainId);
+  res.json({ ok: true, message: 'Open and click tracking disabled.' });
 }));
 
 export default router;

@@ -352,9 +352,34 @@ async function runSend(queueIds, delayMin, delayMax) {
     // was being set on a row that stayed 'pending', and nothing on this path
     // ever read it, so "Held: recent contact" sent anyway. Recorded as a
     // skip because that is what it is, with the reason kept in `error`.
-    if (item.error?.startsWith('Held:') && item.allow_repeat !== 1) {
-      fail(item.error);
-      continue;
+    //
+    // allow_repeat waives ONE reason — the recent-contact one. It used to
+    // waive the whole hold, so a deliberate re-contact sailed past an
+    // 'address' or 'content' hold that had nothing to do with recency. Strip
+    // just 'recent contact' when allow_repeat is set; anything else still
+    // fails the row.
+    if (item.error?.startsWith('Held:')) {
+      const reasons = item.error.slice('Held:'.length).split(',').map((s) => s.trim()).filter(Boolean);
+      const stillHolding = reasons.filter((r) =>
+        !(item.allow_repeat === 1 && r === 'recent contact'));
+      if (stillHolding.length) { fail(`Held: ${stillHolding.join(', ')}`); continue; }
+    }
+
+    // The address may have gone bad between queue and send — a new bounce,
+    // a DNS change, a suppression added ten minutes ago. Re-check now, and
+    // if the answer is 'warn' (a resolver hiccup) defer to a later run
+    // rather than burning the row: a transient DNS failure should cost the
+    // send one day, not the whole prospect.
+    if (getSetting('verify_addresses', '1') === '1') {
+      const check = await checkAddress(item.to_email);
+      if (check.level === 'bad') { fail(check.reason ?? 'address is not deliverable'); continue; }
+      if (check.level === 'warn') {
+        db.prepare('UPDATE send_queue SET error = ? WHERE id = ?')
+          .run(`Deferred: address unverified — ${check.reason ?? 'DNS lookup failed'}`, queueId);
+        activeSend.skipped++;
+        activeSend.done++;
+        continue;
+      }
     }
 
     const { remaining } = capState();
@@ -423,13 +448,21 @@ async function runSend(queueIds, delayMin, delayMax) {
         db.prepare(
           `UPDATE send_queue SET status = 'sent', sent_at = ?, error = NULL WHERE id = ?`
         ).run(at, queueId);
+        // channel stays the historical 'gmail' — its CHECK constraint only
+        // allows three values and rebuilding a table with foreign keys to
+        // change one label is more surgery than the label change is worth.
+        // provider carries the backend identity, from_domain the sending
+        // reputation bucket; both are what the poller and the warm-up ramp
+        // read from now on.
+        const fromDomain = String(from.address ?? '').toLowerCase().split('@')[1] ?? null;
         db.prepare(
           `INSERT INTO email_log
              (lead_id, template_id, lead_name, to_email, subject_snapshot, body_snapshot,
-              sent_at, channel, provider_message_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'gmail', ?)`
+              sent_at, channel, provider_message_id, provider, from_domain)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'gmail', ?, ?, ?)`
         ).run(lead.id, item.template_id, lead.business_name, item.to_email,
-              item.subject, item.body, at, sent.id);
+              item.subject, item.body, at, sent.id,
+              resendConfigured() ? 'resend' : 'gmail', fromDomain);
         db.prepare(
           `UPDATE leads SET last_contacted_at = ?,
              status = CASE WHEN status = 'new' THEN 'sent' ELSE status END
@@ -512,8 +545,12 @@ router.post('/send', wrap((req, res) => {
     );
   }
 
-  const { cap, used, remaining, limited_by_warmup, warmup } = capState();
+  const { cap, used, remaining, limited_by_warmup, limited_by_halt, halt, warmup } = capState();
   if (remaining <= 0) {
+    // The halt reason names what actually happened (a bounce, a complaint)
+    // and how to clear it. Preferred over the generic warm-up/cap wording,
+    // since "Daily cap of 0 reached (0 sent today)" would obscure the cause.
+    if (limited_by_halt) throw badRequest(halt.reason);
     throw badRequest(
       limited_by_warmup
         ? `Warm-up limit of ${cap} reached for today (day ${warmup.day} of sending). ` +

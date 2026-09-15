@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db, getSettings } from '../db.js';
+import { db, getSettings, getSetting } from '../db.js';
 import { wrap, badRequest, notFound, nowIso, int, str, looksLikeEmail } from '../lib/http.js';
 import { renderTemplate, unknownPlaceholders, emptyPlaceholders } from '../lib/template.js';
 import { withFooter, buildFooter } from '../lib/compliance.js';
@@ -146,14 +146,23 @@ router.post('/log', wrap((req, res) => {
   const to = str(req.body.to_email) ?? c.lead.email ?? '';
   const at = nowIso();
 
+  // Hand-sent mail leaves from whichever mailbox the user opened, which is the
+  // signed-in rep's work_email if they have one, else the shared biz_email.
+  // Logging the domain here means the warm-up ramp and the domain cooldown
+  // count a copy-and-paste send the same as one that went through Resend.
+  const fromAddr = String(req.user?.work_email || getSetting('biz_email') || '').trim().toLowerCase();
+  const fromDomain = fromAddr.includes('@') ? fromAddr.split('@')[1] : null;
+
   const info = db.transaction(() => {
     const r = db.prepare(
       `INSERT INTO email_log
-         (lead_id, template_id, lead_name, to_email, subject_snapshot, body_snapshot, sent_at, channel)
-       VALUES (@lead_id, @template_id, @lead_name, @to_email, @subject, @body, @sent_at, @channel)`
+         (lead_id, template_id, lead_name, to_email, subject_snapshot, body_snapshot,
+          sent_at, channel, from_domain)
+       VALUES (@lead_id, @template_id, @lead_name, @to_email, @subject, @body,
+               @sent_at, @channel, @from_domain)`
     ).run({
       lead_id: c.lead.id, template_id: c.template.id, lead_name: c.lead.business_name,
-      to_email: to, subject, body, sent_at: at, channel,
+      to_email: to, subject, body, sent_at: at, channel, from_domain: fromDomain,
     });
     // Only advance a lead that has not already moved further down the funnel.
     db.prepare(

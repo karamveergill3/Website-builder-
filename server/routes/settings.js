@@ -25,6 +25,10 @@ export const ALLOWED_KEYS = new Set([
   'warmup_enabled', 'window_enabled', 'window_start_hour', 'window_end_hour',
   'window_weekdays_only', 'domain_cooldown_days', 'list_unsubscribe_enabled',
   'verify_addresses', 'spam_check_enabled',
+  // Bounce/complaint feedback halt (Phase 3.5): the count of hard bounces in
+  // the last 7 days at which sending pauses, and the timestamp of the last
+  // "I've looked, resume" acknowledgement.
+  'bounce_block_count', 'delivery_ack_at',
   // Daily hunt
   'hunt_enabled', 'hunt_trades', 'hunt_areas', 'hunt_daily_target', 'hunt_hour',
   'hunt_max_places_requests', 'hunt_max_register_pages', 'hunt_max_per_trade',
@@ -64,6 +68,9 @@ export const DEFAULTS = {
   list_unsubscribe_enabled: '0',
   verify_addresses: '1',
   spam_check_enabled: '1',
+  // Three hard bounces in the last week pause sending. A single complaint
+  // pauses it too, without a threshold — one is enough.
+  bounce_block_count: '3',
   hunt_enabled: '0',
   hunt_trades: '',
   hunt_areas: '',

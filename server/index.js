@@ -426,20 +426,37 @@ export function lanUrls(port = PORT) {
  */
 async function startScheduler() {
   const { huntConfig, hunt, activeHunt, ranToday } = await import('./lib/hunter.js');
+  const { configured: resendReady } = await import('./lib/resend.js');
+  const { reconcile } = await import('./lib/delivery.js');
 
   const tick = async () => {
     try {
       const cfg = huntConfig();
-      if (!cfg.enabled || activeHunt() || ranToday()) return;
-      if (new Date().getHours() < cfg.hour) return;
-
-      console.log(`[hunt] starting — target ${cfg.target}`);
-      const run = await hunt({ trigger: 'schedule' });
-      console.log(run.error
-        ? `[hunt] stopped: ${run.error}`
-        : `[hunt] found ${run.found} of ${run.target} (${run.companies_seen} companies seen)`);
+      if (cfg.enabled && !activeHunt() && !ranToday() && new Date().getHours() >= cfg.hour) {
+        console.log(`[hunt] starting — target ${cfg.target}`);
+        const run = await hunt({ trigger: 'schedule' });
+        console.log(run.error
+          ? `[hunt] stopped: ${run.error}`
+          : `[hunt] found ${run.found} of ${run.target} (${run.companies_seen} companies seen)`);
+      }
     } catch (err) {
       console.error('[hunt] scheduler error:', err.message);
+    }
+
+    // The delivery reconciler shares the same 5-minute tick, guarded by
+    // resend so a laptop install without a key never touches api.resend.com.
+    // Failures are logged but never propagate: a Resend outage must not take
+    // the server down.
+    if (resendReady()) {
+      try {
+        const s = await reconcile();
+        if (s.checked && (s.bounced || s.complained)) {
+          console.log(`[delivery] ${s.checked} checked — `
+            + `${s.delivered} delivered, ${s.bounced} bounced, ${s.complained} complained`);
+        }
+      } catch (err) {
+        console.error('[delivery] reconciler error:', err.message);
+      }
     }
   };
 

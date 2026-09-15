@@ -60,7 +60,15 @@ export async function sendEmail({ from, to, subject, text, replyTo }) {
   });
 
   const data = await res.json().catch(() => null);
-  if (res.ok) return { id: data?.id ?? null };
+  if (res.ok) {
+    // A send with no id back is a send we cannot track for bounces later —
+    // treat it as a failure now rather than log a phantom "sent" row.
+    if (!data?.id) {
+      throw new ResendError('Resend accepted the send but returned no id.',
+        { status: 502, code: 'MISSING_ID' });
+    }
+    return { id: data.id };
+  }
 
   const message = data?.message ?? `HTTP ${res.status}`;
 
@@ -83,5 +91,54 @@ export async function sendEmail({ from, to, subject, text, replyTo }) {
     );
   }
 
+  throw new ResendError(`Resend error: ${message}`, { status: 502 });
+}
+
+/**
+ * The last event Resend knows about a message we sent — how the tool learns
+ * that a message accepted an hour ago has since bounced or been reported.
+ *
+ * `last_event` is a string: 'queued', 'sent', 'delivered', 'delivery_delayed',
+ * 'bounced', 'complained', 'canceled'. A 404 is returned as `{ id, last_event:
+ * 'unknown' }` — a Resend id we cannot look up is one whose outcome we can
+ * neither confirm nor rule out, and treating it as clean would be worse than
+ * saying so.
+ *
+ * @returns {Promise<{ id: string, last_event: string, to: string|null }>}
+ */
+export async function getEmail(id) {
+  const key = process.env.RESEND_API_KEY?.trim();
+  if (!key) {
+    throw new ResendError(
+      'RESEND_API_KEY is not set.  Add it to your .env file.',
+      { status: 503, code: 'NOT_CONFIGURED' },
+    );
+  }
+  if (!id) throw new ResendError('getEmail requires an id', { status: 400 });
+
+  const res = await fetch(`https://api.resend.com/emails/${encodeURIComponent(id)}`, {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  if (res.status === 404) return { id, last_event: 'unknown', to: null };
+
+  const data = await res.json().catch(() => null);
+  if (res.ok) {
+    return {
+      id,
+      last_event: data?.last_event ?? 'unknown',
+      // Resend returns `to` as an array of addresses; we send one at a time.
+      to: Array.isArray(data?.to) ? (data.to[0] ?? null) : null,
+    };
+  }
+
+  const message = data?.message ?? `HTTP ${res.status}`;
+  if (res.status === 429) {
+    throw new ResendError(`Resend rate limit: ${message}`,
+      { status: 429, code: 'RATE_LIMITED', retryable: true });
+  }
+  if (res.status === 401 || res.status === 403) {
+    throw new ResendError(`Resend auth error: ${message}`,
+      { status: 401, code: 'AUTH_ERROR' });
+  }
   throw new ResendError(`Resend error: ${message}`, { status: 502 });
 }

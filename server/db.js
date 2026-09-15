@@ -1465,6 +1465,52 @@ Thanks so much, and have a lovely day.
       ALTER TABLE send_queue ADD COLUMN from_email TEXT;
     `,
   },
+  {
+    name: '044_email_log_provider_and_delivery',
+    up: `
+      -- The columns the tool needed once it began sending as its own domain.
+      --
+      -- from_domain is what a message actually left from, taken from the
+      -- resolved From address at INSERT time. The warm-up ramp anchors on the
+      -- earliest send FOR THE CURRENT SENDING DOMAIN, so switching domains
+      -- restarts the ramp at day 0 rather than reading a decade of Gmail
+      -- history as "already warmed up".
+      --
+      -- provider names the backend that carried it — 'gmail' or 'resend'.
+      -- routes/gmail.js used to hardcode channel='gmail' for both, which made
+      -- Resend rows indistinguishable and a poller against api.resend.com for
+      -- a Gmail message id would 404 in a way we could not tell apart. channel
+      -- itself carries a CHECK constraint that only allows the three original
+      -- values, and rebuilding a table with two foreign keys to change it is
+      -- more surgery than the label change is worth; a nullable provider
+      -- column costs nothing and reads out cleanly.
+      --
+      -- delivery_state carries the last event Resend told us about a message
+      -- — 'delivered', 'bounced', 'complained', 'delivery_delayed', 'unknown'.
+      -- Nothing knew before: a 200 back from POST /emails means accepted, not
+      -- delivered, and every failure after that was invisible to the tool.
+      -- On 'bounced' or 'complained' the poller writes to the suppression list
+      -- so a broken address is a one-time cost, not a recurring one.
+      ALTER TABLE email_log ADD COLUMN from_domain          TEXT;
+      ALTER TABLE email_log ADD COLUMN provider             TEXT;
+      ALTER TABLE email_log ADD COLUMN delivery_state       TEXT;
+      ALTER TABLE email_log ADD COLUMN delivery_checked_at  TEXT;
+      CREATE INDEX idx_email_log_provider_msg
+        ON email_log(provider_message_id) WHERE provider_message_id IS NOT NULL;
+      CREATE INDEX idx_email_log_delivery
+        ON email_log(delivery_state, sent_at DESC);
+    `,
+  },
+  {
+    name: '045_shorten_email_starters',
+    run() {
+      for (const s of STARTERS.filter((t) => t.channel === 'email')) {
+        db.prepare(
+          `UPDATE templates SET body = ? WHERE name = ? AND channel = 'email'`
+        ).run(s.body, s.name);
+      }
+    },
+  },
 ];
 
 function migrate() {

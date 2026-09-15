@@ -41,20 +41,13 @@ export const STARTERS = [
     subject: 'A quick idea for {{business}}',
     body: `Hi,
 
-I'm {{my_name}} from {{my_business}}. I came across {{business}} while looking around {{location}}, and I noticed you don't have a website yet, so I thought I'd get in touch and introduce myself properly.
+I'm {{my_name}} from {{my_business}}. I came across {{business}} while looking around {{location}} and noticed you don't have a website yet, so I thought I'd get in touch.
 
-We help local businesses get online with simple, smart one page websites. Nothing over complicated: a clear page that shows what you do, the areas you cover, a few photos of your work, and a button so someone can call or message you straight from their phone. It's the kind of thing that helps new customers find you and feel confident getting in touch.
+We build simple one page websites for local businesses: what you do, photos of your work, and a button so people can call or message you straight from their phone.
 
-If it would be useful, I'd genuinely love to put together a free mock up of what a site for {{business}} could look like. There's no cost and no obligation at all. You'd just get to see a real page built around your business, and if it's not for you, that's completely fine.
+I'd love to put together a free mock up for {{business}} so you can see how it could look. No cost, no obligation, and if it's not for you, that's completely fine.
 
-Would you like me to put one together for you to look at?
-
-Thanks so much for reading, and I hope business is going well.
-
-All the best,
-{{my_name}}
-{{my_business}}
-{{my_phone}}`,
+Would you like me to put one together?`,
   },
 
   {
@@ -63,16 +56,11 @@ All the best,
     subject: 'Following up on {{business}}',
     body: `Hi,
 
-I'm {{my_name}} from {{my_business}}. I dropped you a message last week about building a free website mock up for {{business}}, and I just wanted to follow up gently in case it arrived at a busy time. I completely understand how full the days get.
+I'm {{my_name}} from {{my_business}}. I sent a note last week about a free website mock up for {{business}} and wanted to follow up in case it landed at a busy time.
 
-The offer still stands, and there's honestly no pressure at all. I'd put the page together, send it over for you to look at, and if it's not something you want to take further, that's absolutely no problem.
+The offer still stands. I'd put the page together, send it over, and if it's not for you, no problem at all.
 
-If you'd like me to go ahead, just reply and let me know and I'll get started.
-
-Wishing you all the best,
-{{my_name}}
-{{my_business}}
-{{my_phone}}`,
+Would you like me to go ahead?`,
   },
 
   {

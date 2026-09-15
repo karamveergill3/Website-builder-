@@ -21,7 +21,8 @@ import { getInvoiceByToken, renderInvoicePage, setPayPalOrder, setStripeSession,
 import { configured as paypalConfigured, createOrder, captureOrder, PayPalError } from './lib/paypal.js';
 import { configured as stripeConfigured, createCheckoutSession, retrieveSession, StripeError } from './lib/stripe.js';
 import { configured as gcConfigured, mandateFor, createSubscription, GoCardlessError } from './lib/gocardless.js';
-import { userForToken, readCookie, SESSION_COOKIE } from './lib/auth.js';
+import { userForToken, readCookie, isSecure, SESSION_COOKIE } from './lib/auth.js';
+import { siteGate } from './lib/site-gate.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, '..', 'public');
@@ -29,6 +30,17 @@ const PUBLIC_DIR = resolve(__dirname, '..', 'public');
 export const app = express();
 
 app.use(express.json({ limit: '1mb' }));
+
+/**
+ * The passcode on the front door, before anything else — including the static
+ * app shell, so a stranger who guesses the address is not even shown a sign-in
+ * form to attack. Off entirely unless SITE_PASSCODE is set.
+ *
+ * It exempts the paths a CLIENT opens (invoices, Direct Debit returns, mockup
+ * previews) and the OAuth callback; see server/lib/site-gate.js.
+ */
+app.use('/gate', express.urlencoded({ extended: false, limit: '4kb' }));
+app.use(siteGate({ readCookie, isSecure }));
 
 // Attach the signed-in user (or leave it null) to every request, before
 // anything else looks. Reads the session cookie; never throws.

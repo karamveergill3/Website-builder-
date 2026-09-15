@@ -57,6 +57,8 @@ export default async function outboxView(root, _params, { refresh }) {
       wide: true,
       body: html`<div class="mail">
         <div class="mail-hd"><dl>
+          <dt>From</dt><dd class="mono">${q.from?.name
+            ? `${q.from.name} <${q.from.address}>` : (q.from?.address ?? '')}</dd>
           <dt>To</dt><dd class="mono">${q.to_email}</dd>
           <dt>Subject</dt><dd class="subj">${q.subject}</dd>
         </dl></div>

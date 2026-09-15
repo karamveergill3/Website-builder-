@@ -70,7 +70,7 @@ export function getUserById(id) {
 
 export function listUsers() {
   return db.prepare(
-    `SELECT id, email, name, phone, role, active, created_at, last_login_at
+    `SELECT id, email, name, phone, work_email, role, active, created_at, last_login_at
        FROM users ORDER BY role = 'admin' DESC, name COLLATE NOCASE`
   ).all();
 }
@@ -91,7 +91,7 @@ export function teamRoster() {
  * client for the two things a human gets wrong: a weak password and a
  * duplicate email.
  */
-export function createUser({ email, name, password, role = 'rep', phone = null }) {
+export function createUser({ email, name, password, role = 'rep', phone = null, workEmail = null }) {
   const e = normEmail(email);
   const n = String(name ?? '').trim();
   if (!e || !e.includes('@')) throw badReq('A valid email address is required.');
@@ -103,9 +103,9 @@ export function createUser({ email, name, password, role = 'rep', phone = null }
   if (getUserByEmail(e)) throw badReq('An account with that email already exists.');
 
   const info = db.prepare(
-    `INSERT INTO users (email, name, password_hash, role, active, created_at, phone)
-     VALUES (?, ?, ?, ?, 1, ?, ?)`
-  ).run(e, n, hashPassword(password), role, nowIso(), own(phone));
+    `INSERT INTO users (email, name, password_hash, role, active, created_at, phone, work_email)
+     VALUES (?, ?, ?, ?, 1, ?, ?, ?)`
+  ).run(e, n, hashPassword(password), role, nowIso(), own(phone), normWorkEmail(workEmail));
   return getUserById(Number(info.lastInsertRowid));
 }
 
@@ -120,6 +120,24 @@ export function setUserPhone(id, phone) {
   return getUserById(id);
 }
 
+/**
+ * The mailbox this rep's outreach goes out from, on the business domain. Blank
+ * clears it, which puts them back on the shared Keylo address.
+ */
+export function setUserWorkEmail(id, email) {
+  db.prepare('UPDATE users SET work_email = ? WHERE id = ?').run(normWorkEmail(email), id);
+  return getUserById(id);
+}
+
+function normWorkEmail(email) {
+  const e = normEmail(email);
+  if (!e) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
+    throw badReq('That sending address does not look like an email address.');
+  }
+  return e;
+}
+
 export function setUserPassword(id, password) {
   if (String(password ?? '').length < MIN_PASSWORD) {
     throw badReq(`Password must be at least ${MIN_PASSWORD} characters.`);
@@ -132,7 +150,7 @@ export function setUserPassword(id, password) {
 /** The public shape of a user: never the hash. */
 export const publicUser = (u) => u && {
   id: u.id, email: u.email, name: u.name, role: u.role,
-  phone: u.phone ?? '', active: u.active === 1,
+  phone: u.phone ?? '', work_email: u.work_email ?? '', active: u.active === 1,
 };
 
 /* --------------------------------------------------------------- sessions */

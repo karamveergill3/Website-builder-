@@ -1432,6 +1432,22 @@ Thanks so much, and have a lovely day.
       ALTER TABLE leads ADD COLUMN call_note     TEXT;  -- the last call's outcome
     `,
   },
+  {
+    name: '042_per_rep_sending_address',
+    up: `
+      -- Each rep's own mailbox on the business domain (cailan@keylostudios.com).
+      -- users.email is what they SIGN IN with, which may be a personal address;
+      -- this is what their outreach goes OUT from, and where the reply lands.
+      -- NULL means they have none yet, and their mail goes out under the shared
+      -- Keylo identity from Settings — the single-user behaviour.
+      ALTER TABLE users ADD COLUMN work_email TEXT;
+
+      -- Who staged this message. Read at send time to pick the from-address, so
+      -- a queue row that sits overnight still goes out as the rep who wrote it
+      -- rather than whoever happens to press Send.
+      ALTER TABLE send_queue ADD COLUMN queued_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
+    `,
+  },
 ];
 
 function migrate() {

@@ -117,15 +117,19 @@ export async function openAccount(user, { firstRun = false } = {}) {
         <input id="a-name" name="name" type="text" value="${user.name ?? ''}" required></div>
       <div class="f"><label for="a-phone">Your WhatsApp number ${firstRun ? '' : html`<span class="opt">optional</span>`}</label>
         <input id="a-phone" name="phone" type="tel" value="${user.phone ?? ''}" placeholder="07…" ${firstRun ? 'autofocus' : ''}></div>
+      <div class="f"><label for="a-work">Your sending address <span class="opt">optional</span></label>
+        <input id="a-work" name="work_email" type="email" value="${user.work_email ?? ''}"
+               placeholder="you@keylostudios.com"></div>
       <div class="f"><label for="a-pass">New password <span class="opt">leave blank to keep</span></label>
         <input id="a-pass" name="password" type="password" autocomplete="new-password" minlength="8"></div>
       <p class="tip">Your name and number appear in the WhatsApp and SMS messages you send,
-        so the business you're contacting knows who they're talking to. The Keylo name and
-        email stay the same for everyone.</p>`,
+        so the business you're contacting knows who they're talking to. The sending address is
+        the mailbox your emails go out from and replies come back to — it has to be on the
+        Keylo domain. Leave it blank and your email goes out under the shared Keylo address.</p>`,
     footer: html`<button type="button" data-close>${firstRun ? 'Skip for now' : 'Cancel'}</button>
       <button type="submit" class="primary">${firstRun ? 'Save and start' : 'Save'}</button>`,
     onSubmit: async (d) => {
-      const body = { name: d.name, phone: d.phone };
+      const body = { name: d.name, phone: d.phone, work_email: d.work_email };
       if (d.password) body.password = d.password;
       await api.auth.updateMe(body);
       toast('Saved');
@@ -157,20 +161,26 @@ export default async function teamView(root, _params, { refresh }) {
     </div>
     <div class="panel"><div class="panel-bd">
       <p class="tip" style="margin-top:0">Everyone here works under Keylo Studios. Each rep signs in,
-        connects their own Gmail and uses their own phone for WhatsApp — the lead pool and the
-        "already contacted" memory are shared, so no business is ever approached twice across the team.</p>
+        sends from their own Keylo address and uses their own phone for WhatsApp — the lead pool and
+        the "already contacted" memory are shared, so no business is ever approached twice across the team.</p>
     </div></div>
     <div class="panel"><div class="scroll-x"><table class="rows">
-      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Last signed in</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Signs in with</th><th>Sends from</th><th>Role</th>
+        <th>Last signed in</th><th></th></tr></thead>
       <tbody>
         ${data.users.map((u) => html`
           <tr data-id="${u.id}" style="${u.active ? '' : 'opacity:.55'}">
             <td class="c-name"><span class="name">${u.name}</span>
               ${u.phone ? html`<span class="meta">${u.phone}</span>` : ''}</td>
             <td class="meta">${u.email}</td>
+            <td class="meta">${u.work_email
+              ? u.work_email
+              : html`<span class="opt">shared Keylo address</span>`}</td>
             <td>${u.role === 'admin' ? html`<span class="flag" data-ok>admin</span>` : 'rep'}</td>
             <td class="meta nw">${u.last_login_at ? relative(u.last_login_at) : 'never'}</td>
             <td class="c-act">
+              <button class="mini" data-act="sending" data-id="${u.id}" data-name="${u.name}"
+                      data-work="${u.work_email ?? ''}">Sending address</button>
               <button class="mini" data-act="reset" data-id="${u.id}" data-name="${u.name}">Reset password</button>
               ${u.role === 'admin' ? '' : (u.active
                 ? html`<button class="mini danger" data-act="suspend" data-id="${u.id}" data-name="${u.name}">Suspend</button>`
@@ -188,15 +198,41 @@ export default async function teamView(root, _params, { refresh }) {
           <input id="r-name" name="name" type="text" required></div>
         <div class="f"><label for="r-email">Email (they sign in with this)</label>
           <input id="r-email" name="email" type="email" required></div>
+        <div class="f"><label for="r-work">Sending address <span class="opt">optional</span></label>
+          <input id="r-work" name="work_email" type="email" placeholder="them@keylostudios.com"></div>
         <div class="f"><label for="r-pass">Temporary password <span class="opt">8+ characters</span></label>
           <input id="r-pass" name="password" type="text" minlength="8" required></div>
         <p class="tip">Send them the email and this password. They can change the password from their
-          own account once they sign in.</p>`,
+          own account once they sign in. The sending address is the Keylo mailbox their outreach goes
+          out from; leave it blank and they send under the shared address.</p>`,
       footer: html`<button type="button" data-close>Cancel</button>
         <button type="submit" class="primary">Add rep</button>`,
       onSubmit: async (d) => {
-        await api.auth.addUser({ name: d.name, email: d.email, password: d.password, role: 'rep' });
+        await api.auth.addUser({
+          name: d.name, email: d.email, password: d.password,
+          work_email: d.work_email, role: 'rep',
+        });
         toast(`Added ${d.name}`);
+        return true;
+      },
+    });
+    if (done) refresh();
+  });
+
+  on(root, 'click', '[data-act="sending"]', async (_e, el) => {
+    const done = await modal({
+      title: `Sending address — ${el.dataset.name}`,
+      body: html`
+        <div class="f"><label for="sa">Mailbox their email goes out from <span class="opt">blank to use the shared address</span></label>
+          <input id="sa" name="work_email" type="email" value="${el.dataset.work}"
+                 placeholder="them@keylostudios.com"></div>
+        <p class="tip">Has to be on the Keylo domain — that is the domain verified for sending.
+          Replies come back to this mailbox, so make sure it forwards somewhere they read.</p>`,
+      footer: html`<button type="button" data-close>Cancel</button>
+        <button type="submit" class="primary">Save</button>`,
+      onSubmit: async (d) => {
+        await api.auth.setUser(el.dataset.id, { work_email: d.work_email });
+        toast('Sending address saved');
         return true;
       },
     });

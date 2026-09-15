@@ -18,6 +18,7 @@ import {
 import {
   configured as resendConfigured, sendEmail as resendSend, ResendError,
 } from '../lib/resend.js';
+import { getUserById } from '../lib/auth.js';
 
 const router = Router();
 
@@ -49,6 +50,26 @@ const settingInt = (key, fallback = Number(DEFAULTS[key])) => {
 
 /** Which email backend is active: 'resend' beats 'gmail' beats null. */
 const emailBackend = () => resendConfigured() ? 'resend' : isConnected() ? 'gmail' : null;
+
+/**
+ * Who a queued message goes out as.
+ *
+ * A rep with their own mailbox on the business domain sends under their own
+ * name from their own address, so the reply reaches the person who wrote it.
+ * Anyone without one falls back to the shared Keylo identity — and falls back
+ * to the shared NAME too, deliberately: "Cailan Jassal <karam@...>" is a
+ * mismatch that reads as spoofing to a filter and as a mistake to a human.
+ *
+ * server/lib/template.js resolves {{my_email}} by the same rule, so the body
+ * and the headers name the same mailbox.
+ */
+function senderFor(userId, shared) {
+  const user = userId ? getUserById(userId) : null;
+  const own = user?.work_email?.trim();
+  return own
+    ? { name: user.name, address: own }
+    : { name: shared.name, address: shared.address };
+}
 
 router.get('/status', wrap((_req, res) => {
   res.json({
@@ -187,13 +208,14 @@ router.post('/queue', wrap(async (req, res) => {
         skipped.push({ lead_id: leadId, name: lead.business_name, reason: 'already queued' }); continue;
       }
 
-      const c = composeFor(leadId, templateId, { requireEmail: true, requireCompliance: true });
+      const c = composeFor(leadId, templateId,
+        { requireEmail: true, requireCompliance: true, user: req.user });
       const info = db.prepare(
         `INSERT INTO send_queue
-           (lead_id, template_id, to_email, subject, body, status, created_at, allow_repeat)
-         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`
+           (lead_id, template_id, to_email, subject, body, status, created_at, allow_repeat, queued_by)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
       ).run(leadId, templateId, lead.email, c.subject, c.body, nowIso(),
-            allowRepeat.has(leadId) ? 1 : 0);
+            allowRepeat.has(leadId) ? 1 : 0, req.user?.id ?? null);
       queued.push({ id: Number(info.lastInsertRowid), lead, subject: c.subject, body: c.body });
     }
   });
@@ -230,11 +252,21 @@ router.post('/queue', wrap(async (req, res) => {
 }));
 
 router.get('/queue', wrap((_req, res) => {
+  const shared = {
+    name: getSetting('biz_name') ?? getSetting('biz_contact_name'),
+    address: getSetting('biz_email'),
+  };
   const rows = db.prepare(`
     SELECT q.*, l.business_name, l.opted_out, l.status AS lead_status
       FROM send_queue q LEFT JOIN leads l ON l.id = q.lead_id
      ORDER BY CASE q.status WHEN 'pending' THEN 0 ELSE 1 END, q.id
-  `).all().map((r) => ({ ...r, opted_out: r.opted_out === 1 }));
+  `).all().map((r) => ({
+    ...r,
+    opted_out: r.opted_out === 1,
+    // What the recipient will see in the From line, worked out the same way
+    // the send does — so the Outbox shows it before anything leaves.
+    from: senderFor(r.queued_by, shared),
+  }));
 
   res.json({
     queue: rows,
@@ -269,8 +301,10 @@ router.post('/queue/clear', wrap((_req, res) => {
  */
 async function runSend(queueIds, delayMin, delayMax) {
   const settings = { footer: buildFooter(), optOut: optOutMailto() };
-  const fromName = getSetting('biz_name') ?? getSetting('biz_contact_name');
-  const replyTo = getSetting('biz_email');
+  const shared = {
+    name: getSetting('biz_name') ?? getSetting('biz_contact_name'),
+    address: getSetting('biz_email'),
+  };
 
   for (const queueId of queueIds) {
     if (activeSend?.cancelled) break;
@@ -317,26 +351,30 @@ async function runSend(queueIds, delayMin, delayMax) {
       break;
     }
 
+    const from = senderFor(item.queued_by, shared);
+
     let sent = null;
     try {
       if (resendConfigured()) {
         // ---- Resend path: domain-verified, no per-user OAuth ----
-        const fromAddr = getSetting('biz_email') ?? connectedEmail();
-        const fromFull = fromName ? `${fromName} <${fromAddr}>` : fromAddr;
+        const fromAddr = from.address ?? connectedEmail();
         sent = await resendSend({
-          from: fromFull,
+          from: from.name ? `${from.name} <${fromAddr}>` : fromAddr,
           to: item.to_email,
           subject: item.subject,
           text: item.body,
-          replyTo,
+          replyTo: fromAddr,
         });
       } else {
         // ---- Gmail OAuth path ----
+        // One connected account sends for everyone here, so a rep's own
+        // mailbox can only be the display name and the Reply-To. Resend is
+        // the backend that can actually send AS them.
         const raw = buildRawMessage({
           to: item.to_email,
           from: connectedEmail() ?? undefined,
-          fromName,
-          replyTo,
+          fromName: from.name,
+          replyTo: from.address,
           subject: item.subject,
           body: item.body,
           listUnsubscribe: getSetting('list_unsubscribe_enabled', '0') === '1'

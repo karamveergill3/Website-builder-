@@ -14,7 +14,8 @@ const router = Router();
  * Compose one email for a lead + template, footer included.
  * Shared by the preview endpoint, the manual-send log, and the Phase 3 queue.
  */
-export function composeFor(leadId, templateId, { requireEmail = false, requireCompliance = false } = {}) {
+export function composeFor(leadId, templateId,
+  { requireEmail = false, requireCompliance = false, user = null } = {}) {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
   if (!lead) throw notFound('Lead not found');
   const template = db.prepare('SELECT * FROM templates WHERE id = ?').get(templateId);
@@ -32,7 +33,7 @@ export function composeFor(leadId, templateId, { requireEmail = false, requireCo
     throw badRequest(`${lead.business_name} has no usable email address`);
   }
 
-  const rendered = renderTemplate(template, lead);
+  const rendered = renderTemplate(template, lead, undefined, user);
   const settings = getSettings();
   const footer = buildFooter(settings);
 
@@ -68,10 +69,10 @@ export function composeFor(leadId, templateId, { requireEmail = false, requireCo
         ? [`Unrecognised placeholder(s): ${unknownPlaceholders(template.subject, template.body).map((u) => `{{${u}}}`).join(', ')}`]
         : []),
       ...(looksLikeEmail(lead.email ?? '') ? [] : ['This lead has no email address — you can still copy the text or phone them.']),
-      ...(emptyPlaceholders(template, lead).length
-        ? [`This lead has no ${emptyPlaceholders(template, lead).join(' or ')}, so ` +
-           `${emptyPlaceholders(template, lead).map((k) => `{{${k}}}`).join(' and ')} ` +
-           `render${emptyPlaceholders(template, lead).length === 1 ? 's' : ''} as nothing — ` +
+      ...(emptyPlaceholders(template, lead, undefined, user).length
+        ? [`This lead has no ${emptyPlaceholders(template, lead, undefined, user).join(' or ')}, so ` +
+           `${emptyPlaceholders(template, lead, undefined, user).map((k) => `{{${k}}}`).join(' and ')} ` +
+           `render${emptyPlaceholders(template, lead, undefined, user).length === 1 ? 's' : ''} as nothing — ` +
            'read the text above before you send it.']
         : []),
       ...(verdict.allowed || verdict.code === 'NO_EMAIL' ? [] : [verdict.reason]),
@@ -85,7 +86,7 @@ router.get('/preview', wrap((req, res) => {
   const templateId = int(req.query.template_id);
   if (!leadId || !templateId) throw badRequest('lead_id and template_id are required');
 
-  const c = composeFor(leadId, templateId);
+  const c = composeFor(leadId, templateId, { user: req.user });
   // No draft link until the email would be both compliant and lawful to send.
   const mailto = c.footer.complete && c.verdict.allowed
     ? `mailto:${encodeURIComponent(c.lead.email)}` +
@@ -125,7 +126,8 @@ router.post('/log', wrap((req, res) => {
     throw badRequest('channel must be "mailto" or "copy" for manually sent email');
   }
 
-  const c = composeFor(leadId, templateId, { requireCompliance: true, requireEmail: true });
+  const c = composeFor(leadId, templateId,
+    { requireCompliance: true, requireEmail: true, user: req.user });
 
   // The manual path is a send like any other. It had no prior-contact check
   // at all, and — worse — it is invisible to the domain cooldown, which only

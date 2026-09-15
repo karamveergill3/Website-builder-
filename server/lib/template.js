@@ -60,9 +60,13 @@ export function leadContext(lead = {}) {
  * is one shared Keylo record. The PERSON, though, is whoever is signed in:
  * on a team hub the same message is sent by different reps, and it has to say
  * "I'm Sam" when Sam sends it and "I'm Karam" when Karam does. So a signed-in
- * user's own name and phone overlay the shared values; the rest stays Keylo.
- * With no user (a background render, or a test) it falls back to Settings
- * throughout, which is the old single-user behaviour.
+ * user's own name, phone and mailbox overlay the shared values; the rest stays
+ * Keylo. With no user (a background render, or a test) it falls back to
+ * Settings throughout, which is the old single-user behaviour.
+ *
+ * my_email has to agree with the address the message actually leaves from, or
+ * the body invites a reply to one mailbox while the headers point at another.
+ * server/routes/gmail.js picks the from-address by the same rule.
  */
 export function senderContext(settings = getSettings(), user = null) {
   const v = (k) => (typeof settings[k] === 'string' ? settings[k].trim() : '');
@@ -71,7 +75,7 @@ export function senderContext(settings = getSettings(), user = null) {
     my_name:     own(user?.name)  ?? v('biz_contact_name'),
     my_business: v('biz_name'),
     my_phone:    own(user?.phone) ?? v('biz_phone'),
-    my_email:    v('biz_email'),
+    my_email:    own(user?.work_email) ?? v('biz_email'),
     my_website:  v('biz_website'),
   };
 }

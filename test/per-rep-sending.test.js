@@ -208,7 +208,7 @@ test('the queue says who each message will come from before it is sent', async (
   await post('/api/gmail/queue/clear');
 });
 
-test('the sender is read at send time from who queued it, not who pressed send', async () => {
+test('the sender is whoever queued it, not whoever pressed send', async () => {
   // A rep stages their leads; the admin presses Send (an end-of-day sweep, or
   // the queue sat overnight). The message is still the rep's.
   const lead = await seed('Queued By Rep Ltd');
@@ -221,6 +221,36 @@ test('the sender is read at send time from who queued it, not who pressed send',
 
   assert.equal(sends.length, 1);
   assert.equal(sends[0].from, 'Cailan Test <cailan@test.example>');
+});
+
+test('changing a sending address cannot split a staged message in two', async () => {
+  // The body is frozen when the message is staged. If the From line were
+  // resolved later instead, this sequence produced headers naming the new
+  // mailbox and a body still saying "reply to" the old one — the message
+  // contradicting itself, which is exactly what a spam filter reads as forgery.
+  const lead = await seed('Stale Sender Ltd');
+
+  // Staged while they still had no address of their own.
+  await call('PATCH', '/api/auth/me', { cookie: repCookie, body: { work_email: '' } });
+  sends = [];
+  await call('POST', '/api/gmail/queue',
+    { cookie: repCookie, body: { template_id: templateId, lead_ids: [lead.id] } });
+
+  // Given one afterwards, before the queue is sent.
+  await call('PATCH', '/api/auth/me',
+    { cookie: repCookie, body: { work_email: 'cailan@test.example' } });
+
+  await post('/api/gmail/send', { confirm: true, expected_count: 1 });
+  await waitForSend();
+
+  assert.equal(sends.length, 1);
+  const address = sends[0].from.match(/<(.+)>/)[1];
+  assert.deepEqual(sends[0].reply_to, [address], 'Reply-To must match the From address');
+  assert.match(sends[0].text, new RegExp(`Reply to ${address.replace('.', '\\.')}\\.`),
+    'the body must name the same mailbox the headers do');
+
+  // And it is the one the message was composed with, not the later one.
+  assert.equal(sends[0].from, 'Test Web Studio <sender@test.example>');
 });
 
 test('an admin can set a rep’s sending address for them', async () => {

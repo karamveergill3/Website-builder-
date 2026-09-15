@@ -66,7 +66,9 @@ export function leadContext(lead = {}) {
  *
  * my_email has to agree with the address the message actually leaves from, or
  * the body invites a reply to one mailbox while the headers point at another.
- * server/routes/gmail.js picks the from-address by the same rule.
+ * server/routes/gmail.js picks the from-address by the same rule AND freezes it
+ * onto the queue row in the same breath as this render — agreeing on the rule
+ * is not enough on its own, because the two are read at different times.
  */
 export function senderContext(settings = getSettings(), user = null) {
   const v = (k) => (typeof settings[k] === 'string' ? settings[k].trim() : '');

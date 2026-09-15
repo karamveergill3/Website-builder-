@@ -1448,6 +1448,23 @@ Thanks so much, and have a lovely day.
       ALTER TABLE send_queue ADD COLUMN queued_by INTEGER REFERENCES users(id) ON DELETE SET NULL;
     `,
   },
+  {
+    name: '043_send_queue_from_snapshot',
+    up: `
+      -- The From line, frozen when the message is staged.
+      --
+      -- subject and body are already snapshots: you review a queue row and that
+      -- exact text is what leaves. The sender was not, and resolving it later
+      -- split the message in two — a rep who set their sending address after
+      -- staging got headers naming the new mailbox and a body still saying
+      -- "reply to" the old one. Snapshotting it with the rest closes that, and
+      -- makes the Outbox preview honest: what it shows is what goes.
+      --
+      -- NULL on rows staged before this existed; those resolve from queued_by.
+      ALTER TABLE send_queue ADD COLUMN from_name  TEXT;
+      ALTER TABLE send_queue ADD COLUMN from_email TEXT;
+    `,
+  },
 ];
 
 function migrate() {

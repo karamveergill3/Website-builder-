@@ -51,6 +51,12 @@ const settingInt = (key, fallback = Number(DEFAULTS[key])) => {
 /** Which email backend is active: 'resend' beats 'gmail' beats null. */
 const emailBackend = () => resendConfigured() ? 'resend' : isConnected() ? 'gmail' : null;
 
+/** The shared Keylo identity, for anyone with no mailbox of their own. */
+const sharedSender = () => ({
+  name: getSetting('biz_name') ?? getSetting('biz_contact_name'),
+  address: getSetting('biz_email'),
+});
+
 /**
  * Who a queued message goes out as.
  *
@@ -60,8 +66,9 @@ const emailBackend = () => resendConfigured() ? 'resend' : isConnected() ? 'gmai
  * to the shared NAME too, deliberately: "Cailan Jassal <karam@...>" is a
  * mismatch that reads as spoofing to a filter and as a mistake to a human.
  *
- * server/lib/template.js resolves {{my_email}} by the same rule, so the body
- * and the headers name the same mailbox.
+ * Called once, when the message is staged. server/lib/template.js renders
+ * {{my_email}} from the same user at the same moment, so the body and the
+ * headers are decided together and cannot drift apart afterwards.
  */
 function senderFor(userId, shared) {
   const user = userId ? getUserById(userId) : null;
@@ -70,6 +77,15 @@ function senderFor(userId, shared) {
     ? { name: user.name, address: own }
     : { name: shared.name, address: shared.address };
 }
+
+/**
+ * The sender for a queue row: the snapshot taken when it was staged. Rows
+ * staged before that snapshot existed have neither column, and resolve live
+ * from whoever queued them.
+ */
+const queuedSender = (item) => (item.from_email
+  ? { name: item.from_name, address: item.from_email }
+  : senderFor(item.queued_by, sharedSender()));
 
 router.get('/status', wrap((_req, res) => {
   res.json({
@@ -170,6 +186,8 @@ router.post('/queue', wrap(async (req, res) => {
     throw err;
   }
 
+  const shared = sharedSender();
+
   const queued = [];
   const skipped = [];
 
@@ -210,12 +228,17 @@ router.post('/queue', wrap(async (req, res) => {
 
       const c = composeFor(leadId, templateId,
         { requireEmail: true, requireCompliance: true, user: req.user });
+      // Decided here, with the body, so the From line and the {{my_email}} the
+      // body was just rendered with can never name different mailboxes.
+      const from = senderFor(req.user?.id, shared);
       const info = db.prepare(
         `INSERT INTO send_queue
-           (lead_id, template_id, to_email, subject, body, status, created_at, allow_repeat, queued_by)
-         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+           (lead_id, template_id, to_email, subject, body, status, created_at,
+            allow_repeat, queued_by, from_name, from_email)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`
       ).run(leadId, templateId, lead.email, c.subject, c.body, nowIso(),
-            allowRepeat.has(leadId) ? 1 : 0, req.user?.id ?? null);
+            allowRepeat.has(leadId) ? 1 : 0, req.user?.id ?? null,
+            from.name ?? null, from.address ?? null);
       queued.push({ id: Number(info.lastInsertRowid), lead, subject: c.subject, body: c.body });
     }
   });
@@ -252,10 +275,6 @@ router.post('/queue', wrap(async (req, res) => {
 }));
 
 router.get('/queue', wrap((_req, res) => {
-  const shared = {
-    name: getSetting('biz_name') ?? getSetting('biz_contact_name'),
-    address: getSetting('biz_email'),
-  };
   const rows = db.prepare(`
     SELECT q.*, l.business_name, l.opted_out, l.status AS lead_status
       FROM send_queue q LEFT JOIN leads l ON l.id = q.lead_id
@@ -263,9 +282,8 @@ router.get('/queue', wrap((_req, res) => {
   `).all().map((r) => ({
     ...r,
     opted_out: r.opted_out === 1,
-    // What the recipient will see in the From line, worked out the same way
-    // the send does — so the Outbox shows it before anything leaves.
-    from: senderFor(r.queued_by, shared),
+    // The snapshot the send will use, so the Outbox shows exactly what leaves.
+    from: queuedSender(r),
   }));
 
   res.json({
@@ -301,10 +319,6 @@ router.post('/queue/clear', wrap((_req, res) => {
  */
 async function runSend(queueIds, delayMin, delayMax) {
   const settings = { footer: buildFooter(), optOut: optOutMailto() };
-  const shared = {
-    name: getSetting('biz_name') ?? getSetting('biz_contact_name'),
-    address: getSetting('biz_email'),
-  };
 
   for (const queueId of queueIds) {
     if (activeSend?.cancelled) break;
@@ -351,7 +365,7 @@ async function runSend(queueIds, delayMin, delayMax) {
       break;
     }
 
-    const from = senderFor(item.queued_by, shared);
+    const from = queuedSender(item);
 
     let sent = null;
     try {

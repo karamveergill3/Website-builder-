@@ -15,6 +15,9 @@ import {
   authUrl, exchangeCode, redirectUri, buildRawMessage, sendRaw, revoke,
   isConnected, connectedEmail, clientConfigured, GmailError, SCOPES,
 } from '../lib/gmail.js';
+import {
+  configured as resendConfigured, sendEmail as resendSend, ResendError,
+} from '../lib/resend.js';
 
 const router = Router();
 
@@ -44,12 +47,18 @@ const settingInt = (key, fallback = Number(DEFAULTS[key])) => {
 
 /* ------------------------------------------------------------ connection */
 
+/** Which email backend is active: 'resend' beats 'gmail' beats null. */
+const emailBackend = () => resendConfigured() ? 'resend' : isConnected() ? 'gmail' : null;
+
 router.get('/status', wrap((_req, res) => {
   res.json({
     client_configured: clientConfigured(),
     connected: isConnected(),
     email: connectedEmail(),
     scopes: SCOPES,
+    // Resend fields
+    resend_configured: resendConfigured(),
+    email_backend: emailBackend(),
     policy: policyState(),
     daily: capState(),
     delay_min_seconds: settingInt('send_delay_min_seconds'),
@@ -310,27 +319,40 @@ async function runSend(queueIds, delayMin, delayMax) {
 
     let sent = null;
     try {
-      const raw = buildRawMessage({
-        to: item.to_email,
-        from: connectedEmail() ?? undefined,
-        fromName,
-        replyTo,
-        subject: item.subject,
-        body: item.body,
-        // Off below bulk volumes: the header makes Gmail draw an
-        // "Unsubscribe" chip, which files the message as a campaign. The
-        // opt-out line in the body does the same job and earns a reply.
-        listUnsubscribe: getSetting('list_unsubscribe_enabled', '0') === '1'
-          ? settings.optOut : null,
-      });
-      sent = await sendRaw(raw);
+      if (resendConfigured()) {
+        // ---- Resend path: domain-verified, no per-user OAuth ----
+        const fromAddr = getSetting('biz_email') ?? connectedEmail();
+        const fromFull = fromName ? `${fromName} <${fromAddr}>` : fromAddr;
+        sent = await resendSend({
+          from: fromFull,
+          to: item.to_email,
+          subject: item.subject,
+          text: item.body,
+          replyTo,
+        });
+      } else {
+        // ---- Gmail OAuth path ----
+        const raw = buildRawMessage({
+          to: item.to_email,
+          from: connectedEmail() ?? undefined,
+          fromName,
+          replyTo,
+          subject: item.subject,
+          body: item.body,
+          listUnsubscribe: getSetting('list_unsubscribe_enabled', '0') === '1'
+            ? settings.optOut : null,
+        });
+        sent = await sendRaw(raw);
+      }
     } catch (err) {
       db.prepare("UPDATE send_queue SET status = 'failed', error = ? WHERE id = ?")
         .run(err.message, queueId);
       activeSend.failed++;
       activeSend.done++;
       // A rejected token or an exhausted daily allowance will not fix itself.
-      if (err instanceof GmailError && ['REAUTH_NEEDED', 'DAILY_LIMIT', 'NOT_CONNECTED'].includes(err.code)) {
+      const fatal = (err instanceof GmailError && ['REAUTH_NEEDED', 'DAILY_LIMIT', 'NOT_CONNECTED'].includes(err.code))
+        || (err instanceof ResendError && ['AUTH_ERROR', 'NOT_CONFIGURED'].includes(err.code));
+      if (fatal) {
         activeSend.stopped_reason = err.message;
         break;
       }
@@ -405,7 +427,12 @@ async function runSend(queueIds, delayMin, delayMax) {
  * screen showed, so a stale page can never send more than was reviewed.
  */
 router.post('/send', wrap((req, res) => {
-  if (!isConnected()) throw new GmailError('Connect your Gmail account first.', { status: 401, code: 'NOT_CONNECTED' });
+  if (!resendConfigured() && !isConnected()) {
+    throw new GmailError(
+      'No email backend configured. Set RESEND_API_KEY in .env, or connect a Gmail account.',
+      { status: 401, code: 'NOT_CONNECTED' },
+    );
+  }
   if (activeSend?.running) throw conflict('A send is already running.');
   if (!bool(req.body.confirm)) throw badRequest('Sending requires explicit confirmation.');
 

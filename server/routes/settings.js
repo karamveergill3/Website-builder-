@@ -4,6 +4,7 @@ import { wrap, badRequest, looksLikeEmail } from '../lib/http.js';
 import { configured as paypalConfigured } from '../lib/paypal.js';
 import { configured as stripeConfigured } from '../lib/stripe.js';
 import { configured as gcConfigured } from '../lib/gocardless.js';
+import { configured as resendConfigured } from '../lib/resend.js';
 import {
   buildFooter, missingIdentityFields, REQUIRED_IDENTITY_FIELDS,
   OPTIONAL_IDENTITY_FIELDS, DEFAULT_OPTOUT_LINE,
@@ -139,6 +140,7 @@ router.get('/', wrap((_req, res) => {
       ),
       gmail_connected: Boolean(stored.gmail_refresh_token),
       gmail_email: stored.gmail_email ?? null,
+      resend_configured: resendConfigured(),
       card_configured: stripeConfigured(),
       paypal_configured: paypalConfigured(),
       direct_debit_configured: gcConfigured(),

@@ -119,6 +119,10 @@ test('every outbound host is one of the services this tool uses', () => {
     // GoCardless's REST API, used by Direct Debit for maintenance plans. The
     // token prefix (live_ vs sandbox_) decides which host is called.
     'api.gocardless.com', 'api-sandbox.gocardless.com',
+    // Resend's email API, used as the sending backend when RESEND_API_KEY is
+    // set. Replaces Gmail OAuth for custom-domain email (karam@keylostudios.com).
+    // The docs link is in .env.example; the API host is the send endpoint.
+    'resend.com', 'api.resend.com',
   ]);
 
   const found = new Set();

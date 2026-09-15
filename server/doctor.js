@@ -173,13 +173,18 @@ async function checkPlaces() {
 }
 
 async function checkGmail() {
+  const { configured: resendReady } = await import('./lib/resend.js');
+  if (resendReady()) {
+    return ok('Email', 'Resend API key set — emails send via Resend (custom domain)');
+  }
+
   const { clientConfigured, isConnected, connectedEmail, hasReadScope } =
     await import('./lib/gmail.js');
   if (!clientConfigured()) {
-    return warn('Gmail', 'no OAuth client',
-      'Only needed to send email from inside the tool. WhatsApp, SMS and '
-      + 'calling all work without it — and for businesses with no website, '
-      + 'those are the channels that actually reach anyone.');
+    return warn('Email', 'no sending backend',
+      'Set RESEND_API_KEY in .env for custom-domain email (recommended), '
+      + 'or set GMAIL_CLIENT_ID/SECRET for Gmail OAuth. WhatsApp, SMS and '
+      + 'calling all work without either.');
   }
   if (!isConnected()) {
     return warn('Gmail', 'client configured, account not connected',

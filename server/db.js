@@ -1564,6 +1564,17 @@ Thanks so much, and have a lovely day.
       }
     },
   },
+  {
+    name: '051_proper_signoff_email_starters',
+    run() {
+      // Drop the "Fancy a look?" close; sign off properly with "Kind regards".
+      for (const s of STARTERS.filter((t) => t.channel === 'email')) {
+        db.prepare(
+          `UPDATE templates SET body = ?, subject = ? WHERE name = ? AND channel = 'email'`
+        ).run(s.body, s.subject, s.name);
+      }
+    },
+  },
 ];
 
 function migrate() {

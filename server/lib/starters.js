@@ -53,7 +53,8 @@ We build websites for local businesses — a clean one-pager, a full multi-page 
 
 Happy to put a free mock-up together for {{business}} so you can see it for yourself. No cost, no obligation.
 
-Fancy a look?`,
+Kind regards,
+{{my_name}}`,
   },
 
   {
@@ -70,7 +71,8 @@ Quick reminder:
 
 Offer still stands. I'll put it together, send it over, and if it is not for you, no worries.
 
-Shall I go ahead?`,
+Kind regards,
+{{my_name}}`,
   },
 
   {

@@ -47,8 +47,6 @@ I'm {{my_name}} from {{my_business}}. I came across {{business}} while looking a
 
 Why it matters:
 • {{boost_search_share}} of people Google a local trade before ringing anyone.
-• {{boost_credibility}} judge whether to trust you on how your site looks.
-• Without one, about {{boost_lost_enquiries}} enquiries go to competitors who show up in search.
 • A proper site usually brings {{boost_enquiries_range}} more customers within six months.
 
 We build simple one-page websites for local businesses: what you do, photos of your work, the areas you cover, and a button so people can call or message you straight from their phone.
@@ -68,7 +66,6 @@ I'm {{my_name}} from {{my_business}}. I sent a note last week about a free websi
 
 Quick reminder on the numbers:
 • {{boost_search_share}} Google a local trade before ringing.
-• {{boost_lost_enquiries}} enquiries go to competitors that show up in search.
 • A proper site adds {{boost_enquiries_range}} more customers in six months.
 
 The offer still stands. I would put the page together, send it over, and if it is not for you, no problem at all.

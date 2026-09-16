@@ -1541,6 +1541,17 @@ Thanks so much, and have a lovely day.
       }
     },
   },
+  {
+    name: '049_two_stat_email_starters',
+    run() {
+      // Down to two stats — the credibility and lost-enquiries figures pulled.
+      for (const s of STARTERS.filter((t) => t.channel === 'email')) {
+        db.prepare(
+          `UPDATE templates SET body = ?, subject = ? WHERE name = ? AND channel = 'email'`
+        ).run(s.body, s.subject, s.name);
+      }
+    },
+  },
 ];
 
 function migrate() {

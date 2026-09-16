@@ -211,7 +211,8 @@ router.put('/', wrap((req, res) => {
   });
 }));
 
-import { policyState } from '../lib/sending-policy.js';
+import { policyState, sendingDomain } from '../lib/sending-policy.js';
+import { promises as dns } from 'node:dns';
 
 /**
  * GET /api/settings/deliverability — a single call that checks everything the
@@ -271,24 +272,46 @@ router.get('/deliverability', wrap(async (_req, res) => {
     detail: policy.daily.halt.halted ? policy.daily.halt.reason : undefined,
   });
 
+  const domain = sendingDomain();
+  if (domain) {
+    try {
+      const mx = await dns.resolveMx(domain);
+      const hasMx = mx && mx.length > 0;
+      checks.push({
+        id: 'mx_records',
+        ok: hasMx,
+        label: `MX records for ${domain}`,
+        detail: hasMx
+          ? `${mx.length} record${mx.length > 1 ? 's' : ''}: ${mx.map((r) => r.exchange).join(', ')}`
+          : 'No MX records — inbound replies will bounce',
+      });
+    } catch (e) {
+      checks.push({
+        id: 'mx_records',
+        ok: false,
+        label: `MX records for ${domain}`,
+        detail: e.code === 'ENODATA' || e.code === 'ENOTFOUND'
+          ? 'No MX records — set up email forwarding in your domain registrar'
+          : `DNS lookup failed: ${e.message}`,
+      });
+    }
+  }
+
   const settings = getSettings();
   const bizEmail = settings.biz_email ?? '';
   if (!bizEmail) {
     manual.push({ id: 'biz_email', label: 'Set a business email in Settings' });
   }
 
-  manual.push({
-    id: 'gmail_send_as',
-    label: 'Gmail "Send mail as" must use smtp.resend.com',
-    detail: 'In Gmail Settings > Accounts > Send mail as, edit your @keylostudios.com address. '
-      + 'SMTP server: smtp.resend.com, port 587, username: resend, password: your Resend API key.',
-  });
-  manual.push({
-    id: 'namecheap_catchall',
-    label: 'Namecheap catch-all email forwarding',
-    detail: 'In Namecheap > Domain List > keylostudios.com > Email Forwarding, '
-      + 'add a catch-all rule: *@keylostudios.com forwards to karamveerg13@gmail.com.',
-  });
+  if (domain) {
+    manual.push({
+      id: 'email_forwarding',
+      label: `Email forwarding for @${domain} (for inbound replies)`,
+      detail: `In your domain registrar, add a catch-all forwarding rule: `
+        + `*@${domain} forwards to your Gmail. `
+        + `Without this, replies to your @${domain} address won't arrive in Gmail.`,
+    });
+  }
   manual.push({
     id: 'dmarc_rua',
     label: 'Add DMARC reporting address (optional)',

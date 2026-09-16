@@ -185,7 +185,7 @@ export default async function invoicesView(root, _params, { refresh }) {
   const paid = invoices.filter((i) => i.status === 'paid')
     .reduce((n, i) => n + due(i), 0);
 
-  const payReady = Boolean((s.pay_bank_account && s.pay_bank_name) || s.pay_paypal_link);
+  const payReady = Boolean(s.pay_bank_account && s.pay_bank_name);
 
   mount(root, html`
     <div class="readout">
@@ -196,7 +196,7 @@ export default async function invoicesView(root, _params, { refresh }) {
 
     ${!payReady ? html`
       <div class="msg msg-warn" style="margin-bottom:10px"><div class="grow">
-        Add your <b>bank details or PayPal link</b> below so invoices tell clients how to pay.
+        Add your <b>bank details</b> below so invoices tell clients how to pay.
       </div></div>` : ''}
 
     <div class="bar">
@@ -276,12 +276,6 @@ export default async function invoicesView(root, _params, { refresh }) {
           <div class="f"><label>Bank account name</label><input name="pay_bank_name" value="${s.pay_bank_name ?? ''}"></div>
           <div class="f"><label>Sort code</label><input name="pay_bank_sortcode" value="${s.pay_bank_sortcode ?? ''}" placeholder="00-00-00"></div>
           <div class="f"><label>Account number</label><input name="pay_bank_account" value="${s.pay_bank_account ?? ''}" placeholder="12345678"></div>
-        </div>
-        <div class="cols">
-          <div class="f"><label>PayPal link <span class="opt">PayPal.me or a hosted invoice</span></label>
-            <input name="pay_paypal_link" value="${s.pay_paypal_link ?? ''}" placeholder="https://paypal.me/yourname"></div>
-          <div class="f"><label>Klarna note <span class="opt">shown as an option</span></label>
-            <input name="pay_klarna_note" value="${s.pay_klarna_note ?? ''}" placeholder="Ask us about paying monthly with Klarna"></div>
         </div>
         <div class="cols">
           <div class="f"><label>Invoice prefix</label><input name="invoice_prefix" value="${s.invoice_prefix ?? 'INV'}" placeholder="KEY"></div>

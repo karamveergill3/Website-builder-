@@ -41,7 +41,7 @@ export const STARTERS = [
     subject: 'A website for {{business}}',
     body: `Hi,
 
-I'm {{my_name}} from {{my_business}}. Came across {{business}} in {{location}} and noticed you don't have a website yet — thought I'd reach out.
+I'm {{my_name}} from {{my_business}}. Came across {{business}} in {{location}} and noticed you don't have a website yet, so I thought I'd reach out.
 
 {{about_line}}
 
@@ -49,7 +49,7 @@ Two quick reasons it matters:
 • {{boost_search_share}} of people Google a local trade before ringing anyone.
 • A proper site typically brings {{boost_enquiries_range}} more customers within six months.
 
-We build websites for local businesses — a clean one-pager, a full multi-page site, booking systems, galleries, online payments, whatever your customers need.
+We build websites for local businesses. A clean one-pager, a full multi-page site, booking systems, galleries, online payments, whatever your customers need.
 
 Happy to put a free mock-up together for {{business}} so you can see it for yourself. No cost, no obligation.
 
@@ -63,7 +63,7 @@ Kind regards,
     subject: 'Following up on {{business}}',
     body: `Hi,
 
-{{my_name}} again from {{my_business}} — following up on the free website mock-up for {{business}}, in case last week's note landed at a busy time.
+{{my_name}} again from {{my_business}}, following up on the free website mock-up for {{business}} in case last week's note landed at a busy time.
 
 Quick reminder:
 • {{boost_search_share}} Google a local trade before ringing.

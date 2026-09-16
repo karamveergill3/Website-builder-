@@ -35,7 +35,7 @@ function fill(str, lead, me = {}) {
     first_name: String(lead.business_name).split(/\s+/)[0],
     editorial_summary: summary,
     about_line: summary
-      ? `I see ${lead.business_name} is described as "${summary.replace(/\s+/g, ' ').replace(/\.+$/, '')}" — the kind of story a website is made for.`
+      ? `I see ${lead.business_name} is described as "${summary.replace(/\s+/g, ' ').replace(/\.+$/, '')}". That's exactly the kind of story a website is made for.`
       : '',
     ...STAT_VALUES,
     // The sender half, from Settings — so the preview shows the message as it

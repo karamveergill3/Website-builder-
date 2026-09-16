@@ -100,9 +100,11 @@ export function leadContext(lead = {}) {
     primary_type: lead.primary_type ?? '',
     // Ready-to-drop sentence quoting Google's summary. Empty when Google has
     // no summary, so an entire paragraph vanishes rather than leaving a
-    // dangling "I noticed you're — " orphan.
+    // dangling orphan phrase. No em-dashes: a template that reads as if
+    // written by a person cannot break its cover in the one line the tool
+    // interpolates.
     about_line: summary
-      ? `I see ${business} is described as "${summary.replace(/\s+/g, ' ').replace(/\.+$/, '')}" — the kind of story a website is made for.`
+      ? `I see ${business} is described as "${summary.replace(/\s+/g, ' ').replace(/\.+$/, '')}". That's exactly the kind of story a website is made for.`
       : '',
     ...STAT_PLACEHOLDERS,
   };

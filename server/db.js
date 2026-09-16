@@ -1575,6 +1575,18 @@ Thanks so much, and have a lovely day.
       }
     },
   },
+  {
+    name: '052_no_em_dashes_in_email_starters',
+    run() {
+      // Em-dashes read as machine-written. Rewrote each affected sentence
+      // with a comma or a full stop so a person's voice comes through.
+      for (const s of STARTERS.filter((t) => t.channel === 'email')) {
+        db.prepare(
+          `UPDATE templates SET body = ?, subject = ? WHERE name = ? AND channel = 'email'`
+        ).run(s.body, s.subject, s.name);
+      }
+    },
+  },
 ];
 
 function migrate() {

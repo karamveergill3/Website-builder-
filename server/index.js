@@ -138,7 +138,7 @@ app.get('/i/:token', (req, res) => {
     // form-action 'self' so the "Pay with PayPal" button can post back to us
     // (which then redirects to PayPal); still no script anywhere.
     "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "
-    + "form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+    + "form-action 'self' https://checkout.stripe.com https://www.paypal.com https://www.sandbox.paypal.com; frame-ancestors 'none'; base-uri 'none'"
   );
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');

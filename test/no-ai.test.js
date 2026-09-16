@@ -112,10 +112,14 @@ test('every outbound host is one of the services this tool uses', () => {
     // automated PayPal Checkout (Phase B). Cloudflare's cloudflared is how
     // the team hub is reached from anywhere (a quick tunnel), not called by
     // the server.
-    'paypal.me', 'www.paypal.com', 'api-m.paypal.com', 'api-m.sandbox.paypal.com',
+    'paypal.me', 'www.paypal.com', 'www.sandbox.paypal.com',
+    'api-m.paypal.com', 'api-m.sandbox.paypal.com',
     // Stripe's REST API, used by automated Stripe Checkout (card / Klarna /
     // Clearpay). One host for both test and live — the key prefix decides which.
-    'api.stripe.com',
+    // checkout.stripe.com is Stripe's hosted Checkout page the client is
+    // redirected to — named in the CSP form-action directive so the browser
+    // allows the redirect after the form POST.
+    'api.stripe.com', 'checkout.stripe.com',
     // GoCardless's REST API, used by Direct Debit for maintenance plans. The
     // token prefix (live_ vs sandbox_) decides which host is called.
     'api.gocardless.com', 'api-sandbox.gocardless.com',

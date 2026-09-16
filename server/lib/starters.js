@@ -41,19 +41,19 @@ export const STARTERS = [
     subject: 'A website for {{business}}',
     body: `Hi,
 
-I'm {{my_name}} from {{my_business}}. I came across {{business}} while looking around {{location}} and noticed you don't have a website yet, so I thought I'd get in touch.
+I'm {{my_name}} from {{my_business}}. Came across {{business}} in {{location}} and noticed you don't have a website yet — thought I'd reach out.
 
 {{about_line}}
 
-Why it matters:
+Two quick reasons it matters:
 • {{boost_search_share}} of people Google a local trade before ringing anyone.
-• A proper site usually brings {{boost_enquiries_range}} more customers within six months.
+• A proper site typically brings {{boost_enquiries_range}} more customers within six months.
 
-We build simple one-page websites for local businesses: what you do, photos of your work, the areas you cover, and a button so people can call or message you straight from their phone.
+We build websites for local businesses — a clean one-pager, a full multi-page site, booking systems, galleries, online payments, whatever your customers need.
 
-I would love to put together a free mock-up for {{business}} so you can see how it could look. No cost, no obligation, and if it is not for you, that is completely fine.
+Happy to put a free mock-up together for {{business}} so you can see it for yourself. No cost, no obligation.
 
-Would you like me to put one together?`,
+Fancy a look?`,
   },
 
   {
@@ -62,15 +62,15 @@ Would you like me to put one together?`,
     subject: 'Following up on {{business}}',
     body: `Hi,
 
-I'm {{my_name}} from {{my_business}}. I sent a note last week about a free website mock-up for {{business}} and wanted to follow up in case it landed at a busy time.
+{{my_name}} again from {{my_business}} — following up on the free website mock-up for {{business}}, in case last week's note landed at a busy time.
 
-Quick reminder on the numbers:
+Quick reminder:
 • {{boost_search_share}} Google a local trade before ringing.
-• A proper site adds {{boost_enquiries_range}} more customers in six months.
+• A proper site adds {{boost_enquiries_range}} more customers within six months.
 
-The offer still stands. I would put the page together, send it over, and if it is not for you, no problem at all.
+Offer still stands. I'll put it together, send it over, and if it is not for you, no worries.
 
-Would you like me to go ahead?`,
+Shall I go ahead?`,
   },
 
   {

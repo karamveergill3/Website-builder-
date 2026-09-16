@@ -1552,6 +1552,18 @@ Thanks so much, and have a lovely day.
       }
     },
   },
+  {
+    name: '050_shorter_engaging_email_starters',
+    run() {
+      // Tighter wording, and drops the "simple one-page" claim — we build any
+      // scope of site, so the pitch shouldn't limit itself in the opener.
+      for (const s of STARTERS.filter((t) => t.channel === 'email')) {
+        db.prepare(
+          `UPDATE templates SET body = ?, subject = ? WHERE name = ? AND channel = 'email'`
+        ).run(s.body, s.subject, s.name);
+      }
+    },
+  },
 ];
 
 function migrate() {

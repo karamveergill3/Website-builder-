@@ -1530,6 +1530,17 @@ Thanks so much, and have a lovely day.
       }
     },
   },
+  {
+    name: '048_snappier_email_starters',
+    run() {
+      // Same stats, tighter wording — bullets instead of a long paragraph.
+      for (const s of STARTERS.filter((t) => t.channel === 'email')) {
+        db.prepare(
+          `UPDATE templates SET body = ?, subject = ? WHERE name = ? AND channel = 'email'`
+        ).run(s.body, s.subject, s.name);
+      }
+    },
+  },
 ];
 
 function migrate() {

@@ -511,7 +511,9 @@ export function renderInvoicePage(inv, settings = getSettings()) {
   .pay { margin-bottom:18px; }
   .pay h4 { margin:0 0 6px; }
   .btn { display:inline-block; background:var(--green); color:#fff; text-decoration:none;
-    padding:11px 20px; border-radius:8px; font-weight:600; }
+    padding:11px 20px; border-radius:8px; font-weight:600; cursor:pointer;
+    font-family:inherit; font-size:.95rem; line-height:1.4; }
+  button.btn { border:none; -webkit-appearance:none; appearance:none; }
   .bank td { padding:3px 14px 3px 0; }
   .bank td:first-child { color:var(--muted); }
   .fine { color:var(--muted); font-size:.82rem; }

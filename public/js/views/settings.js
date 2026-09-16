@@ -172,20 +172,6 @@ export default async function settingsView(root, _p, { refresh }) {
               : html`Set <code class="mono">GOOGLE_MAPS_API_KEY</code> — see <code class="mono">docs/PHASE2-PLACES.md</code>`}</td>
           </tr>
           <tr>
-            <td class="c-name"><span class="name" style="font-size:.9rem">Gmail</span>
-                <span class="meta">Sends reviewed emails</span></td>
-            <td class="nw">${data.integrations.gmail_connected
-              ? html`<span class="flag" data-ok>connected</span>`
-              : data.integrations.gmail_client_configured
-                ? html`<span class="flag">not authorised</span>`
-                : html`<span class="flag">not set up</span>`}</td>
-            <td class="meta">${data.integrations.gmail_connected
-              ? html`<span class="mono">${data.integrations.gmail_email}</span> · <a href="#/outbox">Outbox</a>`
-              : data.integrations.gmail_client_configured
-                ? html`<a href="#/outbox">Connect</a>`
-                : html`Set <code class="mono">GMAIL_CLIENT_ID</code> and <code class="mono">GMAIL_CLIENT_SECRET</code>`}</td>
-          </tr>
-          <tr>
             <td class="c-name"><span class="name" style="font-size:.9rem">Resend</span>
                 <span class="meta">Sends emails from your domain</span></td>
             <td class="nw">${data.integrations.resend_configured
@@ -206,16 +192,6 @@ export default async function settingsView(root, _p, { refresh }) {
                 ? html`<span style="color:var(--amber)">Test mode</span> — no real charges. Swap to <code class="mono">sk_live_</code> for real payments.`
                 : 'Live. Clients can pay invoices by card.'
               : html`Set <code class="mono">STRIPE_SECRET_KEY</code> in .env`}</td>
-          </tr>
-          <tr>
-            <td class="c-name"><span class="name" style="font-size:.9rem">PayPal</span>
-                <span class="meta">PayPal payments on invoices</span></td>
-            <td class="nw">${data.integrations.paypal_configured
-              ? html`<span class="flag" data-ok>connected</span>`
-              : html`<span class="flag">not set up</span>`}</td>
-            <td class="meta">${data.integrations.paypal_configured
-              ? 'Connected.'
-              : html`Set <code class="mono">PAYPAL_CLIENT_ID</code> and <code class="mono">PAYPAL_CLIENT_SECRET</code> in .env`}</td>
           </tr>
           <tr>
             <td class="c-name"><span class="name" style="font-size:.9rem">GoCardless</span>

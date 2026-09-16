@@ -3,7 +3,6 @@ import { $, $$, mount, html, toast, clearViewTimers } from './dom.js';
 
 import leadsView     from './views/leads.js';
 import templatesView from './views/templates.js';
-import composeView   from './views/compose.js';
 import logView       from './views/log.js';
 import settingsView  from './views/settings.js';
 import searchView    from './views/search.js';
@@ -22,7 +21,6 @@ const ROUTES = {
   '/hunt':      huntView,
   '/places':    searchView,
   '/search':    searchView,
-  '/compose':   composeView,
   '/templates': templatesView,
   '/outbox':    outboxView,
   '/replies':   repliesView,

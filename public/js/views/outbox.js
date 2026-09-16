@@ -13,8 +13,7 @@ export default async function outboxView(root, _params, { refresh }) {
       <div class="panel"><div class="panel-bd">
         <div class="msg msg-warn"><div class="grow">
           No email backend is set up. Set <code class="mono">RESEND_API_KEY</code> in
-          <code class="mono">.env</code> and restart. Compose still gives you copy-and-paste
-          and mail-app drafts.
+          <code class="mono">.env</code> and restart the server.
         </div></div>
       </div></div>`);
     return;
@@ -189,7 +188,7 @@ export default async function outboxView(root, _params, { refresh }) {
       ${pending.length === 0 ? html`
         <div class="panel"><div class="blank">
           <strong>Nothing queued</strong>
-          Queue from <a href="#/compose">Compose</a> or the <a href="#/leads">lead list</a>.
+          Queue from the <a href="#/leads">lead list</a> — pick a lead and click Reach.
         </div></div>` : html`
         <div class="panel">
           <div class="panel-hd"><h3 class="grow">Awaiting confirmation — ${pending.length}</h3></div>

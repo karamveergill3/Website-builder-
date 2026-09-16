@@ -60,6 +60,10 @@ export async function openReachDialog(leadId) {
     finding: false,
     lastPrepare: null,
     manualUrl: '',
+    // The full email preview for the current template — subject, filled body,
+    // footer preview, PECR verdict. Kept alongside `text` so switching between
+    // email and messaging channels does not lose either.
+    emailPreview: null,
   };
 
   // Initial fetch of any signals we already have.
@@ -123,11 +127,30 @@ async function fillFrom(state, id) {
 
 /** Pick this channel's opening message, unless the user has typed their own. */
 async function fillDefault(state) {
-  if (state.channel === 'email' || state.channel === 'call') return;
+  if (state.channel === 'call') return;
+  if (state.channel === 'email') {
+    if (state.emailPreview) return;    // already loaded for this lead
+    const tpl = defaultTemplateFor(state.templates, 'email', state.lead);
+    if (!tpl) { state.template_id = null; state.emailPreview = null; return; }
+    await previewEmail(state, tpl.id);
+    return;
+  }
   if (state.text && state.text !== state.rendered) return;   // theirs, not ours
   const tpl = defaultTemplateFor(state.templates, state.channel, state.lead);
   if (!tpl) { state.text = ''; state.rendered = ''; state.empty = []; return; }
   await fillFrom(state, tpl.id);
+}
+
+/** Fetch the full email preview (subject, filled body, footer, PECR verdict). */
+async function previewEmail(state, id) {
+  state.template_id = id || null;
+  if (!id) { state.emailPreview = null; return; }
+  try {
+    state.emailPreview = await api.emails.preview(state.lead.id, id);
+  } catch (err) {
+    state.emailPreview = null;
+    toast(err.message ?? 'Could not preview email', { error: true, ms: 5000 });
+  }
 }
 
 /* --------------------------------------------------------------- render */
@@ -325,6 +348,8 @@ function messagePanel(state) {
       </div>`;
   }
   if (channel === 'email') {
+    const forEmail = templates.filter((t) => (t.channel ?? 'email') === 'email');
+    const pv = state.emailPreview;
     return html`
       <div class="panel">
         <div class="panel-hd"><h3>Email</h3></div>
@@ -334,9 +359,39 @@ function messagePanel(state) {
               This lead has no email address and no website — email is unlikely
               to reach them. WhatsApp or a call is the honest channel here.
             </div></div>` : ''}
-          <p>Email uses the existing Compose screen —
-            <a href="#/compose?lead=${lead.id}" data-act="email-hop">write and send there</a>.
-            Every send goes through the PECR gate and appends your business footer.</p>
+          <div class="f">
+            <label for="reach-tpl">Template</label>
+            <select id="reach-tpl" data-act="tpl">
+              <option value="">— pick a template —</option>
+              ${forEmail.map((t) => html`
+                <option value="${t.id}" ${t.id === template_id ? 'selected' : ''}>${t.name}</option>`)}
+            </select>
+            ${!forEmail.length ? html`
+              <p class="tip">No email templates yet.
+                <a href="#/templates" data-act="tpl-hop">Add the starters</a> on the Templates screen.</p>` : ''}
+          </div>
+          ${pv ? html`
+            ${(pv.warnings ?? []).map((w) => html`
+              <div class="msg ${/blocked|incomplete|PECR|consent/.test(w) ? 'msg-bad' : 'msg-warn'}"
+                   style="margin-bottom:10px"><div class="grow">${w}</div></div>`)}
+            <div class="mail">
+              <div class="mail-hd"><dl>
+                <dt>To</dt><dd>${lead.email ?? '(no email)'}</dd>
+                <dt>Subject</dt><dd class="subj">${pv.subject}</dd>
+              </dl></div>
+              <div class="mail-bd" style="max-height:240px">${pv.body}</div>
+            </div>
+            <div class="bar" style="margin:12px 0 0">
+              ${pv.can_send ? html`
+                <button class="primary" data-act="email-queue">Queue for sending</button>` : ''}
+              ${!pv.compliant ? html`<a class="btn" href="#/settings" data-act="tpl-hop">Add your business details</a>` : ''}
+              ${pv.compliant && !pv.lawful ? html`
+                <span class="meta">${pv.block_reason ?? 'This lead cannot be emailed yet.'}</span>` : ''}
+            </div>
+            <p class="tip">Nothing sends until you review the Outbox and confirm.
+              Every send goes through the PECR gate and appends your business footer.</p>
+          ` : template_id ? html`<div class="loading"><span class="spin"></span></div>` : html`
+            <p class="tip">Pick a template above to see the finished email.</p>`}
         </div>
       </div>`;
   }
@@ -426,8 +481,27 @@ function wire(dlg, state) {
   });
 
   on(dlg, 'change', '[data-act="tpl"]', async (_e, el) => {
-    await fillFrom(state, Number(el.value));
+    const id = Number(el.value);
+    if (state.channel === 'email') await previewEmail(state, id);
+    else await fillFrom(state, id);
     rerender();
+  });
+
+  on(dlg, 'click', '[data-act="email-queue"]', async (_e, btn) => {
+    if (!state.template_id) return;
+    btn.disabled = true;
+    try {
+      await api.post('/api/gmail/queue', {
+        lead_ids: [state.lead.id],
+        template_id: state.template_id,
+      });
+      toast('Queued for review');
+      dlg.querySelector('[data-close]')?.click();
+      location.hash = '/outbox';
+    } catch (err) {
+      toast(err.message ?? 'Could not queue', { error: true, ms: 6000 });
+      btn.disabled = false;
+    }
   });
 
   on(dlg, 'click', '[data-act="call-outcome"]', async (_e, btn) => {

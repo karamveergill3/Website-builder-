@@ -508,7 +508,11 @@ export default async function leadsView(root, params, { refresh }) {
     return wipe({ ids, count: ids.length });
   });
 
-  on(root, 'click', '[data-act="write"]', (_e, el) => { location.hash = `/compose?lead=${el.dataset.id}`; });
+  on(root, 'click', '[data-act="write"]', async (_e, el) => {
+    const { openReachDialog } = await import('./reach.js');
+    await openReachDialog(el.dataset.id);
+    refresh();
+  });
 
   /* ---- selection ---- */
 

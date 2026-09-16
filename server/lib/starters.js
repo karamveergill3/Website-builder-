@@ -38,14 +38,18 @@ export const STARTERS = [
   {
     name: 'First message — email',
     channel: 'email',
-    subject: 'A quick idea for {{business}}',
+    subject: 'A website for {{business}}',
     body: `Hi,
 
 I'm {{my_name}} from {{my_business}}. I came across {{business}} while looking around {{location}} and noticed you don't have a website yet, so I thought I'd get in touch.
 
-We build simple one page websites for local businesses: what you do, photos of your work, and a button so people can call or message you straight from their phone.
+{{about_line}}
 
-I'd love to put together a free mock up for {{business}} so you can see how it could look. No cost, no obligation, and if it's not for you, that's completely fine.
+Here is why it matters. {{boost_search_share}} of consumers now check Google before choosing a local business (BrightLocal, 2024), and Stanford research shows {{boost_credibility}} judge a business's credibility on how its website looks. A trade with no site loses roughly {{boost_lost_enquiries}} of potential enquiries to competitors that turn up in search, and businesses that put a professional one up typically see {{boost_enquiries_range}} more monthly customers within six months.
+
+We build simple one-page websites for local businesses: what you do, photos of your work, the areas you cover, and a button so people can call or message you straight from their phone.
+
+I would love to put together a free mock-up for {{business}} so you can see how it could look. No cost, no obligation, and if it is not for you, that is completely fine.
 
 Would you like me to put one together?`,
   },
@@ -56,9 +60,11 @@ Would you like me to put one together?`,
     subject: 'Following up on {{business}}',
     body: `Hi,
 
-I'm {{my_name}} from {{my_business}}. I sent a note last week about a free website mock up for {{business}} and wanted to follow up in case it landed at a busy time.
+I'm {{my_name}} from {{my_business}}. I sent a note last week about a free website mock-up for {{business}} and wanted to follow up in case it landed at a busy time.
 
-The offer still stands. I'd put the page together, send it over, and if it's not for you, no problem at all.
+Just to say the numbers again: {{boost_search_share}} of people now Google a local business before contacting them, and roughly {{boost_lost_enquiries}} of enquiries go to competitors who show up in search. Businesses that put a proper website up usually add {{boost_enquiries_range}} more monthly customers within six months.
+
+The offer still stands. I would put the page together, send it over, and if it is not for you, no problem at all.
 
 Would you like me to go ahead?`,
   },

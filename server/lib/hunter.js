@@ -277,9 +277,12 @@ function importPlaceLead(place, trade, area) {
     `INSERT INTO leads
        (business_name, category, location, phone, google_place_id, status,
         notes, source, opted_out, entity_type, has_website, website_checked_at,
+        editorial_summary, primary_type,
         details_source, details_imported_at, assigned_to, created_at)
      VALUES (@name, @trade, @town, @phone, @place_id, 'new', @notes, 'Daily hunt (Google)', 0,
-             'unknown', 0, @now, 'google_places', @now, @assigned, @now)`
+             'unknown', 0, @now,
+             @summary, @primary_type,
+             'google_places', @now, @assigned, @now)`
   ).run({
     name: place.display_name ?? '(unnamed business)',
     trade,
@@ -287,6 +290,8 @@ function importPlaceLead(place, trade, area) {
     phone: place.phone ?? null,
     place_id: place.place_id,
     notes: place.address ? `Address: ${place.address}` : null,
+    summary: place.editorial_summary ?? null,
+    primary_type: place.primary_type ?? null,
     assigned: nextAssignee(),
     now: nowIso(),
   });
@@ -309,12 +314,16 @@ function importConfirmedPlaceLead(row, company, trade, area) {
        (business_name, category, location, phone, google_place_id, status, source, opted_out,
         entity_type, company_number, registered_name, registered_address, company_status,
         company_type, incorporated_on, sic_codes, entity_note, checked_at,
-        has_website, website_checked_at, website_evidence, details_source, details_imported_at,
+        has_website, website_checked_at, website_evidence,
+        editorial_summary, primary_type,
+        details_source, details_imported_at,
         assigned_to, created_at)
      VALUES (@name, @trade, @town, @phone, @place_id, 'new', 'Daily hunt', 0,
              'corporate', @number, @regname, @address, @status,
              @type, @inc, @sic, @note, @now,
-             0, @now, 'places-no-website', 'google_places', @now,
+             0, @now, 'places-no-website',
+             @summary, @primary_type,
+             'google_places', @now,
              @assigned, @now)`
   ).run({
     name: row.display_name ?? company.company_name,
@@ -330,6 +339,8 @@ function importConfirmedPlaceLead(row, company, trade, area) {
     inc: company.date_of_creation ?? null,
     sic: (company.sic_codes ?? []).join(',') || null,
     note: `Companies House ${company.company_number} — found on Google, confirmed on the register`,
+    summary: row.editorial_summary ?? null,
+    primary_type: row.primary_type ?? null,
     assigned: nextAssignee(),
     now: nowIso(),
   });

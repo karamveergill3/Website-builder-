@@ -92,7 +92,10 @@ test('a message can name both the prospect and the sender', () => {
 test('a blank sender setting renders empty, and emptyPlaceholders flags it', async () => {
   const { emptyPlaceholders } = await import('../server/lib/template.js');
   const tpl = { subject: '', body: 'from {{my_name}}' };
-  assert.equal(renderTemplate(tpl, LEAD, {}).body, 'from ');
+  // Trailing whitespace left by an empty placeholder is stripped by the tidy
+  // pass — a message ending in "from " is worse than one ending in "from".
+  // emptyPlaceholders still flags the underlying gap so the preview can warn.
+  assert.equal(renderTemplate(tpl, LEAD, {}).body, 'from');
   assert.deepEqual(emptyPlaceholders(tpl, LEAD, {}), ['my_name']);
   assert.deepEqual(emptyPlaceholders(tpl, LEAD, ME), []);
 });

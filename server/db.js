@@ -1511,6 +1511,25 @@ Thanks so much, and have a lovely day.
       }
     },
   },
+  {
+    name: '046_places_editorial_summary',
+    up: `
+      ALTER TABLE leads ADD COLUMN editorial_summary TEXT;
+      ALTER TABLE leads ADD COLUMN primary_type      TEXT;
+    `,
+  },
+  {
+    name: '047_refresh_email_starters_with_stats',
+    run() {
+      // Push the new opener wording out to installs that already have the
+      // starter — matched on name, so an owner who edited it is not overridden.
+      for (const s of STARTERS.filter((t) => t.channel === 'email')) {
+        db.prepare(
+          `UPDATE templates SET body = ?, subject = ? WHERE name = ? AND channel = 'email'`
+        ).run(s.body, s.subject, s.name);
+      }
+    },
+  },
 ];
 
 function migrate() {

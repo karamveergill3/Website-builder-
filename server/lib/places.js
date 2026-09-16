@@ -30,6 +30,14 @@ export const WANTED_FIELDS = [
   'formattedAddress',
   'nationalPhoneNumber',
   'websiteUri',
+  // Google's own short description of the business ("Family-run roofing firm
+  // in Otley, specialising in flat roofs and skylights") when it has one. Not
+  // filled for every place — small businesses often don't have one — but when
+  // present it beats guessing at services from the trade category alone.
+  // editorialSummary moves the request to the Atmosphere billing tier, ~10%
+  // more per request than Pro.
+  'editorialSummary',
+  'primaryTypeDisplayName',
 ];
 
 export const TEXT_SEARCH_MASK = [
@@ -234,6 +242,14 @@ export async function placeDetails(placeId, { signal } = {}) {
 /** Normalise a Places response object into the shape place_cache stores. */
 export function normalise(place) {
   const website = typeof place.websiteUri === 'string' ? place.websiteUri.trim() : '';
+  // editorialSummary is a LocalizedText: { text, languageCode }. Take the text
+  // when it exists, and fall back to nothing rather than an empty envelope.
+  const summary = typeof place.editorialSummary?.text === 'string'
+    ? place.editorialSummary.text.trim()
+    : '';
+  const primaryType = typeof place.primaryTypeDisplayName?.text === 'string'
+    ? place.primaryTypeDisplayName.text.trim()
+    : '';
   return {
     place_id: place.id,
     display_name: place.displayName?.text ?? place.displayName ?? null,
@@ -242,6 +258,8 @@ export function normalise(place) {
     website_uri: website || null,
     // A place with no website simply omits websiteUri from the response.
     has_website: website ? 1 : 0,
+    editorial_summary: summary || null,
+    primary_type: primaryType || null,
   };
 }
 

@@ -5,6 +5,7 @@ import { html, mount, on, modal, confirmDialog, toast, fmtDate } from '../dom.js
 const SAMPLE = {
   business_name: 'Hillside Roofing Ltd', category: 'roofers', location: 'Otley',
   phone: '07700 900123', email: 'info@hillsideroofing.co.uk',
+  editorial_summary: 'Family-run roofing firm specialising in flat roofs, chimney repairs and gutter work.',
 };
 
 const CHANNELS = [
@@ -14,19 +15,44 @@ const CHANNELS = [
 ];
 
 
+const STAT_VALUES = {
+  boost_search_share: '98%',
+  boost_enquiries_range: '20 to 40%',
+  boost_lost_enquiries: '1 in 3',
+  boost_credibility: '75%',
+};
+
+function titleCase(v) {
+  return String(v ?? '').split(/(\s+)/).map((w) => (w.trim()
+    ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : w)).join('');
+}
+
 function fill(str, lead, me = {}) {
+  const summary = String(lead.editorial_summary ?? '').trim();
   const ctx = {
     business: lead.business_name, category: lead.category, location: lead.location,
     phone: lead.phone, email: lead.email,
     first_name: String(lead.business_name).split(/\s+/)[0],
+    editorial_summary: summary,
+    about_line: summary
+      ? `I see ${lead.business_name} is described as "${summary.replace(/\s+/g, ' ').replace(/\.+$/, '')}" — the kind of story a website is made for.`
+      : '',
+    ...STAT_VALUES,
     // The sender half, from Settings — so the preview shows the message as it
-    // will actually go out rather than a page of {{my_name}}.
-    my_name: me.biz_contact_name ?? '', my_business: me.biz_name ?? '',
+    // will actually go out rather than a page of {{my_name}}. Names capitalised
+    // so the preview matches what the server renders.
+    my_name: titleCase(me.biz_contact_name ?? ''),
+    my_business: titleCase(me.biz_name ?? ''),
     my_phone: me.biz_phone ?? '', my_email: me.biz_email ?? '',
     my_website: me.biz_website ?? '',
   };
-  return String(str ?? '').replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (m, k) =>
-    Object.prototype.hasOwnProperty.call(ctx, k.toLowerCase()) ? (ctx[k.toLowerCase()] ?? '') : m);
+  return String(str ?? '')
+    .replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (m, k) =>
+      Object.prototype.hasOwnProperty.call(ctx, k.toLowerCase()) ? (ctx[k.toLowerCase()] ?? '') : m)
+    .replace(/[ \t]+(\r?\n)/g, '$1')
+    .replace(/\r?\n[ \t]+\r?\n/g, '\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\s+$/, '');
 }
 
 async function openEditor(t, me = {}) {
@@ -58,7 +84,11 @@ async function openEditor(t, me = {}) {
         <textarea id="t-body" name="body" class="code" required>${t?.body ?? ''}</textarea>
         <p class="tip">
           About them: <code>{{business}}</code> <code>{{category}}</code>
-          <code>{{location}}</code> <code>{{phone}}</code> <code>{{email}}</code>.
+          <code>{{location}}</code> <code>{{phone}}</code> <code>{{email}}</code>
+          <code>{{about_line}}</code> <code>{{editorial_summary}}</code>.
+          Stats to cite: <code>{{boost_search_share}}</code>
+          <code>{{boost_credibility}}</code> <code>{{boost_lost_enquiries}}</code>
+          <code>{{boost_enquiries_range}}</code>.
           About you, from Settings: <code>{{my_name}}</code>
           <code>{{my_business}}</code> <code>{{my_phone}}</code>
           <code>{{my_email}}</code> <code>{{my_website}}</code>.

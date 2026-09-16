@@ -12,10 +12,7 @@ const CTA_LABEL = {
 const CTAS = Object.keys(CTA_LABEL);
 
 export default async function repliesView(root, _p, { refresh }) {
-  const [data, ollama] = await Promise.all([
-    api.get('/api/replies'),
-    api.get('/api/ollama').catch(() => null),
-  ]);
+  const data = await api.get('/api/replies');
   const replies = data.replies ?? [];
   const gmail = data.gmail ?? {};
 
@@ -29,32 +26,12 @@ export default async function repliesView(root, _p, { refresh }) {
         : ''}
     </div>
 
-    ${!gmail.ready ? html`
-      <div class="msg msg-warn" style="margin-bottom:10px"><div class="grow">
-        <b>Not reading Gmail.</b> ${gmail.reason ?? ''}
-        ${gmail.code === 'READ_DISABLED'
-          ? html` Turn on <b>Read replies</b> in <a href="#/settings">Settings</a>.` : ''}
-        <div class="tip" style="margin-top:6px">
-          You can still paste a reply in by hand — it goes through exactly the same
-          extraction and builds the same mockup.
-        </div>
-      </div></div>` : ''}
-
-    ${ollama && !ollama.ok ? html`
-      <div class="msg msg-info" style="margin-bottom:10px"><div class="grow">
-        <b>Local model not running.</b> ${ollama.detail ?? ''}
-        <div class="tip" style="margin-top:6px">
-          ${ollama.fallback ?? ''}
-          Install it for messier replies: <code class="mono">ollama pull ${ollama.model}</code>.
-          It runs on this machine — free, private, and nothing is billed to any account.
-        </div>
-      </div></div>` : ''}
-
     ${!replies.length ? html`
       <div class="panel"><div class="panel-bd">
-        <p class="tip">Nothing back yet. When a prospect replies, it lands here with the
-          brief already pulled out of it — services, what they want visitors to do,
-          whether they have a logo — and one button builds them a four-page site.</p>
+        <p class="tip">Nothing back yet. When a prospect replies, paste it in with
+          <b>Paste a reply</b> — the brief is pulled out of it (services, what they want
+          visitors to do, whether they have a logo) and one button builds them a
+          four-page site.</p>
       </div></div>`
     : replies.map((r) => replyCard(r))}
   `);

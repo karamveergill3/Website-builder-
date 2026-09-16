@@ -7,20 +7,20 @@ import {
 export default async function outboxView(root, _params, { refresh }) {
   const status = await api.get('/api/gmail/status').catch(() => null);
 
-  if (!status?.client_configured) {
+  if (!status?.client_configured && !status?.resend_configured) {
     mount(root, html`
       <div class="bar"><h2>Outbox</h2></div>
       <div class="panel"><div class="panel-bd">
         <div class="msg msg-warn"><div class="grow">
-          Set <code class="mono">GMAIL_CLIENT_ID</code> and <code class="mono">GMAIL_CLIENT_SECRET</code>
-          in <code class="mono">.env</code> and restart — see <code class="mono">docs/PHASE3-GMAIL.md</code>.
-          Compose still gives you copy-and-paste and mail-app drafts.
+          No email backend is set up. Set <code class="mono">RESEND_API_KEY</code> in
+          <code class="mono">.env</code> and restart. Compose still gives you copy-and-paste
+          and mail-app drafts.
         </div></div>
       </div></div>`);
     return;
   }
 
-  if (!status.connected) {
+  if (status.email_backend === 'gmail' && !status.connected) {
     mount(root, html`
       <div class="bar"><h2>Outbox</h2></div>
       <div class="panel">
@@ -166,7 +166,8 @@ export default async function outboxView(root, _params, { refresh }) {
           <button class="mini" data-act="clear">Discard all</button>
           <button class="primary" data-act="send" ${run?.running || remaining === 0 ? 'disabled' : ''}>
             Review and send ${Math.min(pending.length, remaining)}</button>` : ''}
-        <button class="mini ghost" data-act="disconnect">Disconnect</button>
+        ${data.email_backend === 'gmail'
+          ? html`<button class="mini ghost" data-act="disconnect">Disconnect</button>` : ''}
       </div>
 
       ${run?.running ? html`

@@ -116,7 +116,7 @@ export default async function leadsView(root, params, { refresh }) {
     api.auth.roster().catch(() => ({ roster: [] })),
     api.auth.me().catch(() => ({ user: null })),
   ]);
-  const canQueue = gmail?.connected === true;
+  const canQueue = gmail?.connected === true || gmail?.resend_configured === true;
   const canCheck = ch?.configured === true;
 
   // The team, for the owner column, filter and reassignment. With more than

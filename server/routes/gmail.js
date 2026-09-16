@@ -294,7 +294,8 @@ router.get('/queue', wrap((_req, res) => {
     delay_min_seconds: settingInt('send_delay_min_seconds'),
     delay_max_seconds: settingInt('send_delay_max_seconds'),
     connected: isConnected(),
-    email: connectedEmail(),
+    email: connectedEmail() ?? sharedSender().address,
+    email_backend: emailBackend(),
     active_send: activeSend,
   });
 }));

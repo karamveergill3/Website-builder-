@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, getSettings, setSetting } from '../db.js';
 import { wrap, badRequest, looksLikeEmail } from '../lib/http.js';
 import { configured as paypalConfigured } from '../lib/paypal.js';
-import { configured as stripeConfigured } from '../lib/stripe.js';
+import { configured as stripeConfigured, isTestMode as stripeTestMode } from '../lib/stripe.js';
 import { configured as gcConfigured } from '../lib/gocardless.js';
 import {
   configured as resendConfigured, listDomains, disableTracking,
@@ -151,6 +151,7 @@ router.get('/', wrap((_req, res) => {
       gmail_email: stored.gmail_email ?? null,
       resend_configured: resendConfigured(),
       card_configured: stripeConfigured(),
+      card_test_mode: stripeConfigured() && stripeTestMode(),
       paypal_configured: paypalConfigured(),
       direct_debit_configured: gcConfigured(),
     },

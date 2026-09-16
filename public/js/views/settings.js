@@ -202,7 +202,9 @@ export default async function settingsView(root, _p, { refresh }) {
               ? html`<span class="flag" data-ok>connected</span>`
               : html`<span class="flag">not set up</span>`}</td>
             <td class="meta">${data.integrations.card_configured
-              ? 'Key found. Clients can pay invoices by card.'
+              ? data.integrations.card_test_mode
+                ? html`<span style="color:var(--amber)">Test mode</span> — no real charges. Swap to <code class="mono">sk_live_</code> for real payments.`
+                : 'Live. Clients can pay invoices by card.'
               : html`Set <code class="mono">STRIPE_SECRET_KEY</code> in .env`}</td>
           </tr>
           <tr>

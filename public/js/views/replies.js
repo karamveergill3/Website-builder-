@@ -258,6 +258,64 @@ export default async function repliesView(root, _p, { refresh }) {
       toast(url, { ms: 9000 });
     }
   });
+
+  /* ---- reply back to the lead via Resend ---- */
+
+  on(root, 'click', '[data-act="send-reply"]', async (_e, el) => {
+    const reply = replies.find((r) => String(r.id) === el.dataset.id);
+    if (!reply) return;
+    const mockupUrl = reply.mockup?.token
+      ? new URL(`/m/${reply.mockup.token}/`, location.origin).toString()
+      : null;
+
+    const defaultBody = mockupUrl
+      ? `Hi — I've put together a draft website for ${reply.business_name ?? 'you'}. `
+        + `Take a look and let me know what you think:\n\n${mockupUrl}\n\n`
+        + `Happy to change anything — colours, wording, photos. Just say the word.`
+      : '';
+
+    const defaultSubject = reply.subject
+      ? `Re: ${reply.subject.replace(/^Re:\s*/i, '')}`
+      : `Your website — ${reply.business_name ?? ''}`;
+
+    const ok = await modal({
+      title: `Reply to ${reply.business_name ?? reply.from_address ?? 'lead'}`,
+      wide: true,
+      body: html`
+        <div class="f">
+          <label for="sr-to">To</label>
+          <input id="sr-to" name="to" type="email"
+                 value="${reply.from_address ?? ''}"
+                 placeholder="their@email.com" required>
+        </div>
+        <div class="f">
+          <label for="sr-subject">Subject</label>
+          <input id="sr-subject" name="subject" type="text"
+                 value="${defaultSubject}">
+        </div>
+        <div class="f">
+          <label for="sr-body">Message</label>
+          <textarea id="sr-body" name="body" rows="10" required
+            placeholder="Write your reply…">${defaultBody}</textarea>
+        </div>
+        ${mockupUrl ? html`
+          <p class="tip">The mockup link is already in the message above.</p>` : html`
+          <p class="tip">Build a mockup first to include its link in your reply.</p>`}`,
+      footer: html`
+        <button data-close class="ghost">Cancel</button>
+        <button data-submit class="primary">Send via Resend</button>`,
+      onSubmit: async (form) => {
+        if (!form.body?.trim()) throw new Error('Write something to send');
+        await api.post(`/api/replies/${reply.id}/reply`, {
+          to: form.to,
+          subject: form.subject,
+          body: form.body,
+        });
+        return true;
+      },
+    });
+    if (ok) { toast('Reply sent'); refresh(); }
+  });
 }
 
 /* ------------------------------------------------------------- rendering */
@@ -321,6 +379,8 @@ function briefPanel(r, b) {
     <div class="bar">
       <button class="mini" data-act="edit-brief" data-id="${r.id}">Edit brief</button>
       <button class="mini ghost" data-act="reextract" data-id="${r.id}">Read again</button>
+      <button class="mini" data-act="send-reply" data-id="${r.id}"
+        style="margin-left:6px">Reply</button>
       <div class="grow"></div>
       ${r.mockup ? html`
         <a class="btn mini" href="${r.mockup.token ? `/m/${r.mockup.token}/` : '#'}"

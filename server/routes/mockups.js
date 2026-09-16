@@ -7,6 +7,7 @@
  *   POST   /api/replies/:id/extract     re-run the brief extractor
  *   PATCH  /api/replies/:id/brief       user corrections to the brief
  *   POST   /api/replies/:id/read        mark as read
+ *   POST   /api/replies/:id/reply        send a reply via Resend
  *   POST   /api/mockups                 generate a site from a brief
  *   GET    /api/mockups                 list generated mockups
  *   POST   /api/mockups/:id/sent        record that the link was sent
@@ -22,6 +23,12 @@ import {
   syncReplies, extractBriefFor, listReplies, markRead, recordManualReply,
   readiness, briefToApi,
 } from '../lib/replies.js';
+import {
+  configured as resendConfigured, sendEmail as resendSend,
+} from '../lib/resend.js';
+import { getUserById } from '../lib/auth.js';
+import { sendingDomain } from '../lib/sending-policy.js';
+import { looksLikeEmail } from '../lib/http.js';
 import { renderSite, writeSite, newToken, PAGES, SINGLE_PAGE } from '../lib/site-builder.js';
 import { briefForBuild, CTAS } from '../lib/brief.js';
 import { available as ollamaAvailable, model as ollamaModel } from '../lib/ollama.js';
@@ -206,6 +213,63 @@ router.get('/mockups', wrap((req, res) => {
   res.json({
     mockups: rows.map((m) => ({ ...m, url: `/m/${m.token}/`, pages: JSON.parse(m.pages ?? '[]') })),
   });
+}));
+
+/**
+ * Send a reply to the lead directly via Resend — no Gmail "Send mail as" needed.
+ */
+router.post('/replies/:id/reply', wrap(async (req, res) => {
+  const id = int(req.params.id);
+  if (!id) throw badRequest('Bad reply id');
+
+  const reply = db.prepare(
+    `SELECT r.*, l.business_name, l.email AS lead_email, l.id AS lid
+     FROM replies r JOIN leads l ON l.id = r.lead_id
+     WHERE r.id = ?`
+  ).get(id);
+  if (!reply) throw notFound('Reply not found');
+
+  const to = str(req.body?.to) || reply.lead_email || reply.from_address;
+  if (!to || !looksLikeEmail(to)) throw badRequest('No valid recipient email');
+
+  const subject = str(req.body?.subject)
+    || (reply.subject ? `Re: ${reply.subject.replace(/^Re:\s*/i, '')}` : `Your website — ${reply.business_name}`);
+  const body = str(req.body?.body);
+  if (!body) throw badRequest('body is required');
+
+  if (!resendConfigured()) {
+    throw badRequest('Resend is not configured — set RESEND_API_KEY in .env');
+  }
+
+  const domain = sendingDomain();
+  if (!domain) throw badRequest('No sending domain — set biz_email in Settings');
+
+  const rep = req.user ? getUserById(req.user.id) : null;
+  const fromAddr = (rep?.work_email || db.prepare("SELECT value FROM settings WHERE key='biz_email'").get()?.value || '').trim().toLowerCase();
+  if (!fromAddr || !looksLikeEmail(fromAddr)) {
+    throw badRequest('No valid from address — set biz_email or a work_email');
+  }
+  const fromName = rep?.name || getSetting('biz_contact_name', '');
+  const from = fromName ? `${fromName} <${fromAddr}>` : fromAddr;
+
+  const sent = await resendSend({ from, to, subject, text: body, replyTo: fromAddr });
+
+  const at = nowIso();
+  const fromDomain = fromAddr.split('@')[1] ?? null;
+  db.prepare(
+    `INSERT INTO email_log
+       (lead_id, template_id, lead_name, to_email, subject_snapshot, body_snapshot,
+        sent_at, channel, provider_message_id, provider, from_domain)
+     VALUES (?, NULL, ?, ?, ?, ?, ?, 'gmail', ?, 'resend', ?)`
+  ).run(reply.lid, reply.business_name, to, subject, body, at, sent.id, fromDomain);
+
+  db.prepare(
+    `UPDATE leads SET last_contacted_at = ?,
+       status = CASE WHEN status IN ('new','replied') THEN 'sent' ELSE status END
+     WHERE id = ?`
+  ).run(at, reply.lid);
+
+  res.json({ ok: true, message_id: sent.id, to, subject });
 }));
 
 router.post('/mockups/:id/sent', wrap((req, res) => {

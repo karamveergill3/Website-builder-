@@ -185,6 +185,46 @@ export default async function settingsView(root, _p, { refresh }) {
                 ? html`<a href="#/outbox">Connect</a>`
                 : html`Set <code class="mono">GMAIL_CLIENT_ID</code> and <code class="mono">GMAIL_CLIENT_SECRET</code>`}</td>
           </tr>
+          <tr>
+            <td class="c-name"><span class="name" style="font-size:.9rem">Resend</span>
+                <span class="meta">Sends emails from your domain</span></td>
+            <td class="nw">${data.integrations.resend_configured
+              ? html`<span class="flag" data-ok>connected</span>`
+              : html`<span class="flag">not set up</span>`}</td>
+            <td class="meta">${data.integrations.resend_configured
+              ? 'Key found.'
+              : html`Set <code class="mono">RESEND_API_KEY</code> in .env`}</td>
+          </tr>
+          <tr>
+            <td class="c-name"><span class="name" style="font-size:.9rem">Stripe</span>
+                <span class="meta">Card payments on invoices</span></td>
+            <td class="nw">${data.integrations.card_configured
+              ? html`<span class="flag" data-ok>connected</span>`
+              : html`<span class="flag">not set up</span>`}</td>
+            <td class="meta">${data.integrations.card_configured
+              ? 'Key found. Clients can pay invoices by card.'
+              : html`Set <code class="mono">STRIPE_SECRET_KEY</code> in .env`}</td>
+          </tr>
+          <tr>
+            <td class="c-name"><span class="name" style="font-size:.9rem">PayPal</span>
+                <span class="meta">PayPal payments on invoices</span></td>
+            <td class="nw">${data.integrations.paypal_configured
+              ? html`<span class="flag" data-ok>connected</span>`
+              : html`<span class="flag">not set up</span>`}</td>
+            <td class="meta">${data.integrations.paypal_configured
+              ? 'Connected.'
+              : html`Set <code class="mono">PAYPAL_CLIENT_ID</code> and <code class="mono">PAYPAL_CLIENT_SECRET</code> in .env`}</td>
+          </tr>
+          <tr>
+            <td class="c-name"><span class="name" style="font-size:.9rem">GoCardless</span>
+                <span class="meta">Direct Debit for maintenance plans</span></td>
+            <td class="nw">${data.integrations.direct_debit_configured
+              ? html`<span class="flag" data-ok>connected</span>`
+              : html`<span class="flag">not set up</span>`}</td>
+            <td class="meta">${data.integrations.direct_debit_configured
+              ? 'Connected.'
+              : html`Set <code class="mono">GOCARDLESS_ACCESS_TOKEN</code> in .env`}</td>
+          </tr>
         </tbody>
       </table></div>
     </div>

@@ -47,6 +47,8 @@ export const ALLOWED_KEYS = new Set([
   'invoice_prefix', 'invoice_seq', 'invoice_vat_rate', 'invoice_terms', 'invoice_footer',
   'pay_bank_name', 'pay_bank_sortcode', 'pay_bank_account',
   'pay_paypal_link', 'pay_klarna_note',
+  // Price list — one JSON blob so the whole ladder edits in one place.
+  'price_list_json',
 ]);
 
 export const DEFAULTS = {

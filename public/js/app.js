@@ -14,6 +14,7 @@ import repliesView   from './views/replies.js';
 import teamView, { loginView, setupView, openAccount } from './views/auth.js';
 import invoicesView from './views/invoices.js';
 import websitesView from './views/websites.js';
+import pricesView from './views/prices.js';
 import { api } from './api.js';
 
 const ROUTES = {
@@ -30,6 +31,7 @@ const ROUTES = {
   '/deliverability': deliverView,
   '/invoices':  invoicesView,
   '/websites':  websitesView,
+  '/prices':    pricesView,
   '/team':      teamView,
 };
 

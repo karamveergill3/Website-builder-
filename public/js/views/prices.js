@@ -53,15 +53,6 @@ const DEFAULTS = {
     looked_after: 29,          // Above + 2 changes a month same day
     booking_payments: 45,      // Full care for a booking/payments site
   },
-  hourly: 50,                  // Ad-hoc, 30-minute blocks, £25 minimum invoice
-  no_capital: {
-    // The £0-up-front closer — total year-one cost is more than the lump sum
-    // but converts 2-3× better on cold sales because it removes the "hand £300
-    // to a stranger who phoned me" objection.
-    one_page_monthly: 39,
-    five_page_monthly: 59,
-    term_months: 12,
-  },
 };
 
 /**
@@ -107,14 +98,6 @@ const ROWS = [
     ['monthly.keep_it_live',     'Keep it live',       '£/mo'],
     ['monthly.looked_after',     'Looked after',       '£/mo'],
     ['monthly.booking_payments', 'Booking & payments', '£/mo'],
-  ]},
-  { section: 'No capital? Pay monthly', rows: [
-    ['no_capital.one_page_monthly',  'One-pager on 12 months',  '£/mo'],
-    ['no_capital.five_page_monthly', 'Five pages on 12 months', '£/mo'],
-    ['no_capital.term_months',       'Term',                    'months'],
-  ]},
-  { section: 'Ad-hoc', rows: [
-    ['hourly', 'Hourly rate (30-min blocks)', '£/hr'],
   ]},
 ];
 

@@ -1,0 +1,342 @@
+import { Router } from 'express';
+import { db, getSettings, setSetting } from '../db.js';
+import { wrap, badRequest, looksLikeEmail } from '../lib/http.js';
+import { configured as paypalConfigured } from '../lib/paypal.js';
+import { configured as stripeConfigured, isTestMode as stripeTestMode } from '../lib/stripe.js';
+import { configured as gcConfigured } from '../lib/gocardless.js';
+import {
+  configured as resendConfigured, listDomains, disableTracking,
+} from '../lib/resend.js';
+import {
+  buildFooter, missingIdentityFields, REQUIRED_IDENTITY_FIELDS,
+  OPTIONAL_IDENTITY_FIELDS, DEFAULT_OPTOUT_LINE,
+  DEFAULT_MARKETING_LINE, DEFAULT_SOURCE_LINE,
+} from '../lib/compliance.js';
+
+const router = Router();
+
+/** Only these keys are writable, so a typo cannot quietly create a dead setting. */
+export const ALLOWED_KEYS = new Set([
+  // Identity block that appears in every email
+  'biz_contact_name', 'biz_name', 'biz_address', 'biz_email',
+  'biz_phone', 'biz_website', 'biz_company_number', 'biz_vat_number',
+  'optout_line', 'optout_email', 'marketing_line', 'source_line',
+  'biz_place_of_registration',
+  // Sending guard-rails (Phase 3)
+  'daily_cap', 'send_delay_seconds', 'send_delay_min_seconds', 'send_delay_max_seconds',
+  'warmup_enabled', 'window_enabled', 'window_start_hour', 'window_end_hour',
+  'window_weekdays_only', 'domain_cooldown_days', 'list_unsubscribe_enabled',
+  'verify_addresses', 'spam_check_enabled',
+  // Bounce/complaint feedback halt (Phase 3.5): the count of hard bounces in
+  // the last 7 days at which sending pauses, and the timestamp of the last
+  // "I've looked, resume" acknowledgement.
+  'bounce_block_count', 'delivery_ack_at',
+  // Daily hunt
+  'hunt_enabled', 'hunt_trades', 'hunt_areas', 'hunt_daily_target', 'hunt_hour',
+  'hunt_max_places_requests', 'hunt_max_register_pages', 'hunt_max_per_trade',
+  'hunt_require_no_website', 'hunt_include_unlisted', 'hunt_require_phone',
+  'hunt_require_mobile', 'hunt_include_places', 'hunt_messageable_only',
+  'hunt_include_sole_traders',
+  // Lead search defaults (Phase 2)
+  'default_areas', 'default_region_code',
+  // Places pricing, so Google's repricing does not need a code change
+  'places_text_search_per_1000', 'places_details_per_1000',
+  'places_free_calls_per_month', 'places_pricing_verified_on',
+  // Invoicing: how the business gets paid, shown on every invoice.
+  // (biz_vat_number already lives in the identity block above.)
+  'invoice_prefix', 'invoice_seq', 'invoice_vat_rate', 'invoice_terms', 'invoice_footer',
+  'pay_bank_name', 'pay_bank_sortcode', 'pay_bank_account',
+  'pay_paypal_link', 'pay_klarna_note',
+  // Price list — one JSON blob so the whole ladder edits in one place.
+  'price_list_json',
+  // Phase 2 questions — the "yes, send a mockup" follow-up script,
+  // stored intro + numbered questions + outro so the wording travels
+  // with the studio, not with one browser.
+  'phase2_questions_json',
+]);
+
+export const DEFAULTS = {
+  // 25/day is roughly 5% of Gmail's technical 500/day ceiling. The binding
+  // constraint is not that ceiling but abuse detection, which has no volume
+  // threshold at all -- see docs/PHASE3-GMAIL.md.
+  daily_cap: '25',
+  send_delay_min_seconds: '120',
+  send_delay_max_seconds: '420',
+  warmup_enabled: '1',
+  window_enabled: '1',
+  window_start_hour: '9',
+  window_end_hour: '17',
+  window_weekdays_only: '1',
+  domain_cooldown_days: '14',
+  // Google scopes the one-click unsubscribe requirement to senders of 5,000+
+  // a day. Below that the header buys nothing and costs something: Gmail
+  // draws an "Unsubscribe" chip beside the sender, which files the message
+  // as bulk in the reader's mind. The opt-out line in the body does the same
+  // job and produces a reply, which is the strongest positive signal there is.
+  list_unsubscribe_enabled: '0',
+  verify_addresses: '1',
+  spam_check_enabled: '1',
+  // Three hard bounces in the last week pause sending. A single complaint
+  // pauses it too, without a threshold — one is enough.
+  bounce_block_count: '3',
+  hunt_enabled: '0',
+  hunt_trades: '',
+  hunt_areas: '',
+  hunt_daily_target: '15',
+  hunt_hour: '8',
+  // The register is free, so read plenty of it: most high-street trades are
+  // sole traders the register does not hold, so it takes a lot of pages to
+  // turn up enough limited companies to hit the target. Google lookups do
+  // cost against the free 5,000/SKU/month, but only for towns that actually
+  // held a fresh company — 120 a run is ~3,600 a month, well inside the free
+  // allowance even run daily.
+  hunt_max_places_requests: '120',
+  hunt_max_register_pages: '200',
+  // A day of twenty roofers is a worse day's calling than a mixed list,
+  // and it puts all the risk on one trade answering cold contact.
+  hunt_max_per_trade: '3',
+  hunt_require_no_website: '1',
+  // Off by default: it needs the Google key, and turning it on without one
+  // would make a fresh install refuse to run.
+  hunt_require_phone: '0',
+  // Tighter still: only 07 numbers, the ones WhatsApp and SMS reach. Off by
+  // default for the same reason as the line above, and because a landline is
+  // still a business you can ring.
+  hunt_require_mobile: '0',
+  hunt_include_unlisted: '1',
+  // On by default: also pull businesses straight from Google and file the
+  // no-website ones (with their phone). This is what finds contactable,
+  // WhatsApp-able leads; the register alone mostly finds firms with no number.
+  hunt_include_places: '1',
+  // On by default: file only businesses you can lawfully message today —
+  // confirmed limited companies, no website, with a mobile. Keeps blocked
+  // leads (sole traders, unconfirmed Google listings, no-number firms) off
+  // the list entirely. Governs the three filters above when set.
+  hunt_messageable_only: '1',
+  // Off by default: also keep the businesses the register can't confirm as a
+  // limited company (sole traders). Filed call-only — lawful to phone, and
+  // messaging unlocks once they agree on the call. A deliberate opt-in.
+  hunt_include_sole_traders: '0',
+  // Invoicing
+  invoice_prefix: 'INV',
+  invoice_terms: 'Payment is due within 24 hours of the invoice date.',
+  default_region_code: 'GB',
+  optout_line: DEFAULT_OPTOUT_LINE,
+  marketing_line: DEFAULT_MARKETING_LINE,
+  source_line: DEFAULT_SOURCE_LINE,
+};
+
+/** Secrets live in the settings table but are never exposed through this API. */
+const SECRET_KEYS = new Set([
+  'gmail_refresh_token', 'gmail_access_token', 'gmail_token_expiry',
+]);
+
+const publicSettings = (stored) =>
+  Object.fromEntries(Object.entries(stored).filter(([k]) => !SECRET_KEYS.has(k)));
+
+router.get('/', wrap((_req, res) => {
+  const stored = getSettings();
+  const settings = { ...DEFAULTS, ...publicSettings(stored) };
+  res.json({
+    settings,
+    schema: {
+      required_identity: REQUIRED_IDENTITY_FIELDS,
+      optional_identity: OPTIONAL_IDENTITY_FIELDS,
+    },
+    compliance: {
+      complete: missingIdentityFields(stored).length === 0,
+      missing: missingIdentityFields(stored),
+      footer_preview: buildFooter(stored).text,
+    },
+    integrations: {
+      places_api_key_configured: Boolean(process.env.GOOGLE_MAPS_API_KEY),
+      gmail_client_configured: Boolean(
+        process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET
+      ),
+      gmail_connected: Boolean(stored.gmail_refresh_token),
+      gmail_email: stored.gmail_email ?? null,
+      resend_configured: resendConfigured(),
+      card_configured: stripeConfigured(),
+      card_test_mode: stripeConfigured() && stripeTestMode(),
+      paypal_configured: paypalConfigured(),
+      direct_debit_configured: gcConfigured(),
+    },
+  });
+}));
+
+router.put('/', wrap((req, res) => {
+  const body = req.body ?? {};
+  const unknown = Object.keys(body).filter((k) => !ALLOWED_KEYS.has(k));
+  if (unknown.length) throw badRequest(`Unknown setting(s): ${unknown.join(', ')}`);
+
+  if (body.biz_email && !looksLikeEmail(body.biz_email)) {
+    throw badRequest('Contact email address does not look valid');
+  }
+  if (body.optout_email && !looksLikeEmail(body.optout_email)) {
+    throw badRequest('Opt-out email address does not look valid');
+  }
+  // A blank value here used to slip past the range check and be stored as '',
+  // which Number() reads as 0 -- a daily cap of zero, or no delay at all.
+  for (const [key, min, max] of [
+    ['daily_cap', 1, 500],
+    ['send_delay_seconds', 0, 3600],
+    ['send_delay_min_seconds', 0, 3600],
+    ['send_delay_max_seconds', 0, 3600],
+    ['window_start_hour', 0, 23],
+    ['window_end_hour', 1, 24],
+    ['domain_cooldown_days', 0, 365],
+    ['hunt_daily_target', 1, 200],
+    ['hunt_hour', 0, 23],
+    ['hunt_max_places_requests', 1, 500],
+    ['hunt_max_register_pages', 1, 200],
+    ['hunt_max_per_trade', 1, 50],
+  ]) {
+    if (body[key] === undefined) continue;
+    const raw = String(body[key]).trim();
+    if (raw === '') {
+      // Blank means "back to the default", so drop the override entirely.
+      delete body[key];
+      db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+      continue;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < min || n > max) {
+      throw badRequest(`${key} must be a number between ${min} and ${max}`);
+    }
+  }
+
+  for (const [key, value] of Object.entries(body)) setSetting(key, String(value ?? '').trim());
+
+  const stored = getSettings();
+  res.json({
+    settings: { ...DEFAULTS, ...publicSettings(stored) },
+    compliance: {
+      complete: missingIdentityFields(stored).length === 0,
+      missing: missingIdentityFields(stored),
+      footer_preview: buildFooter(stored).text,
+    },
+  });
+}));
+
+import { policyState, sendingDomain } from '../lib/sending-policy.js';
+import { promises as dns } from 'node:dns';
+
+/**
+ * GET /api/settings/deliverability — a single call that checks everything the
+ * app can check from the server side: Resend domain status, tracking config,
+ * warm-up state, feedback halt, and what still needs manual action.
+ */
+router.get('/deliverability', wrap(async (_req, res) => {
+  const checks = [];
+  const manual = [];
+  let domains = [];
+
+  if (resendConfigured()) {
+    try {
+      domains = await listDomains();
+    } catch (e) {
+      checks.push({ id: 'resend_api', ok: false, label: 'Resend API reachable', detail: e.message });
+    }
+
+    if (domains.length) {
+      checks.push({ id: 'resend_api', ok: true, label: 'Resend API reachable' });
+      for (const d of domains) {
+        checks.push({
+          id: `domain_${d.id}`,
+          ok: d.status === 'verified',
+          label: `Domain ${d.name} verified`,
+          detail: d.status !== 'verified' ? `Status: ${d.status}` : undefined,
+        });
+        const trackingOn = d.open_tracking || d.click_tracking;
+        checks.push({
+          id: `tracking_${d.id}`,
+          ok: !trackingOn,
+          label: `Tracking off for ${d.name}`,
+          detail: trackingOn ? 'Open/click tracking hurts deliverability at low volume' : undefined,
+          fixable: trackingOn ? d.id : undefined,
+        });
+      }
+    }
+  } else {
+    checks.push({ id: 'resend_api', ok: false, label: 'Resend API key configured', detail: 'Set RESEND_API_KEY in .env' });
+  }
+
+  const policy = policyState();
+  checks.push({
+    id: 'warmup',
+    ok: policy.daily.warmup.active,
+    label: 'Warm-up ramp active',
+    detail: policy.daily.warmup.active
+      ? `Day ${policy.daily.warmup.day ?? 0}, cap ${policy.daily.warmup.cap}/day`
+      : policy.sending_domain
+        ? `Domain ${policy.sending_domain} past warm-up (day ${policy.daily.warmup.day})`
+        : 'No sending domain set',
+  });
+  checks.push({
+    id: 'halt',
+    ok: !policy.daily.halt.halted,
+    label: 'No feedback halt',
+    detail: policy.daily.halt.halted ? policy.daily.halt.reason : undefined,
+  });
+
+  const domain = sendingDomain();
+  if (domain) {
+    try {
+      const mx = await dns.resolveMx(domain);
+      const hasMx = mx && mx.length > 0;
+      checks.push({
+        id: 'mx_records',
+        ok: hasMx,
+        label: `MX records for ${domain}`,
+        detail: hasMx
+          ? `${mx.length} record${mx.length > 1 ? 's' : ''}: ${mx.map((r) => r.exchange).join(', ')}`
+          : 'No MX records — inbound replies will bounce',
+      });
+    } catch (e) {
+      checks.push({
+        id: 'mx_records',
+        ok: false,
+        label: `MX records for ${domain}`,
+        detail: e.code === 'ENODATA' || e.code === 'ENOTFOUND'
+          ? 'No MX records — set up email forwarding in your domain registrar'
+          : `DNS lookup failed: ${e.message}`,
+      });
+    }
+  }
+
+  const settings = getSettings();
+  const bizEmail = settings.biz_email ?? '';
+  if (!bizEmail) {
+    manual.push({ id: 'biz_email', label: 'Set a business email in Settings' });
+  }
+
+  if (domain) {
+    manual.push({
+      id: 'email_forwarding',
+      label: `Email forwarding for @${domain} (for inbound replies)`,
+      detail: `In your domain registrar, add a catch-all forwarding rule: `
+        + `*@${domain} forwards to your Gmail. `
+        + `Without this, replies to your @${domain} address won't arrive in Gmail.`,
+    });
+  }
+  manual.push({
+    id: 'dmarc_rua',
+    label: 'Add DMARC reporting address (optional)',
+    detail: 'Update DMARC TXT record to include rua=mailto:dmarc@keylostudios.com for aggregate reports.',
+  });
+
+  res.json({ checks, manual, domains: domains.map((d) => ({ id: d.id, name: d.name, status: d.status })) });
+}));
+
+/**
+ * POST /api/settings/deliverability/fix-tracking — disable open+click tracking
+ * on a Resend domain. The body must include { domain_id }.
+ */
+router.post('/deliverability/fix-tracking', wrap(async (req, res) => {
+  const domainId = req.body?.domain_id;
+  if (!domainId) throw badRequest('domain_id is required');
+  await disableTracking(domainId);
+  res.json({ ok: true, message: 'Open and click tracking disabled.' });
+}));
+
+export default router;

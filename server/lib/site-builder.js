@@ -202,18 +202,54 @@ const NAMED_COLOURS = {
   beige: '#8a7355', white: '#374151',
 };
 
+/**
+ * Colour names that signal "this is the ground, not the accent".
+ *
+ * A prospect writing "white and brown" means the page opens on a warm white
+ * with brown as the accent, not that the accent is a mid grey (which is
+ * what mapping `white` through NAMED_COLOURS as an accent would produce).
+ * When one of these appears in brand_colours the palette flips to light
+ * mode, the ground token becomes the warm tone they named, and the accent
+ * is picked from the first NON-ground brand colour further in the list.
+ */
+const GROUND_SIGNALS = {
+  white: '#fafaf7', cream: '#faf6ee', ivory: '#fbfaf5', beige: '#f4ecdf',
+};
+
 export function resolvePalette(trade, brandColours = []) {
   const base = { ...PALETTES[tradeFamily(trade)] };
   base.mode ??= 'dark';
   base.ground ??= base.ink;
+  // Always carry a dark-ground the toggle can flip to. Dark-default palettes
+  // reuse their own ground; light-default palettes borrow the sector's ink,
+  // deepened a shade further so it still reads as a real dark rather than
+  // a slightly dark ink.
+  base.darkGround = base.ground;
+
+  const lower = brandColours.map((c) => String(c).trim().toLowerCase());
+
+  // Ground signals win first: if the prospect named white/cream/ivory/beige,
+  // the palette flips to a light-ground variant of the sector theme. Ink
+  // stays as the sector's dark text colour; wash and line derive from the
+  // named ground so the whole system reads warm together.
+  const groundHit = lower.find((c) => c in GROUND_SIGNALS);
+  if (groundHit) {
+    base.mode = 'light';
+    base.ground = GROUND_SIGNALS[groundHit];
+    base.wash = shade(base.ground, -0.06);
+    base.line = shade(base.ground, -0.14);
+    base.darkGround = shade(base.ink, -0.18);
+  }
+
+  // Pick the accent from the first named or hex colour that isn't a ground
+  // signal. Reordering means `['white', 'brown', 'cream']` gives a cream
+  // ground with brown accent, not a grey accent as the flat mapping would.
   for (const raw of brandColours) {
     const c = String(raw).trim().toLowerCase();
+    if (c in GROUND_SIGNALS) continue;
     const hit = /^#[0-9a-f]{3,8}$/i.test(c) ? c : NAMED_COLOURS[c];
     if (!hit) continue;
     base.accent = hit;
-    // The mesh sits on a dark ink, so its second hue has to be LIGHTER than
-    // the brand colour or the gradient reads as one lit corner and a flat
-    // rest. Lightening keeps the two obviously related.
     base.glow = shade(hit, 0.42);
     return base;
   }
@@ -898,6 +934,11 @@ function css(p, t) {
     --ink:${p.ink}; --accent:${p.accent}; --glow:${p.glow ?? p.accent};
     --wash:${p.wash}; --line:${p.line}; --muted:${p.muted};
     --ground:${p.ground ?? p.ink};
+    /* The ground the toggle flips to. On a dark-default palette it equals
+       --ground; on a light-default one it is the sector's ink deepened, so
+       the toggle produces a real dark surface rather than a slightly-off
+       cream. */
+    --dark-ground:${p.darkGround ?? p.ground ?? p.ink};
     --radius:${t.radius};
     --btn-radius:${t.btnRadius};
     --display:${t.display};
@@ -1432,15 +1473,28 @@ function css(p, t) {
      dark, so they stay put. */
   ${['@media (prefers-color-scheme: dark)', 'body:has(.theme-input:checked)']
     .map((sel) => `${sel}{
-    body{background:var(--ground);color:#e7ebf3}
-    section.alt{background:color-mix(in srgb, var(--ground) 90%, #000)}
+    body{background:var(--dark-ground);color:#e7ebf3}
+    /* Hero and closing band flip too on a light-default palette; on a
+       dark-default palette --dark-ground equals --ground so these no-op. */
+    .hero,.band{background:var(--dark-ground);color:#fff}
+    .hero h1{background:linear-gradient(170deg,#fff 30%,rgba(255,255,255,.80));
+      -webkit-background-clip:text;background-clip:text;color:transparent}
+    .hero p.lede{color:rgba(255,255,255,.72)}
+    .hero .cta{background:var(--accent);color:#0b0b0b;
+      box-shadow:0 8px 30px -8px var(--accent)}
+    .hero .cta.ghost{background:transparent;color:#fff;
+      border-color:rgba(255,255,255,.28)}
+    .band .cta{background:#fff;color:var(--ink)}
+    .ticker{border-top-color:rgba(255,255,255,.12)}
+    .ticker span{color:rgba(255,255,255,.5)}
+    section.alt{background:color-mix(in srgb, var(--dark-ground) 90%, #000)}
     .card,.bento-cell,.step,.chip{
-      background:color-mix(in srgb, var(--ground) 84%, #fff 5%);
+      background:color-mix(in srgb, var(--dark-ground) 84%, #fff 5%);
       color:#eef1f7;border-color:rgba(255,255,255,.09)}
     .card p,.bento-cell p,.step p{color:rgba(255,255,255,.66)}
     .card h3,.bento-cell h3,.step h3{color:#f5f7fb}
     .cell-no{color:rgba(255,255,255,.4)}
-    .shot{background:color-mix(in srgb, var(--ground) 88%, #000);
+    .shot{background:color-mix(in srgb, var(--dark-ground) 88%, #000);
       color:rgba(255,255,255,.55);border-color:rgba(255,255,255,.1)}
     .facts li,.sec-head,.price-row{border-color:rgba(255,255,255,.09)}
     .facts b{color:rgba(255,255,255,.55)}
@@ -1450,7 +1504,7 @@ function css(p, t) {
     .steps{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.09)}
     .step:hover{background:rgba(255,255,255,.04)}
     .plate-label{background:rgba(11,14,20,.85);color:#f5f7fb}
-    footer{background:var(--ground);color:rgba(255,255,255,.6);
+    footer{background:var(--dark-ground);color:rgba(255,255,255,.6);
       border-top-color:rgba(255,255,255,.08)}
     footer a{color:rgba(255,255,255,.75)}
     /* Sticky header stays dark: the scroll animation would otherwise resolve

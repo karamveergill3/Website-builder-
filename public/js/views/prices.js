@@ -204,20 +204,6 @@ export default async function pricesView(root) {
               <table class="rows"><tbody id="p-examples">${drawExamples()}</tbody></table>
             </div>
           </div>
-
-          <div class="panel">
-            <div class="panel-hd"><h3>Rules to hold to</h3></div>
-            <div class="panel-bd">
-              <ol style="margin:0;padding-left:20px;line-height:1.6">
-                <li>Quote one VAT-inclusive number.</li>
-                <li>Say the year-two price in the same breath as the build price.</li>
-                <li>"Your domain, your files if you leave" in the first paragraph.</li>
-                <li>Whenever you quote a monthly, state the total beside it.</li>
-                <li>Never quote below £${prices.pages.one_page} for a build.</li>
-                <li>Never quote the full works cold. It's a referral price.</li>
-              </ol>
-            </div>
-          </div>
         </div>
       </div>
 

@@ -998,8 +998,12 @@ function css(p, t) {
   nav a:hover{color:var(--ink)}
   nav a:hover::after,nav a[aria-current]::after{transform:scaleX(1)}
   nav a[aria-current]{color:var(--ink)}
-  .tel{background:var(--ink);color:#fff;padding:11px 20px;border-radius:var(--btn-radius);
+  /* The tel button carries the phone number, the single most tapped element
+     on the page for this market. Padding lifts its hit area past the 44px
+     minimum without changing how it reads visually. */
+  .tel{background:var(--ink);color:#fff;padding:13px 22px;border-radius:var(--btn-radius);
     text-decoration:none;font-weight:700;white-space:nowrap;font-size:.92rem;
+    min-height:44px;display:inline-flex;align-items:center;
     transition:transform .25s var(--ease),box-shadow .25s var(--ease)}
   .tel:hover{transform:translateY(-2px);box-shadow:var(--shadow-2)}
 
@@ -1281,8 +1285,9 @@ function css(p, t) {
 
   /* Areas covered */
   .chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:32px}
-  .chip{border:1px solid var(--line);border-radius:100px;padding:9px 20px;
-    font-weight:600;font-size:.94rem;background:#fff;
+  .chip{border:1px solid var(--line);border-radius:100px;padding:11px 20px;
+    font-weight:600;font-size:.94rem;background:#fff;min-height:44px;
+    display:inline-flex;align-items:center;
     transition:border-color .25s,transform .25s var(--ease)}
   .chip:hover{border-color:var(--accent);transform:translateY(-2px)}
   .chip-add{border-style:dashed;color:var(--muted);font-weight:500}
@@ -1328,7 +1333,9 @@ function css(p, t) {
       -webkit-mask-image:linear-gradient(90deg,#000 88%,transparent);
       mask-image:linear-gradient(90deg,#000 88%,transparent)}
     nav::-webkit-scrollbar{display:none}
-    nav a{font-size:.9rem;white-space:nowrap}
+    /* Padding-block gives each link a 44px vertical hit area on a phone
+       without changing the sideways-scroll behaviour of the strip. */
+    nav a{font-size:.9rem;white-space:nowrap;padding:14px 0}
     /* The sticky call bar already carries the number, so the header's
        copy of it is just taking room. */
     .tel{display:none}
@@ -1362,13 +1369,13 @@ function css(p, t) {
   .theme-input{position:absolute;opacity:0;pointer-events:none;
     width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0)}
   .theme-toggle{display:inline-flex;align-items:center;justify-content:center;
-    width:40px;height:40px;border-radius:100px;cursor:pointer;flex-shrink:0;
+    width:44px;height:44px;border-radius:100px;cursor:pointer;flex-shrink:0;
     color:var(--muted);border:1px solid var(--line);background:transparent;
     transition:color .25s,background .25s,border-color .25s,transform .3s var(--ease)}
   .theme-toggle:hover{color:var(--ink);transform:translateY(-1px)}
   .theme-input:focus-visible ~ header .theme-toggle{outline:2px solid var(--accent);
     outline-offset:3px}
-  .theme-toggle .ti{position:relative;display:block}
+  .theme-toggle .ti{position:relative;display:block;width:18px;height:18px}
   .theme-toggle .ti-sun,.theme-toggle .ti-moon{transform-origin:50% 50%;
     transition:opacity .35s var(--ease),transform .5s var(--ease)}
   .theme-toggle .ti-sun{opacity:0;transform:rotate(-90deg) scale(.6)}
@@ -1382,8 +1389,33 @@ function css(p, t) {
   header .theme-toggle:hover{color:${light ? 'var(--ink)' : '#fff'};
     background:${light ? 'rgba(0,0,0,.04)' : 'rgba(255,255,255,.08)'}}
   @media (max-width:720px){
-    .theme-toggle{width:36px;height:36px;margin-left:auto}
+    /* 44 stays 44 — the toggle is the second most tapped control after the
+       call bar, and shrinking it under the accessibility minimum to save
+       header space isn't a trade worth making. */
+    .theme-toggle{margin-left:auto}
   }
+
+  /* ---------- keyboard focus ----------
+     Every interactive element gets a visible focus ring in the accent
+     colour. A mouse user never sees this (focus-visible, not focus), and a
+     keyboard user needs it to know where they are. The offset keeps the
+     ring off the element's own outline so it stays legible on both light
+     and dark surfaces. */
+  a:focus-visible,button:focus-visible,label:focus-visible,
+  .cta:focus-visible,.tel:focus-visible,.chip:focus-visible,
+  .brand:focus-visible{
+    outline:2px solid var(--accent);outline-offset:3px;
+    border-radius:${t.btnRadius === '100px' ? '100px' : '4px'}}
+  /* nav links use an underline, so a boxy ring reads as extra chrome —
+     switch to a solid underline for focus, matching the hover style. */
+  nav a:focus-visible{outline:none}
+  nav a:focus-visible::after{transform:scaleX(1);height:3px}
+  /* The visually-hidden checkbox is what actually receives focus for the
+     theme toggle; the ring is drawn on the sibling label instead. */
+  .theme-input:focus-visible{outline:none}
+  /* A caller who arrives here by keyboard finds it — that's the point of
+     it being 100% opacity in this state. */
+  .cta:focus-visible{transform:translateY(-1px)}
 
   /* ---------- dark mode ----------
      Two entry points, same overrides: the OS asks for it (auto), or the

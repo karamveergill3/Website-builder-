@@ -15,6 +15,7 @@ import teamView, { loginView, setupView, openAccount } from './views/auth.js';
 import invoicesView from './views/invoices.js';
 import websitesView from './views/websites.js';
 import pricesView from './views/prices.js';
+import phase2View from './views/phase2.js';
 import { api } from './api.js';
 
 const ROUTES = {
@@ -25,6 +26,7 @@ const ROUTES = {
   '/templates': templatesView,
   '/outbox':    outboxView,
   '/replies':   repliesView,
+  '/phase2':    phase2View,
   '/log':       logView,
   '/settings':  settingsView,
   '/compliance': complianceView,

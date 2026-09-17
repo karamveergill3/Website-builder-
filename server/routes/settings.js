@@ -49,6 +49,10 @@ export const ALLOWED_KEYS = new Set([
   'pay_paypal_link', 'pay_klarna_note',
   // Price list — one JSON blob so the whole ladder edits in one place.
   'price_list_json',
+  // Phase 2 questions — the "yes, send a mockup" follow-up script,
+  // stored intro + numbered questions + outro so the wording travels
+  // with the studio, not with one browser.
+  'phase2_questions_json',
 ]);
 
 export const DEFAULTS = {

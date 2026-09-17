@@ -143,8 +143,11 @@ const THEMES = {
     // Manrope, not Inter. Inter-by-default is a named tell of a machine-made
     // page (WEB-CRAFT.md T2), and swapping to a deliberately chosen face is
     // the cheapest fix in the ruleset. Manrope reads professional-modern
-    // without landing on the framework default. Falls through to a real
-    // system face if the webfont fails.
+    // without landing on the framework default. (The ruleset names Satoshi
+    // on Fontshare as the ideal anti-Inter face — that upgrade is a
+    // separate change that widens the outbound-host allow-list, deliberately
+    // left for a follow-up.) Falls through to a real system face if the
+    // webfont fails.
     font: 'Manrope:wght@500;700;800',
     display: "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     weight: 800, tracking: '-.045em', transform: 'none',
@@ -1538,6 +1541,70 @@ function css(p, t) {
 
   @media print{
     .theme-toggle,.theme-input{display:none}
+  }
+
+  /* ---------- motion vocabulary (T19) ----------
+     WEB-CRAFT.md T19: "one gesture repeated on 37 elements reads as no
+     motion at all". Every section head used to fade-and-rise as one block;
+     now the label WIPES in from the left, the heading UNCOVERS from behind
+     a blur, and the note takes the plain gesture, so the eye reads the
+     sequence as choreographed rather than stamped. Same for stats: they
+     arrive from the side rather than up, and alternating the direction
+     stops a row landing as one block. All compositor-only transforms and
+     filters, drops out under prefers-reduced-motion. */
+  @supports (animation-timeline: view()){
+    /* Delegate: when a sec-head or stats row is a .reveal, it stops
+       animating as a unit and its children take vocabulary parts. */
+    .sec-head.reveal,.stats.reveal{opacity:1;transform:none;animation:none}
+
+    .sec-head.reveal .eyebrow{clip-path:inset(0 100% 0 0);opacity:.001;
+      animation:vocab-wipe .8s var(--ease) forwards;
+      animation-timeline:view();animation-range:entry 4% cover 24%}
+    @keyframes vocab-wipe{to{clip-path:inset(0 0 0 0);opacity:1}}
+
+    .sec-head.reveal h2{opacity:0;transform:translate3d(0,14px,0);
+      filter:blur(8px);
+      animation:vocab-uncover .95s var(--ease) forwards;
+      animation-timeline:view();animation-range:entry 4% cover 28%}
+    @keyframes vocab-uncover{to{opacity:1;transform:none;filter:blur(0)}}
+
+    .sec-head.reveal .sec-note{opacity:0;transform:translate3d(0,10px,0);
+      animation:vocab-plain .8s var(--ease) forwards .12s;
+      animation-timeline:view();animation-range:entry 6% cover 26%}
+    @keyframes vocab-plain{to{opacity:1;transform:none}}
+
+    .stats.reveal .stat{opacity:0;transform:translate3d(-24px,0,0);
+      animation:vocab-side .7s var(--ease) forwards;
+      animation-timeline:view();animation-range:entry 6% cover 24%}
+    .stats.reveal .stat:nth-child(3),
+    .stats.reveal .stat:nth-child(4){transform:translate3d(24px,0,0)}
+    .stats.reveal .stat:nth-child(2),
+    .stats.reveal .stat:nth-child(3){animation-delay:80ms}
+    .stats.reveal .stat:nth-child(4){animation-delay:160ms}
+    @keyframes vocab-side{to{opacity:1;transform:none}}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .sec-head.reveal .eyebrow,.sec-head.reveal h2,.sec-head.reveal .sec-note,
+    .stats.reveal .stat{
+      animation:none !important;opacity:1 !important;
+      transform:none !important;filter:none !important;
+      clip-path:none !important}
+  }
+
+  /* R2 upgrade (2026-08-19): a sampled linear() spring is now the preferred
+     way to express overshoot on arrival. A cubic-bezier mathematically
+     cannot cross 1, which is the whole reason the keyframe workaround
+     existed; linear() samples a real spring. Only used on the hero
+     entrance — R16 says one signature moment, calm everywhere else — with
+     an @supports fallback to the sector's own easing on older engines. */
+  @supports (animation-timing-function: linear(0,1)){
+    :root{--ease-spring:linear(
+      0 0%, 0.058 4%, 0.223 9%, 0.442 14%, 0.678 20%, 0.9 27%,
+      1.045 33%, 1.098 42%, 1.087 50%, 1.045 58%, 1.014 66%,
+      0.996 76%, 1 100%
+    )}
+    .hero .eyebrow,.hero h1,.hero p.lede,.hero .cta,.hero .cta.ghost,
+    .hero-art{animation-timing-function:var(--ease-spring)}
   }
 
   /* ---------- craft defaults ----------

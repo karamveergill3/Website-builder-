@@ -140,8 +140,13 @@ const THEMES = {
     sections: ['areas', 'prices'],
   },
   pro: {
-    font: 'Inter:wght@600;800',
-    display: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    // Manrope, not Inter. Inter-by-default is a named tell of a machine-made
+    // page (WEB-CRAFT.md T2), and swapping to a deliberately chosen face is
+    // the cheapest fix in the ruleset. Manrope reads professional-modern
+    // without landing on the framework default. Falls through to a real
+    // system face if the webfont fails.
+    font: 'Manrope:wght@500;700;800',
+    display: "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     weight: 800, tracking: '-.045em', transform: 'none',
     size: 'clamp(2.3rem,4.5vw,3.9rem)',
     eyebrowTracking: '.16em',
@@ -1533,7 +1538,34 @@ function css(p, t) {
 
   @media print{
     .theme-toggle,.theme-input{display:none}
-  }`;
+  }
+
+  /* ---------- craft defaults ----------
+     The near-free pass WEB-CRAFT.md Part 2 calls "non-negotiable on every
+     build". Any one of these missing is a tell of a machine-made page: a
+     brand ::selection, hover underlines that animate thickness not colour,
+     scrollbar-color, headlines that balance, body copy capped at a
+     readable measure. All plain CSS, all mechanical. */
+  ::selection{background:var(--accent);color:${light ? 'var(--ground)' : '#0b0b0b'}}
+  :root{scrollbar-color:var(--accent) transparent}
+  /* text-wrap:balance rebalances the last two lines of a heading rather
+     than leaving the tail as one word — a hallmark of hand-set type. */
+  h1,h2,h3,.pull p{text-wrap:balance}
+  /* R16: body copy capped at ~65ch. Running paragraphs the full width of a
+     wide screen is one of the most common amateur tells. Scoped to prose
+     paragraphs — the hero lede has its own measure, and grid/card copy
+     is already narrow enough. */
+  .hero p.lede{max-width:min(52ch,100%)}
+  section p:not(.eyebrow):not(.sec-note):not(.tip-line):not(.quote-note){
+    max-width:65ch}
+  /* Footer links get an underline that animates in on hover — thickness
+     via a background-image gradient so it slides in cleanly under the
+     type, rather than a colour swap. */
+  footer a{background-image:linear-gradient(currentColor,currentColor);
+    background-position:0 100%;background-repeat:no-repeat;
+    background-size:0% 1px;
+    transition:background-size .28s var(--ease),color .2s}
+  footer a:hover{background-size:100% 1px}`;
 }
 
 function page({ title, brief, palette, theme, current, body, draftNote, single = false }) {
@@ -1571,9 +1603,16 @@ function page({ title, brief, palette, theme, current, body, draftNote, single =
 <meta name="description" content="${esc(subhead(b)).slice(0, 155)}">
 <meta name="robots" content="noindex,nofollow">
 <meta name="color-scheme" content="light dark">
+<!-- A real favicon, not the browser's default document glyph. WEB-CRAFT.md
+     Part 2 counts a missing favicon as a machine tell — the mark is drawn
+     inline as a data URI in the sector's accent colour so no extra request
+     is needed and it comes through under the mockup CSP. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
+  `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='${palette.accent}'/><text x='16' y='22' font-family='ui-sans-serif,system-ui' font-weight='800' font-size='18' text-anchor='middle' fill='${palette.ink}'>${esc(String(b.business_name).trim().charAt(0).toUpperCase())}</text></svg>`
+)}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${t.font}&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${t.font}&display=swap">
 <style>${css(palette, t)}</style>
 </head>
 <body id="top">
@@ -2130,9 +2169,19 @@ function singleBody(b, family = 'pro', sections = []) {
   const where = b.areas?.length ? b.areas.join(', ') : 'the local area';
   const tel = telHref(b.phone);
   const mail = mailtoHref(b.email);
-  const eyebrow = b.areas?.length
-    ? `${shortTrade(b.trade) ?? 'Local trade'} · ${b.areas[0]}`
-    : (shortTrade(b.trade) ?? 'Local trade');
+  // R18: every word pays rent. The trade word is already in the h1, so the
+  // eyebrow shouldn't restate it — it should add a beat the headline doesn't
+  // cover. Mapping from CTA gives a wayfinding label that changes the page
+  // per what the visitor is here to do, without inventing a claim.
+  const EYEBROW_BY_CTA = {
+    call:    'Speak to us',
+    quote:   'Free quotes',
+    book:    'Booking open',
+    prices:  'Price list',
+    gallery: 'Recent work',
+    enquire: 'Enquiries',
+  };
+  const eyebrow = EYEBROW_BY_CTA[b.primary_cta] ?? 'Local specialists';
 
   // The ticker needs its items twice: the track translates by -50%, so the
   // second copy is what is on screen as the first scrolls away.

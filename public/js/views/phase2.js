@@ -16,30 +16,30 @@ import { html, mount, $, toast } from '../dom.js';
  * facts about their business, then assets, then colours.
  */
 const DEFAULTS = {
-  intro: `Great, five quick things and I'll get one over:`,
+  intro: `Just 5 quick bits and I'll get one sorted:`,
   questions: [
     {
-      q: 'What name would you like on the site?',
+      q: 'What name should go on the site?',
       note: 'The masthead. "Hillside Roofing" reads warmer than "HILLSIDE ROOFING LIMITED".',
     },
     {
-      q: 'What should visitors do first — call, book, get a quote, see prices, or see your work?',
-      note: 'Decides the whole layout — hero, main button, what the site is arranged around.',
+      q: `What's the main thing you want visitors to do? Call you, book, get a quote, see prices, or see your work?`,
+      note: 'Decides the whole layout. Hero, main button, what the site is arranged around.',
     },
     {
       q: 'What areas do you cover?',
-      note: 'The service area section, local SEO, and page templates.',
+      note: 'The service area section, local SEO, page templates.',
     },
     {
-      q: 'Have you got a logo, and any photos of past work?',
+      q: 'Got a logo? And any photos of past work?',
       note: 'Real logo vs generated wordmark. Real photos vs trade-styled placeholders.',
     },
     {
       q: 'Any brand colours you like?',
-      note: 'Palette — falls back to sector defaults if they say none.',
+      note: 'Palette. Falls back to sector defaults if they say none.',
     },
   ],
-  outro: `Whatever you send, I'll work with. Don't worry about answering them all.`,
+  outro: `No stress if you can't answer them all. Even one or two gives me enough.`,
 };
 
 /** Fold the intro, numbered questions and outro into one paste-ready block. */
@@ -84,9 +84,9 @@ export default async function phase2View(root) {
 
   mount(root, html`
     <div class="bar">
-      <h2>Phase 2</h2>
+      <h2>Ask them</h2>
       <div class="grow"></div>
-      <span class="meta">After they've said yes to a mockup. Copy this into WhatsApp or email.</span>
+      <span class="meta">Once they've said yes to a mockup. Copy it into WhatsApp or email.</span>
     </div>
 
     <form id="phase2">
@@ -193,7 +193,7 @@ export default async function phase2View(root) {
 
   form.querySelector('[data-act="copy"]')?.addEventListener('click', async () => {
     const ok = await copy(assemble(readState()));
-    toast(ok ? 'Copied — paste into WhatsApp or email' : 'Could not copy — select the text',
+    toast(ok ? 'Copied. Paste it into WhatsApp or email' : 'Could not copy. Select the text instead',
       { error: !ok });
   });
 

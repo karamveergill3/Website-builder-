@@ -12,9 +12,21 @@ const CTA_LABEL = {
 const CTAS = Object.keys(CTA_LABEL);
 
 export default async function repliesView(root, _p, { refresh }) {
-  const data = await api.get('/api/replies');
+  // Opening Replies is seeing them: what came in since last time is marked
+  // new, and the count on the tab goes.
+  const [data, seen] = await Promise.all([
+    api.get('/api/replies'),
+    api.post('/api/replies/seen', {}).catch(() => ({ before: null })),
+  ]);
   const replies = data.replies ?? [];
   const gmail = data.gmail ?? {};
+  // A refresh straight after (a delete, a rebuild) keeps the same ones marked.
+  if (lastSeen.at === null || Date.now() - lastSeen.when > 60_000) {
+    lastSeen.at = seen.before ?? '';
+    lastSeen.when = Date.now();
+  }
+  const isNew = (r) => Boolean(lastSeen.at) && String(r.fetched_at ?? '') > lastSeen.at;
+  import('../app.js').then((m) => m.updateRepliesBadge(0)).catch(() => {});
 
   mount(root, html`
     <div class="bar">
@@ -26,14 +38,20 @@ export default async function repliesView(root, _p, { refresh }) {
         : ''}
     </div>
 
+    <p class="tip" style="margin:-4px 0 12px">Every reply lands here: WhatsApp replies as soon as
+      they're pasted in (on <a href="#/whatsapp">Sent via WhatsApp</a> or with <b>Paste a reply</b>),
+      ${gmail.ready ? 'and email replies on their own, checked in Gmail every 5 minutes.'
+        : html`and email replies on their own once Gmail is connected with permission to read
+          (<a href="#/settings">Settings</a>).`}</p>
+
     ${!replies.length ? html`
       <div class="panel"><div class="panel-bd">
         <p class="tip">Nothing back yet. When a prospect replies, paste it in with
-          <b>Paste a reply</b> — the brief is pulled out of it (services, what they want
-          visitors to do, whether they have a logo) and one button builds them a
-          four-page site.</p>
+          <b>Paste a reply</b> (or on Sent via WhatsApp): the brief is pulled out of it
+          (services, what they want visitors to do, whether they have a logo) and one
+          button builds them a site.</p>
       </div></div>`
-    : replies.map((r) => replyCard(r))}
+    : replies.map((r) => replyCard(r, isNew(r)))}
   `);
 
   /* ---- sync ---- */
@@ -331,11 +349,12 @@ export default async function repliesView(root, _p, { refresh }) {
 
 /* ------------------------------------------------------------- rendering */
 
-function replyCard(r) {
+function replyCard(r, fresh = false) {
   const b = r.brief;
   return html`
-    <div class="panel">
+    <div class="panel${fresh ? ' reply-new' : ''}">
       <div class="panel-hd">
+        ${fresh ? html`<span class="flag" data-ok>new</span>` : ''}
         <h3 class="grow">${r.business_name ?? r.from_address ?? 'Unknown'}
           ${r.location ? html`<span class="meta" style="font-weight:400"> — ${r.location}</span>` : ''}
         </h3>
@@ -349,7 +368,14 @@ function replyCard(r) {
         <div style="white-space:pre-wrap;border-left:3px solid var(--line);padding-left:12px;
                     margin-bottom:14px;color:var(--muted);font-size:.94rem">${r.body}</div>
 
-        ${b ? briefPanel(r, b) : html`
+        ${Object.hasOwn(TURNED_DOWN, r.intent) ? html`
+          <div class="bar" style="margin:0">
+            <span class="flag">${TURNED_DOWN[r.intent]}</span>
+            <div class="grow"></div>
+            <button class="mini primary" data-act="draft" data-id="${r.id}"
+              title="Your answer to this reply, written and ready to copy or open in WhatsApp">Draft reply</button>
+          </div>`
+        : b ? briefPanel(r, b) : html`
           <div class="msg msg-warn"><div class="grow">
             No brief yet.
             <button class="mini" data-act="reextract" data-id="${r.id}">Read it</button>
@@ -409,3 +435,14 @@ function briefPanel(r, b) {
       <p class="tip">Built ${relative(r.mockup.generated_at)} — four pages, on a private link.
         Paste it into your reply; nobody finds it without the link.</p>` : ''}`;
 }
+
+/** When you'd last opened Replies before this visit (kept across a refresh). */
+const lastSeen = { at: null, when: 0 };
+
+/** Replies that turned us down: no brief or mock up to build, just an answer. */
+const TURNED_DOWN = {
+  no: 'Not interested',
+  elsewhere: 'Using someone else',
+  has_site: 'Already has a website',
+  stop: 'Asked not to be contacted',
+};

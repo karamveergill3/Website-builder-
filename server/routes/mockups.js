@@ -3,6 +3,8 @@
  *
  *   GET    /api/replies                 what has come back, with briefs
  *   POST   /api/replies/sync            pull new replies from Gmail
+ *   GET    /api/replies/unseen          how many are new to you
+ *   POST   /api/replies/seen            you've looked
  *   POST   /api/replies/manual          record a reply that came another way
  *   POST   /api/replies/whatsapp-read   read a WhatsApp paste: whose, and the answer
  *   POST   /api/replies/whatsapp-paste  file messages copied out of WhatsApp
@@ -24,7 +26,7 @@ import { db } from '../db.js';
 import { wrap, badRequest, notFound, conflict, nowIso, str, int } from '../lib/http.js';
 import {
   syncReplies, extractBriefFor, listReplies, markRead, recordManualReply,
-  readiness, briefToApi, insertReply,
+  readiness, briefToApi, insertReply, unseenReplies, seeReplies,
 } from '../lib/replies.js';
 import {
   configured as resendConfigured, sendEmail as resendSend,
@@ -134,6 +136,16 @@ router.get('/replies', wrap((req, res) => {
     }),
     gmail: readiness(),
   });
+}));
+
+/** GET /api/replies/unseen — how many have come in since you last opened Replies. */
+router.get('/replies/unseen', wrap((req, res) => {
+  res.json({ count: unseenReplies(req.user) });
+}));
+
+/** POST /api/replies/seen — you've opened Replies; says when you last had. */
+router.post('/replies/seen', wrap((req, res) => {
+  res.json({ before: seeReplies(req.user) });
 }));
 
 router.post('/replies/sync', wrap(async (req, res) => {

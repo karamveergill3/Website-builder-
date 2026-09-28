@@ -50,6 +50,30 @@ export function refresh() {
   return route();
 }
 
+/**
+ * How many replies have come in since you last opened Replies, on the tab
+ * itself: checked on every screen change and every couple of minutes, so a
+ * reply someone else pasted, or one Gmail brought in, is seen from anywhere.
+ */
+export async function updateRepliesBadge(count = null) {
+  const link = document.querySelector('#nav a[href="#/replies"]');
+  if (!link) return;
+  let n = count;
+  if (n === null) {
+    try { n = (await api.get('/api/replies/unseen')).count ?? 0; } catch { return; }
+  }
+  let badge = link.querySelector('.nav-badge');
+  if (!n) { badge?.remove(); return; }
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.className = 'nav-badge';
+    link.append(badge);
+  }
+  badge.textContent = n > 99 ? '99+' : String(n);
+  badge.title = `${n} new repl${n === 1 ? 'y' : 'ies'}`;
+}
+setInterval(() => { if (document.visibilityState === 'visible') updateRepliesBadge(); }, 2 * 60 * 1000);
+
 export function navigate(to) {
   if (location.hash === `#${to}`) return refresh();
   location.hash = to;
@@ -85,6 +109,7 @@ async function route() {
   mount(el, html`<div class="loading"><span class="spin"></span></div>`);
   try {
     await render(el, params, { refresh, navigate });
+    if (path !== '/replies') updateRepliesBadge();
   } catch (err) {
     // A session that lapsed mid-use: drop straight to the login rather than
     // showing a confusing error on a screen the viewer is no longer allowed.

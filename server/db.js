@@ -1752,6 +1752,15 @@ Thanks so much, and have a lovely day.
       );
     },
   },
+  {
+    name: '062_replies_seen_by_user',
+    up: `
+      -- When each of the team last opened Replies, so each sees their own
+      -- count of what has come in since.
+      ALTER TABLE users ADD COLUMN replies_seen_at TEXT;
+      CREATE INDEX idx_replies_fetched ON replies(fetched_at);
+    `,
+  },
 ];
 
 function migrate() {

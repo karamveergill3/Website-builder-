@@ -396,6 +396,14 @@ blockquote.quote {
 .wa-preset { margin-bottom: 8px; }
 .wa-reading { margin: 10px 0 0; }
 
+/* New replies: a count on the Replies tab, and a mark on each new one. */
+.nav-badge {
+  display: inline-block; min-width: 17px; margin-left: 5px; padding: 0 5px;
+  border-radius: 9px; background: var(--clay); color: #fff; font-size: .66rem; font-weight: 700;
+  line-height: 17px; text-align: center; vertical-align: 1px;
+}
+.panel.reply-new { border-left: 3px solid var(--green); }
+
 /* A select that is only as wide as what it says, so it never spills into the next column. */
 select.fit { width: auto; max-width: 150px; }
 /* The status select is the status: coloured like the pill it replaces. */

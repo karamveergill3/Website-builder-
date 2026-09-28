@@ -18,6 +18,7 @@ import {
   isConnected, readEnabled, hasReadScope, listMessages, getMessage, replyQuery, GmailError,
 } from './gmail.js';
 import { buildBrief } from './brief.js';
+import { classifyReply } from './reply-draft.js';
 
 /** Gmail caps query length; 40 addresses per query stays well inside it. */
 const ADDRESSES_PER_QUERY = 40;
@@ -238,7 +239,10 @@ export function listReplies({ limit = 50, leadId = null, unreadOnly = false } = 
        FROM replies r
        LEFT JOIN leads   l ON l.id = r.lead_id
        LEFT JOIN briefs  b ON b.reply_id = r.id
-       LEFT JOIN mockups m ON m.brief_id = b.id
+       -- The latest mock up only: a rebuild adds a row, and a plain join
+       -- listed the reply once per build.
+       LEFT JOIN mockups m ON m.id = (SELECT m2.id FROM mockups m2 WHERE m2.brief_id = b.id
+                                        ORDER BY m2.generated_at DESC, m2.id DESC LIMIT 1)
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY r.received_at DESC
       LIMIT ?`
@@ -246,6 +250,9 @@ export function listReplies({ limit = 50, leadId = null, unreadOnly = false } = 
 
   return rows.map((r) => ({
     id: r.id,
+    // What kind of reply it is (a yes, a no, "we've got someone"), so the
+    // screen can leave the build tools off a reply that turned us down.
+    intent: classifyReply(r.body, {}, { location: r.location }),
     lead_id: r.lead_id,
     business_name: r.business_name,
     category: r.category,
@@ -257,6 +264,7 @@ export function listReplies({ limit = 50, leadId = null, unreadOnly = false } = 
     subject: r.subject,
     body: r.body,
     received_at: r.received_at,
+    fetched_at: r.fetched_at,
     read_at: r.read_at,
     brief: r.brief_id ? briefToApi({
       id: r.brief_id, trading_name: r.trading_name,
@@ -269,6 +277,39 @@ export function listReplies({ limit = 50, leadId = null, unreadOnly = false } = 
       ? { token: r.mockup_token, generated_at: r.mockup_generated_at }
       : null,
   }));
+}
+
+/**
+ * The scheduler's look at Gmail: new replies filed on their own, every few
+ * minutes, whenever Gmail is connected with permission to read. Skipped
+ * (not an error) when it isn't, or while a look is still running.
+ */
+let checking = false;
+const doneChecking = () => { checking = false; };
+export async function checkForReplies() {
+  if (checking || !readiness().ready) return { skipped: true };
+  checking = true;
+  try {
+    return await syncReplies({ sinceDays: 14, max: 50 });
+  } finally {
+    doneChecking();
+  }
+}
+
+/** How many replies have come in since this person last opened Replies. */
+export function unseenReplies(user) {
+  if (!user?.id) return 0;
+  const row = db.prepare('SELECT replies_seen_at, created_at FROM users WHERE id = ?').get(user.id);
+  const since = row?.replies_seen_at ?? row?.created_at ?? '';
+  return db.prepare('SELECT COUNT(*) AS n FROM replies WHERE fetched_at > ?').get(since).n;
+}
+
+/** They have opened Replies: returns when they last had, to mark what is new. */
+export function seeReplies(user) {
+  if (!user?.id) return null;
+  const row = db.prepare('SELECT replies_seen_at, created_at FROM users WHERE id = ?').get(user.id);
+  db.prepare('UPDATE users SET replies_seen_at = ? WHERE id = ?').run(nowIso(), user.id);
+  return row?.replies_seen_at ?? row?.created_at ?? null;
 }
 
 export function markRead(replyId) {

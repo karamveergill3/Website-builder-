@@ -431,6 +431,7 @@ async function startScheduler() {
   const { huntConfig, hunt, activeHunt, ranToday } = await import('./lib/hunter.js');
   const { configured: resendReady, listDomains, disableTracking } = await import('./lib/resend.js');
   const { reconcile } = await import('./lib/delivery.js');
+  const { checkForReplies } = await import('./lib/replies.js');
 
   if (resendReady()) {
     try {
@@ -474,6 +475,16 @@ async function startScheduler() {
       } catch (err) {
         console.error('[delivery] reconciler error:', err.message);
       }
+    }
+
+    // Replies by email come in on their own on the same tick, whenever Gmail
+    // is connected with permission to read; the "Check Gmail" button is only
+    // for not waiting.
+    try {
+      const got = await checkForReplies();
+      if (got.stored) console.log(`[replies] ${got.stored} new from Gmail`);
+    } catch (err) {
+      console.error('[replies] check failed:', err.message);
     }
   };
 

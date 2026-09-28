@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { STARTERS, missingStarters } from './lib/starters.js';
+import { STARTERS, missingStarters, withSalesLine } from './lib/starters.js';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1608,6 +1608,26 @@ Thanks so much, and have a lovely day.
       -- free allowance and their own budget.
       ALTER TABLE hunt_runs ADD COLUMN company_lookups INTEGER NOT NULL DEFAULT 0;
     `,
+  },
+  {
+    name: '054_whatsapp_openers_sales_line',
+    run() {
+      // The sales line goes into each shipped WhatsApp opener just before its
+      // mock-up offer. Inserted rather than the body replaced, so wording
+      // changed on the Templates screen is kept.
+      const now = new Date().toISOString();
+      for (const s of STARTERS.filter((t) => t.channel === 'whatsapp')) {
+        const cur = db.prepare(
+          "SELECT id, body FROM templates WHERE name = ? AND channel = 'whatsapp'"
+        ).get(s.name);
+        if (!cur) continue;
+        const body = withSalesLine(cur.body);
+        if (body !== cur.body) {
+          db.prepare('UPDATE templates SET body = ?, updated_at = ? WHERE id = ?')
+            .run(body, now, cur.id);
+        }
+      }
+    },
   },
 ];
 

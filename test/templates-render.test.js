@@ -144,6 +144,55 @@ test('a lead carries its sector, so the right opener can pick itself', async () 
   assert.equal(byId[other.id].sector_label, null, 'an unrecognised trade uses the generic opener');
 });
 
+test('every WhatsApp opener carries the sales line, just before the mock-up offer', async () => {
+  const { SALES_LINE } = await import('../server/lib/starters.js');
+  for (const s of STARTERS.filter((x) => x.channel === 'whatsapp')) {
+    const line = s.body.indexOf(SALES_LINE);
+    const offer = s.body.search(/free mock up/);
+    assert.ok(line > 0, `${s.name} is missing the sales line`);
+    assert.ok(line < offer, `${s.name}: the line belongs before the offer`);
+  }
+  for (const s of STARTERS.filter((x) => x.channel !== 'whatsapp')) {
+    assert.ok(!s.body.includes(SALES_LINE), `${s.name} should not carry it`);
+  }
+});
+
+test('the trades opener reads exactly as Keylo sends it', async () => {
+  const { renderTemplate } = await import('../server/lib/template.js');
+  const trades = STARTERS.find((s) => s.name === 'First message — WhatsApp · Trades');
+  const r = renderTemplate(
+    trades,
+    { business_name: 'Barlows Window Services', location: 'Stoke-On-Trent' },
+    { biz_name: 'keylo studios' },
+    { name: 'javier' },
+  );
+  assert.equal(r.body, [
+    "Hi, my name is Javier and I'm from Keylo Studios. I came across Barlows Window Services in Stoke-On-Trent and noticed you don't have a website yet, so I thought I'd get in touch.",
+    '',
+    "For a trade, most people just want to see a few jobs you've done and be able to tap to call. That's exactly what we build: a clean one page site with photos of your work, the areas you cover, and a call button, so new customers can find you and get straight through.",
+    '',
+    'Having a website is proven to boost sales by 40%.',
+    '',
+    "I'd be happy to put together a free mock up for Barlows Window Services so you can see how it could look, with no cost and no obligation.",
+    '',
+    "Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.",
+    '',
+    'Cheers, and all the best with the work.',
+    'Javier, Keylo Studios',
+  ].join('\n'));
+});
+
+test('the sales line is added to an existing opener without undoing edits', async () => {
+  const { withSalesLine, SALES_LINE } = await import('../server/lib/starters.js');
+  const edited = 'Hi, it is Karam.\n\nWe build sites.\n\nFancy a free mock up? Just say.\n\nKaram';
+  const once = withSalesLine(edited);
+  assert.equal(once,
+    `Hi, it is Karam.\n\nWe build sites.\n\n${SALES_LINE}\n\nFancy a free mock up? Just say.\n\nKaram`);
+  assert.equal(withSalesLine(once), once, 'never added twice');
+  const noOffer = 'Hi.\n\nNo offer paragraph in this one.';
+  assert.equal(withSalesLine(noOffer), noOffer, 'nothing to anchor on, so left alone');
+});
+
 test('the salon and trades WhatsApp openers are seeded and read naturally', async () => {
   const names = (await get('/api/templates')).body.templates
     .filter((t) => t.channel === 'whatsapp').map((t) => t.name);

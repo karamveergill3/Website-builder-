@@ -34,6 +34,23 @@
  * template.
  */
 
+/** The stat every WhatsApp opener carries, between what we build and the mock-up offer. */
+export const SALES_LINE = 'Having a website is proven to boost sales by 40%.';
+
+/**
+ * Put SALES_LINE into an opener just before its free mock-up offer, once.
+ * Leaves the rest of the wording alone, so an opener someone edited on the
+ * Templates screen keeps their edits; one with no mock-up offer to anchor on
+ * is returned unchanged rather than guessed at.
+ */
+export function withSalesLine(body) {
+  const text = String(body ?? '');
+  if (/boost sales/i.test(text)) return text;
+  const at = text.search(/\n\n[^\n]*free mock ?-?up/i);
+  if (at < 0) return text;
+  return `${text.slice(0, at)}\n\n${SALES_LINE}${text.slice(at)}`;
+}
+
 export const STARTERS = [
   {
     name: 'First message — email',
@@ -83,6 +100,8 @@ Kind regards,
 
 We build simple, great looking one page websites for local businesses. Just a clear page with what you do, a few photos, and a button so people can call or message you straight from their phone.
 
+${SALES_LINE}
+
 I'd be really happy to put together a free mock up for {{business}} so you can see exactly how it could look, with no cost and no obligation at all.
 
 Would that be something you'd like me to do for you? No pressure at all, and if it's not for you, just say and I won't message again.
@@ -99,6 +118,8 @@ Thanks so much, and have a great day.
     body: `Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} in {{location}} and noticed you don't have a website yet. For a salon that's so often the first place a new client looks before they book, so I wanted to reach out.
 
 We build simple, beautiful one page websites: your treatments, lovely photos of your work, and a button so someone can call or book you straight from their phone. They're really easy to keep updated too.
+
+${SALES_LINE}
 
 I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
@@ -117,6 +138,8 @@ Thanks so much, and have a lovely day.
 
 For a trade, most people just want to see a few jobs you've done and be able to tap to call. That's exactly what we build: a clean one page site with photos of your work, the areas you cover, and a call button, so new customers can find you and get straight through.
 
+${SALES_LINE}
+
 I'd be happy to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
 Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
@@ -133,6 +156,8 @@ Cheers, and all the best with the work.
     body: `Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} in {{location}} and noticed you don't have a website yet, so I wanted to say hello.
 
 For a place like yours, a website is usually where people check the menu, your opening hours and how to order, so it can make a real difference. We build simple, tasty looking one page sites with your menu, a few photos and a tap to call button.
+
+${SALES_LINE}
 
 I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
@@ -151,6 +176,8 @@ Thanks so much, and hope you're keeping busy.
 
 For a garage, a website is where people check what you do and book their car in. We build simple, straightforward one page sites with your services, your opening hours and a tap to call button, so customers can find you and get booked in easily.
 
+${SALES_LINE}
+
 I'd be happy to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
 Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
@@ -168,6 +195,8 @@ Cheers, and all the best.
 
 For somewhere like yours, a website is usually the first place people look before they commit to booking. We build simple, welcoming one page sites with what you offer, your prices or timetable, and a tap to book or call button.
 
+${SALES_LINE}
+
 I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
 Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
@@ -184,6 +213,8 @@ Thanks so much, and have a great day.
     body: `Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} in {{location}} and noticed you don't have a website yet, so I thought I'd say hello.
 
 For a shop, a website is where people check what you stock, where you are and when you're open. We build simple, welcoming one page sites with photos, your location and a tap to call button, so new customers can find you easily.
+
+${SALES_LINE}
 
 I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 

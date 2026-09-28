@@ -1389,3 +1389,97 @@ test('sameFirm needs the name AND the town', () => {
   assert.equal(sameFirm(leeds, row('City Roofing', '9 Road, LS21 3BB'), null), false);
   assert.equal(sameFirm(leeds, row('City Roofing', '9 Road, Leeds LS2 3BB'), null), true);
 });
+
+/* ---------------------------------------------------- staying in the area */
+
+/** A Companies House name-search hit, registered in `town`. */
+const hit = (title, number, town, postcode = 'LS21 1AA') => ({
+  company_number: number, title, company_status: 'active', company_type: 'ltd',
+  date_of_creation: '2016-01-01', address_snippet: `1 High St, ${town}`,
+  address: { locality: town, postal_code: postcode },
+});
+
+test('a same-named company registered in another town is not taken for a local business', async () => {
+  // Name alone used to be enough. The lead then showed the other company's
+  // town, and a local sole trader got filed as someone else's limited company.
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_messageable_only: '1', hunt_include_places: '1', hunt_daily_target: '5',
+  });
+
+  register = [{ body: { hits: 1, items: [company('AREA FILLER LIMITED', '74000001')] } }];
+  places = [{ places: [place('Elite Roofing', { phone: '07700 910001' })] }];
+  search = [{ body: { items: [hit('ELITE ROOFING LIMITED', '74000002', 'Bristol', 'BS1 4DJ')] } }];
+
+  const run = await runAndWait();
+  const names = (await get('/api/leads')).body.leads.map((l) => l.business_name);
+  assert.ok(!names.includes('Elite Roofing'), 'the Bristol company is not this Otley listing');
+  assert.equal(run.wrong_town, 1, 'counted as the wrong town, so the run says why');
+});
+
+test('with the same name in two towns, the one registered here is confirmed', async () => {
+  // Before, two strong matches anywhere in the country was "ambiguous" and
+  // nothing was filed. The town settles it.
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_messageable_only: '1', hunt_include_places: '1', hunt_daily_target: '5',
+  });
+
+  register = [{ body: { hits: 1, items: [company('AREA FILLER TWO LIMITED', '74000011')] } }];
+  places = [{ places: [place('Premier Roofing', { phone: '07700 910011' })] }];
+  search = [{ body: { items: [
+    hit('PREMIER ROOFING LIMITED', '74000012', 'Bristol', 'BS1 4DJ'),
+    hit('PREMIER ROOFING LIMITED', '74000013', 'Otley'),
+  ] } }];
+
+  await runAndWait();
+  const lead = (await get('/api/leads')).body.leads.find((l) => l.business_name === 'Premier Roofing');
+  assert.ok(lead, 'filed');
+  assert.equal(lead.company_number, '74000013', 'as the company registered in Otley');
+  assert.equal(lead.location, 'Otley');
+});
+
+test('a local company is not filed from a Google listing in another town', async () => {
+  // Google answers "roofers in Otley" with firms from nearby towns too. An
+  // Otley company with the same name as a Kendal listing is not that firm.
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_messageable_only: '1', hunt_include_places: '1', hunt_daily_target: '5',
+  });
+
+  register = [{ body: { hits: 1, items: [company('AREA FILLER THREE LIMITED', '74000021')] } }];
+  places = [{ places: [{
+    ...place('Summit Roofing', { phone: '07700 910021' }),
+    formattedAddress: '4 Stricklandgate, Kendal LA9 4ND, UK',
+  }] }];
+  search = [{ body: { items: [hit('SUMMIT ROOFING LIMITED', '74000022', 'Otley')] } }];
+
+  const run = await runAndWait();
+  const names = (await get('/api/leads')).body.leads.map((l) => l.business_name);
+  assert.ok(!names.includes('Summit Roofing'));
+  assert.equal(run.wrong_town, 1);
+});
+
+test('call-only sole traders outside the town are not filed under it', async () => {
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_messageable_only: '1', hunt_include_sole_traders: '1',
+    hunt_include_places: '1', hunt_daily_target: '5',
+  });
+
+  register = [{ body: { hits: 1, items: [company('AREA FILLER FOUR LIMITED', '74000031')] } }];
+  places = [{ places: [
+    { ...place('Faraway Dave', { phone: '07700 910031' }), formattedAddress: 'Ilkley LS29, UK' },
+    place('Local Dave', { phone: '07700 910032' }),
+  ] }];
+  search = [{ body: { items: [] } }, { body: { items: [] } }];   // neither is a company
+
+  await runAndWait();
+  const names = (await get('/api/leads')).body.leads.map((l) => l.business_name);
+  assert.ok(names.includes('Local Dave'), 'the Otley one is filed call-only');
+  assert.ok(!names.includes('Faraway Dave'), 'the Ilkley one is not filed as Otley');
+});

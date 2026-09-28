@@ -24,7 +24,7 @@
 import { db, getSetting } from '../db.js';
 import { nowIso } from './http.js';
 import {
-  advancedSearch, findCompany, isBodyCorporate, normaliseName, CompaniesHouseError,
+  advancedSearch, searchByName, isBodyCorporate, isTrading, normaliseName, CompaniesHouseError,
   matchScore, AUTO_MATCH,
 } from './companies-house.js';
 import { resolveTrade, TRADES } from './sic.js';
@@ -370,6 +370,24 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const outwardCode = (postcode) => String(postcode ?? '').trim().split(/\s+/)[0] || '';
 
 /**
+ * Does this address name this place as a whole word? "Otley" is in "1 High
+ * St, Otley LS21 1AA" but "LS2" is not in "LS21", and "Stone" is not in
+ * "Stoneleigh". An empty place is named by nothing.
+ */
+function mentions(address, place) {
+  const p = String(place ?? '').trim().toLowerCase();
+  if (!p) return false;
+  return new RegExp(`(^|[^a-z0-9])${escapeRe(p)}([^a-z0-9]|$)`).test(String(address ?? '').toLowerCase());
+}
+
+/**
+ * Is a Google listing in the town being hunted? Google answers "roofers in
+ * Otley" with firms from the towns around it too, and a lead is filed under
+ * the hunted town — so the listing's own address has to say so.
+ */
+export const inArea = (area, address) => !area || mentions(address, area);
+
+/**
  * Is this Google listing the same firm as this register entry?
  *
  * Same name is not enough: two firms can share a trading name a county apart,
@@ -394,9 +412,7 @@ export function sameFirm(company, row, area) {
     return false;
   }
 
-  const places = [company.locality, area, outwardCode(company.postal_code)]
-    .map((s) => String(s ?? '').trim().toLowerCase()).filter(Boolean);
-  return places.some((p) => new RegExp(`(^|[^a-z0-9])${escapeRe(p)}([^a-z0-9]|$)`).test(addr));
+  return [company.locality, area, outwardCode(company.postal_code)].some((p) => mentions(addr, p));
 }
 
 /**
@@ -536,17 +552,50 @@ function importConfirmedPlaceLead(row, company, trade, area) {
   return leadId;
 }
 
+/** How far a match must lead the next one to be taken without a human — findCompany's bar. */
+const CLEAR_MARGIN = 0.15;
+
 /**
  * Look a Google business up on the register and, only if it is unambiguously
- * an active limited company, file it as a confirmed corporate lead. Returns
- * { filed, reason }: 'known' if already held, 'unconfirmed' if the register
- * could not clearly match it to a company (a sole trader, or too fuzzy a name
- * to be sure — left off rather than guessed at, because guessing wrong means
- * messaging someone you may not).
+ * an active limited company in the town being hunted, file it as a confirmed
+ * corporate lead. Returns { filed, reason }: 'known' if already held,
+ * 'elsewhere' if the only matching company is registered in another town (or
+ * the listing is), 'unconfirmed' if the register could not clearly match it
+ * (a sole trader, or too fuzzy a name to be sure). Anything not filed is left
+ * off rather than guessed at, because guessing wrong means messaging someone
+ * you may not.
+ *
+ * A name match alone used to be enough, so a same-named company registered
+ * anywhere in the UK passed: the lead showed that company's town, and a local
+ * sole trader could be filed as somebody else's limited company. Now the
+ * company must be registered in the hunted town, lead any other candidate
+ * there by a clear margin, and Google's address for the listing must agree
+ * (sameFirm), which also turns away listings Google pulled in from nearby.
  */
 async function confirmAndImportPlaceLead(row, trade, area, seen) {
-  const { auto } = await findCompany(row.display_name, { location: area });
-  if (!auto) return { filed: false, reason: 'unconfirmed' };
+  const ranked = (await searchByName(row.display_name, { limit: 50 }))
+    .map((c) => ({ ...c, score: matchScore(row.display_name, c) }))
+    .filter((c) => c.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  // Every candidate in town counts toward the margin, dissolved or not: a
+  // live "Hillside Roofing (Yorkshire) Ltd" next to a dissolved "Hillside
+  // Roofing Ltd" is not a clear answer for a listing called "Hillside Roofing".
+  const here = ranked.filter((c) => sameTown(area, c.locality));
+  const [best, runnerUp] = here;
+  const auto = best
+    && best.score >= AUTO_MATCH
+    && isTrading(best)
+    && isBodyCorporate(best.company_type)
+    && (!runnerUp || best.score - runnerUp.score >= CLEAR_MARGIN)
+    ? best : null;
+
+  if (!auto) {
+    const elsewhere = !here.some((c) => c.score >= AUTO_MATCH)
+      && ranked.some((c) => c.score >= AUTO_MATCH && isBodyCorporate(c.company_type));
+    return { filed: false, reason: elsewhere ? 'elsewhere' : 'unconfirmed' };
+  }
+  if (!sameFirm(auto, row, area)) return { filed: false, reason: 'elsewhere' };
 
   const number = String(auto.company_number ?? '').trim().toUpperCase();
   if (!number) return { filed: false, reason: 'unconfirmed' };
@@ -920,9 +969,13 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
 
             if (cfg.messageableOnly) {
               let outcome;
-              if (registerVerdict(row.place_id) === 'not_ltd') {
+              const prior = registerVerdict(row.place_id);
+              if (prior === 'not_ltd' || prior === 'elsewhere') {
                 // The register already said no about this listing recently.
-                outcome = { filed: false, reason: 'unconfirmed', remembered: true };
+                outcome = {
+                  filed: false, reason: prior === 'elsewhere' ? 'elsewhere' : 'unconfirmed',
+                  remembered: true,
+                };
               } else {
                 // One register search per business. Count it against the register
                 // budget so a town of no-hopers cannot run the API dry, and stop
@@ -938,18 +991,23 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
                 }
                 if (!outcome.filed && outcome.reason === 'unconfirmed') {
                   recordRegisterVerdict(row.place_id, 'not_ltd');
+                } else if (!outcome.filed && outcome.reason === 'elsewhere') {
+                  recordRegisterVerdict(row.place_id, 'elsewhere');
                 }
               }
               if (!outcome.filed) {
                 if (outcome.reason === 'known') { counters.already_known++; continue; }
-                // The register can't confirm it's a limited company — a sole
-                // trader, most likely. File it call-only when that's switched
-                // on; otherwise leave it off the list.
+                // The register can't confirm it's a limited company in this
+                // town — a sole trader, most likely. File it call-only when
+                // that's switched on; otherwise leave it off the list.
                 if (!cfg.includeSoleTraders) {
                   if (outcome.remembered) counters.already_known++;
+                  else if (outcome.reason === 'elsewhere') counters.wrong_town++;
                   else counters.not_confirmed++;
                   continue;
                 }
+                // Filed under the hunted town, so it has to actually be there.
+                if (!inArea(t.area, row.address)) { counters.wrong_town++; continue; }
                 if (ledgerFor({ business_name: row.display_name, location: t.area })) {
                   counters.already_known++; continue;
                 }
@@ -961,6 +1019,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
                   .run(t.id);
               }
             } else {
+              if (!inArea(t.area, row.address)) { counters.wrong_town++; continue; }
               if (ledgerFor({ business_name: row.display_name, location: t.area })) {
                 counters.already_known++; continue;
               }

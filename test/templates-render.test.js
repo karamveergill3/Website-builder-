@@ -211,7 +211,8 @@ test('one WhatsApp opener, with a different middle for every kind of business', 
   const as = (category) => renderTemplate(opener,
     { business_name: 'Test Business', location: 'Leeds', category }, { biz_name: 'Keylo Studios' },
     { name: 'Cailan Jassal' }).body;
-  const bodies = ['roofers', 'dog groomers', 'barbers', 'cafe', 'garage', 'accountant'].map(as);
+  const bodies = ['roofers', 'dog groomers', 'dog walker', 'barbers', 'cafe', 'locksmith',
+    'window cleaner', 'garage', 'accountant'].map(as);
   assert.equal(new Set(bodies).size, bodies.length, 'each business reads differently');
   for (const b of bodies) {
     assert.match(b, /That's exactly what we build/);

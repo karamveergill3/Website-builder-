@@ -37,6 +37,62 @@ test('the written pitches are specific: sentence one is about that business', ()
   }
 });
 
+test('every search term the hunt uses has a pitch of its own', () => {
+  const owner = new Map();
+  for (const p of PITCHES) {
+    for (const t of p.terms) {
+      assert.ok(!owner.has(t), `"${t}" is claimed by both ${owner.get(t)} and ${p.business}`);
+      owner.set(t, p.business);
+    }
+  }
+  const missing = [...new Set(TRADES.flatMap((t) => t.terms))].filter((t) => !owner.has(t));
+  assert.deepEqual(missing, [], 'these fall through to the general wording');
+});
+
+test('no two kinds of business share a pitch', () => {
+  const seen = new Map();
+  for (const p of PITCHES) {
+    assert.ok(!seen.has(p.pitch), `${p.business} repeats ${seen.get(p.pitch)}`);
+    seen.set(p.pitch, p.business);
+  }
+});
+
+test('the closing line never assumes the day, the time or the season', () => {
+  for (const p of ALL) {
+    assert.ok(!/\b(weekend|tonight|this morning|this afternoon|summer|winter|again)\b/i.test(p.close),
+      `${p.business}: ${p.close}`);
+  }
+});
+
+test('a lead is matched to its own business, however the trade is written', () => {
+  const is = (category, business) => assert.equal(pitchFor(category).business, business, category);
+  is('roofers', 'roofer');
+  is('Roofer', 'roofer');
+  is('Roofing contractor', 'roofer');
+  is('dog groomers', 'dog groomer');
+  is('Mobile dog groomer', 'dog groomer');
+  is('Barbers', 'barber');
+  is('barbershop', 'barber');
+  is('window cleaner', 'window cleaner');
+  is('chinese takeaway', 'Chinese takeaway');
+  is('Nail salon', 'nail tech');
+  is('hair salon', 'hairdresser');
+  is('carpet cleaning', 'carpet cleaner');
+  is('carpet fitter', 'carpet fitter');
+  is('security systems', 'security installer');
+  is('cctv drain', 'CCTV drain survey company');
+  is('Plumbing, heating and air conditioning', 'plumber');
+  // Neighbours that must not borrow each other's wording.
+  assert.notEqual(pitchFor('window cleaner'), pitchFor('glazier'));
+  assert.notEqual(pitchFor('dog walker'), pitchFor('dog groomer'));
+  assert.notEqual(pitchFor('wedding photographer'), pitchFor('photographer'));
+});
+
+test('a business outside the list falls back to its sector, then to the general wording', () => {
+  assert.equal(pitchFor('pet shop'), SECTOR_PITCHES.pets);
+  assert.equal(pitchFor('nightclub'), GENERAL_PITCH);
+});
+
 test('an unknown business still reads naturally', () => {
   assert.equal(pitchFor('accountant'), GENERAL_PITCH);
   assert.equal(pitchFor(''), GENERAL_PITCH);

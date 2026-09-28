@@ -23,8 +23,9 @@ import { stripQuoted, numberedAnswers } from './brief.js';
 import { fieldOf } from './ask.js';
 
 // Acted on automatically (they are opted out), so only an unmistakable ask:
-// "Stop" as the whole message, or "stop messaging", never "stop by any time".
-const STOP = /(^\s*stop\s*(please|pls|now|thanks|thank you)?\s*[.!]*\s*$|\bplease stop\b|\bstop (messaging|texting|contacting|sending|it)\b|\bunsubscribe\b|\bremove (me|us|my (number|details))\b|\b(do not|don'?t|dont) (message|text|contact|msg|whatsapp) (me|us)\b|\bleave (me|us) alone\b|\btake (me|us) off\b)/i;
+// "Stop" as a whole message (or a whole line of one, when several WhatsApps
+// are read together), or "stop messaging", never "stop by any time".
+const STOP = /(^\s*stop\s*(please|pls|now|thanks|thank you)?\s*[.!]*\s*$|\bplease stop\b|\bstop (messaging|texting|contacting|sending|it)\b|\bunsubscribe\b|\bremove (me|us|my (number|details))\b|\b(do not|don'?t|dont) (message|text|contact|msg|whatsapp) (me|us)\b|\bleave (me|us) alone\b|\btake (me|us) off\b)/im;
 const NOT_A_SITE = /\b(don'?t|dont|do not|haven'?t|havent|have not|no|never had)\b[^.!?\n]{0,20}\b(web ?site|site)\b/i;
 const HAS_SITE = /\b(already (have|got) (one|a (web ?)?site)|(we'?ve|we have|i'?ve|i have|we've got|i've got|we got|i got|already got) (got )?(a|our own|one|our) ?(web ?)?site|we (already )?have one|our (web ?)?site (is|at))\b/i;
 const NO = /\b(not interested|no thanks|no thank you|no ta|not for (us|me)|we'?re (ok|okay|fine|good|sorted|all good)|i'?m (ok|okay|fine|good|sorted)|all good thanks|no need|not needed|not required|(don'?t|dont|do not) need (one|it|a (web ?)?site))\b/i;

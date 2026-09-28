@@ -22,8 +22,11 @@ import { normalisePhone } from './handoff.js';
 
 /** Spaces WhatsApp uses that are not a plain space (before am/pm, in numbers). */
 const ODD_SPACES = /[   ]/g;
-/** Direction marks and other invisible characters exports are sprinkled with. */
-const INVISIBLE = /[​-‏‪-‮⁠-⁩﻿]/g;
+/**
+ * Direction marks and other invisible characters exports are sprinkled with.
+ * Not the zero-width joiners (U+200C, U+200D): those hold emoji like 🤷‍♂️ together.
+ */
+const INVISIBLE = /[​‎‏‪-‮⁠⁦-⁩﻿]/g;
 
 const DATE = String.raw`(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})`;
 const TIME = String.raw`(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?\s*([ap]\.?\s?m\.?)?`;
@@ -31,9 +34,12 @@ const WHO = String.raw`([^:\n]{1,80}?):(?:\s|$)(.*)$`;
 
 // [17:05, 28/09/2026] Name: text
 const TIME_FIRST = new RegExp(String.raw`^\[${TIME},\s*${DATE}\]\s*${WHO}`, 'i');
-// [28/09/2026, 17:05:12] Name: text   and   28/09/2026, 17:05 - Name: text
-const DATE_FIRST = new RegExp(String.raw`^\[?${DATE},?\s+${TIME}\]?\s*(?:-\s*)?${WHO}`, 'i');
-// A dated line with no sender: WhatsApp's own notices in an Android export.
+// [28/09/2026, 17:05:12] Name: text      (iPhone export)
+const DATE_BRACKET = new RegExp(String.raw`^\[${DATE},?\s+${TIME}\]\s*${WHO}`, 'i');
+// 28/09/2026, 17:05 - Name: text          (Android export)
+const DATE_DASH = new RegExp(String.raw`^${DATE},?\s+${TIME}\s+-\s+${WHO}`, 'i');
+// A dated line with no sender: WhatsApp's own notices, in an Android export
+// only (anywhere else a line like "30/09/26 10.00 - 12.00" is part of a message).
 const NOTICE = new RegExp(String.raw`^${DATE},?\s+${TIME}\s+-\s+[^:]*$`, 'i');
 /** WhatsApp's own notices, which an iPhone export files under the chat's name. */
 const SYSTEM = /^(?:messages and calls are end-to-end encrypted|messages to this chat and calls are now secured|this business uses a secure service|this chat is with a business account|your security code with .* changed|missed (?:voice|video) call|.* is a contact\.?$)/i;
@@ -106,21 +112,23 @@ export function senderPhone(sender) {
 export function parseWhatsApp(input, { now = Date.now() } = {}) {
   const text = String(input ?? '').replace(/\r\n?/g, '\n').replace(ODD_SPACES, ' ').replace(INVISIBLE, '');
   const messages = [];
+  const lines = text.split('\n');
+  const android = lines.some((line) => DATE_DASH.test(line));
 
-  for (const line of text.split('\n')) {
+  for (const line of lines) {
     let m = TIME_FIRST.exec(line);
     let head = null;
     if (m) {
       const [, hh, min, ss, ampm, dd, mm, yy, who, body] = m;
       head = { at: toIso(dd, mm, yy, hh, min, ss, ampm, now), who, body };
-    } else if ((m = DATE_FIRST.exec(line))) {
+    } else if ((m = DATE_BRACKET.exec(line) ?? (android ? DATE_DASH.exec(line) : null))) {
       const [, dd, mm, yy, hh, min, ss, ampm, who, body] = m;
       head = { at: toIso(dd, mm, yy, hh, min, ss, ampm, now), who, body };
     }
     if (head) {
       const sender = head.who.replace(/^~\s*/, '').trim();
       messages.push({ sender, phone: senderPhone(sender), at: head.at, text: head.body });
-    } else if (NOTICE.test(line.trim())) {
+    } else if (android && NOTICE.test(line.trim())) {
       messages.push(null);   // ends the message above; not one of theirs
     } else if (messages.length && messages[messages.length - 1]) {
       // A line with no header carries on the message above it.
@@ -182,15 +190,23 @@ export function theirSide(messages, isUs) {
   return { senders, latest };
 }
 
+const norm = (s) => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+const hash = (s) => createHash('sha256').update(s).digest('hex').slice(0, 32);
+
 /**
  * A fingerprint for one message, so pasting the same thing twice (or a longer
- * stretch of the chat that includes it) files nothing twice.
+ * stretch of the chat that includes it) files nothing twice. A message with
+ * no header has no time to tell a repeat from a new "Yes", so each paste of
+ * one gets its own; routes/mockups.js decides whether it is a repeat.
  */
-export function fingerprint(leadId, m) {
-  const norm = (s) => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
-  const when = m.at ? m.at.slice(0, 16) : 'undated';
-  return createHash('sha256').update(`${leadId}|${when}|${norm(m.text)}`).digest('hex').slice(0, 32);
+export function fingerprint(leadId, m, { now = Date.now() } = {}) {
+  return m.at
+    ? hash(`${leadId}|${m.at.slice(0, 16)}|${norm(m.text)}`)
+    : hash(`${leadId}|undated|${norm(m.text)}|${now}`);
 }
+
+/** The words of a message alone, to match it across the two ways of copying. */
+export const textKey = (leadId, text) => hash(`${leadId}|text|${norm(text)}`);
 
 /** Words that say nothing about which business it is. */
 const FILLER = new Set([

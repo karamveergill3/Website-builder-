@@ -9,7 +9,7 @@
 import { api } from '../api.js';
 import { html, modal, toast } from '../dom.js';
 
-async function copy(text) {
+export async function copy(text) {
   try {
     await navigator.clipboard.writeText(text);
     return true;
@@ -24,11 +24,36 @@ async function copy(text) {
   return ok;
 }
 
-const waLink = (number, text) => `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
+export const waLink = (number, text) => `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
 
 /** Fetch the draft for a reply again (optionally the "here's your mock up" one). */
 export const fetchDraft = async (replyId, kind = null) =>
   (await api.get(`/api/replies/${replyId}/draft`, { origin: location.origin, kind: kind ?? undefined })).draft;
+
+/**
+ * Do what a draft's button says: opt them out, mark them as having a site,
+ * build their mock up. Returns { changed, next }: whether the lead changed,
+ * and a draft to show next (the mock up message), if any.
+ */
+export async function runDraftAction(act, draft) {
+  if (act === 'optout') {
+    await api.leads.update(draft.lead_id, { opted_out: true, status: 'lost' });
+    toast('Marked not interested. Nobody will contact them again');
+    return { changed: true, next: null };
+  }
+  if (act === 'has-site') {
+    await api.post(`/api/leads/${draft.lead_id}/has-website`, {});
+    toast('Marked as having a website');
+    return { changed: true, next: null };
+  }
+  if (act === 'build') {
+    toast('Building their mock up…');
+    await api.post('/api/mockups', { reply_id: draft.reply_id });
+    return { changed: true, next: await fetchDraft(draft.reply_id, 'mockup') };
+  }
+  if (act === 'mockup-msg') return { changed: false, next: await fetchDraft(draft.reply_id, 'mockup') };
+  return { changed: false, next: null };
+}
 
 /**
  * Show a draft. Resolves when the dialog closes; `changed` is true if an
@@ -80,27 +105,9 @@ export async function showReplyDraft(draft) {
         btn.addEventListener('click', async () => {
           btn.disabled = true;
           try {
-            const act = btn.dataset.action;
-            if (act === 'optout') {
-              await api.leads.update(draft.lead_id, { opted_out: true, status: 'lost' });
-              toast('Marked not interested. Nobody will contact them again');
-              changed = true;
-            } else if (act === 'has-site') {
-              await api.post(`/api/leads/${draft.lead_id}/has-website`, {});
-              toast('Marked as having a website');
-              changed = true;
-            } else if (act === 'build') {
-              toast('Building their mock up…');
-              await api.post('/api/mockups', { reply_id: draft.reply_id });
-              changed = true;
-              next = await fetchDraft(draft.reply_id, 'mockup');
-              close(true);
-              return;
-            } else if (act === 'mockup-msg') {
-              next = await fetchDraft(draft.reply_id, 'mockup');
-              close(true);
-              return;
-            }
+            const out = await runDraftAction(btn.dataset.action, draft);
+            changed = changed || out.changed;
+            if (out.next) { next = out.next; close(true); }
           } catch (err) {
             toast(err.message ?? 'That did not work', { error: true });
             btn.disabled = false;

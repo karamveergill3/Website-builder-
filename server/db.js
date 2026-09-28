@@ -1719,6 +1719,18 @@ Thanks so much, and have a lovely day.
       CREATE INDEX idx_wa_paste_seen_reply ON wa_paste_seen(reply_id);
     `,
   },
+  {
+    name: '060_whatsapp_paste_seen_by_text',
+    up: `
+      -- A message copied on its own has no header, so no time: its words
+      -- (text_key) and whether it had a time (sent_at) are what tell a paste
+      -- of it apart from a new message saying the same thing.
+      ALTER TABLE wa_paste_seen ADD COLUMN text_key TEXT;
+      ALTER TABLE wa_paste_seen ADD COLUMN sent_at TEXT;
+      CREATE INDEX idx_wa_paste_seen_text ON wa_paste_seen(text_key, seen_at);
+      CREATE INDEX idx_wa_paste_seen_lead ON wa_paste_seen(lead_id, seen_at);
+    `,
+  },
 ];
 
 function migrate() {

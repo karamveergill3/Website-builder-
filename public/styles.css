@@ -367,6 +367,35 @@ blockquote.quote {
   border-radius: 3px; font-size: .82rem; color: var(--ink-2);
 }
 
+/* One column per person; lost ones live on the Archive tab. */
+.wa-columns {
+  display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(270px, 1fr));
+  gap: 12px; align-items: start; overflow-x: auto; padding-bottom: 4px;
+}
+.wa-col { background: var(--sunk); border-radius: var(--r); padding: 8px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.wa-col-hd { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 2px 4px 2px; }
+.wa-col-hd b { font-size: .9rem; }
+.wa-empty { padding: 4px; margin: 0; }
+.wa-card {
+  background: var(--raised); border: 1px solid var(--rule); border-radius: var(--r-sm);
+  padding: 9px 10px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 4px; min-width: 0;
+}
+.wa-card[data-s="replied"] { border-left: 3px solid var(--st-replied-fg); }
+.wa-card[data-s="won"] { border-left: 3px solid var(--st-won-fg); }
+.wa-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.wa-card-top .name { font-weight: 700; font-size: .88rem; line-height: 1.3; overflow-wrap: anywhere; }
+.wa-card .said { font-size: .79rem; color: var(--ink-2); line-height: 1.4; overflow-wrap: anywhere; }
+.wa-card-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: .78rem; }
+.wa-card-act { display: flex; justify-content: flex-end; align-items: center; gap: 4px; margin-top: 2px; }
+.wa-card-act .more { margin-left: 0; }
+
+/* The paste box's answer, right under it. */
+.wa-result { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--rule-2); }
+.wa-for { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px; }
+.wa-for label { margin: 0; }
+.wa-preset { margin-bottom: 8px; }
+.wa-reading { margin: 10px 0 0; }
+
 /* A select that is only as wide as what it says, so it never spills into the next column. */
 select.fit { width: auto; max-width: 150px; }
 /* The status select is the status: coloured like the pill it replaces. */
@@ -396,6 +425,7 @@ select.fit { width: auto; max-width: 150px; }
 @media (max-width: 760px) {
   main { padding: 14px 12px 70px; }
   .steps { grid-template-columns: 1fr; }
+  .wa-columns { grid-template-columns: 1fr; }
   .masthead-inner { padding: 0 12px; }
   .readout { flex-wrap: wrap; }
   .readout div { flex: 1 0 40%; }

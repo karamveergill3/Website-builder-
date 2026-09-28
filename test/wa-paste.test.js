@@ -24,7 +24,7 @@ import assert from 'node:assert/strict';
 process.env.OLLAMA_HOST = '127.0.0.1:1';
 
 const { parseWhatsApp, theirSide, nameFit, senderPhone } = await import('../server/lib/wa-paste.js');
-const { get, post, teardown, nextCompanyNumber } = await import('./helpers.js');
+const { get, post, req, teardown, nextCompanyNumber } = await import('./helpers.js');
 const { db } = await import('../server/db.js');
 
 test.after(teardown);
@@ -280,4 +280,146 @@ test('nothing is sent: a paste writes no send record and no email', async () => 
   await paste(`[18:00, 16/06/2025] ${phone.shown}: Sounds good`);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM outreach_events WHERE lead_id = ?').get(l.id).n, before.events);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM email_log').get().n, before.mail);
+});
+
+/* ------------------------------------------------ review fixes (round 1) */
+
+test('reading: a line of times inside a message stays in it, and emoji keep their joins', () => {
+  const p = parseWhatsApp('[17:05, 27/09/2025] +44 7700 900123: I can do any of these\n30/09/25 10.00 - 12.00\nwhichever suits');
+  assert.equal(p.messages.length, 1);
+  assert.equal(p.messages[0].text, 'I can do any of these\n30/09/25 10.00 - 12.00\nwhichever suits');
+  const shrug = '\u{1F937}‍♂️';
+  assert.equal(parseWhatsApp(`[17:05, 27/09/2025] +44 7700 900123: ${shrug} no idea`).messages[0].text, `${shrug} no idea`);
+});
+
+test('"stop" among other messages still opts them out', async () => {
+  const phone = number();
+  const l = await lead('Stop Among Others Ltd', phone);
+  const r = await paste(`[15:00, 16/06/2025] ${phone.shown}: Who is this?\n[15:01, 16/06/2025] ${phone.shown}: Stop`);
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  assert.equal(r.body.stopped, true);
+  assert.equal((await get(`/api/leads/${l.id}`)).body.lead.opted_out, true);
+});
+
+test('"stop" from a number opts out every business that number is on', async () => {
+  const phone = number();
+  const a = await lead('Shared Number One Ltd', phone);
+  const b = await lead('Shared Number Two Ltd', phone, { whatsapp: false });
+  const r = await paste(`[10:00, 20/06/2025] ${phone.shown}: Stop`);
+  assert.equal(r.status, 201);
+  assert.equal((await get(`/api/leads/${a.id}`)).body.lead.opted_out, true);
+  assert.equal((await get(`/api/leads/${b.id}`)).body.lead.opted_out, true);
+});
+
+test('a paste from one business\'s number is not filed under another', async () => {
+  const phoneA = number();
+  const a = await lead('Right Business Ltd', phoneA);
+  const b = await lead('Wrong Row Ltd', number());
+  const r = await paste(`[15:00, 16/06/2025] ${phoneA.shown}: Stop`, { lead_id: b.id });
+  assert.equal(r.status, 409);
+  assert.match(r.body.error, /Right Business Ltd/);
+  assert.equal(repliesFor(b.id).length, 0);
+  assert.equal((await get(`/api/leads/${b.id}`)).body.lead.opted_out, false);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM contact_signals WHERE lead_id = ? AND kind = 'whatsapp'").get(b.id).n, 0);
+  assert.equal(repliesFor(a.id).length, 0, 'nothing filed anywhere until the rep chooses');
+});
+
+test('our own message under a name we do not know is not filed as theirs', async () => {
+  const l = await lead('Dave The Plumber Ltd', number());
+  const r = await paste(`[16:58, 15/06/2025] Kam: Hi Dave, it's Kam. I made you a free website mock up, want to see it?
+[17:05, 15/06/2025] Dave Plumber: Yes please, how much?`, { lead_id: l.id });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  assert.equal(repliesFor(l.id).at(-1).body, 'Yes please, how much?');
+  assert.equal(r.body.draft.intent, 'price');
+});
+
+test('the same short reply on a later day is filed again; pasted twice in a row it is not', async () => {
+  const l = await lead('Yes Again Ltd', number());
+  assert.equal((await paste('Yes', { lead_id: l.id })).status, 201);
+  assert.equal((await paste('Yes', { lead_id: l.id })).body.already, true, 'a double paste files once');
+  // A day later they say "Yes" to something new.
+  db.prepare("UPDATE wa_paste_seen SET seen_at = '2020-01-01T00:00:00.000Z' WHERE lead_id = ?").run(l.id);
+  assert.equal((await paste('Yes', { lead_id: l.id })).status, 201);
+  assert.equal(repliesFor(l.id).length, 2);
+});
+
+test('a message pasted on its own and later with its header is filed once', async () => {
+  const phone = number();
+  const l = await lead('Both Ways Ltd', phone);
+  assert.equal((await paste('Can you do Saturday?', { lead_id: l.id })).status, 201);
+  const now = new Date(Date.now() - 60_000);
+  const hhmm = now.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' });
+  const date = now.toLocaleDateString('en-GB', { timeZone: 'Europe/London' });
+  const again = await paste(`[${hhmm}, ${date}] ${phone.shown}: Can you do Saturday?`);
+  assert.equal(again.body.already, true, JSON.stringify(again.body));
+  assert.equal(repliesFor(l.id).length, 1);
+});
+
+test('a number confirmed by the rep is trusted even if a directory listed it first', async () => {
+  const l = await lead('Directory Listed Ltd', number());
+  const other = number();
+  db.prepare(`INSERT INTO contact_signals (lead_id, kind, value, source, confidence, first_seen_at, last_seen_at)
+              VALUES (?, 'whatsapp', ?, 'web:www.yell.com', 85, ?, ?)`).run(l.id, other.e164, 'x', 'x');
+  assert.equal((await paste(`[09:00, 16/06/2025] ${other.shown}: Yes please`)).body.need_lead, true);
+  assert.equal((await paste(`[09:00, 16/06/2025] ${other.shown}: Yes please`, { lead_id: l.id })).status, 201);
+  const next = await paste(`[09:10, 16/06/2025] ${other.shown}: How much is it?`);
+  assert.equal(next.status, 201, 'matched by itself now');
+  assert.equal(next.body.lead.id, l.id);
+});
+
+/* ------------------------------------------------------- read, then file */
+
+const read = (text, extra = {}) => post('/api/replies/whatsapp-read', { text, ...extra });
+
+test('reading a paste saves nothing: it says whose it is and drafts the answer', async () => {
+  const phone = number();
+  const l = await lead('Read Only Grooming Ltd', phone);
+  const before = repliesFor(l.id).length;
+  const r = await read(`[10:00, 17/06/2025] ${phone.shown}: How much would it be?`);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.lead.id, l.id);
+  assert.equal(r.body.how, 'number');
+  assert.equal(r.body.sure, true);
+  assert.equal(r.body.their_text, 'How much would it be?');
+  assert.equal(r.body.draft.intent, 'price');
+  assert.ok(r.body.draft.text);
+  assert.equal(repliesFor(l.id).length, before, 'nothing filed by reading');
+  assert.equal((await get(`/api/leads/${l.id}`)).body.lead.status, 'sent');
+});
+
+test('with no number, what the message says picks the business, as a guess to check', async () => {
+  const l = await lead('Zebedee Grooming Parlour Ltd', number());
+  const r = await read("Hi, it's Zebedee Grooming here, yes please go ahead");
+  assert.equal(r.body.lead.id, l.id);
+  assert.equal(r.body.how, 'text');
+  assert.equal(r.body.sure, false);
+  assert.match(r.body.why, /zebedee/i);
+  assert.ok(r.body.candidates.some((c) => c.id === l.id));
+});
+
+test('with nothing to go on, the latest business messaged is offered, and the rep can change it', async () => {
+  const l = await lead('Most Recent Send Ltd', number());
+  const r = await read('Sounds good to me');
+  assert.equal(r.body.how, 'recent');
+  assert.equal(r.body.lead.id, l.id);
+  assert.equal(r.body.sure, false);
+  const other = r.body.candidates.find((c) => c.id !== l.id);
+  const chosen = await read('Sounds good to me', { lead_id: other.id });
+  assert.equal(chosen.body.lead.id, other.id);
+  assert.equal(chosen.body.how, 'chosen');
+  assert.equal(chosen.body.draft.lead_id, other.id);
+});
+
+test('a reply can be deleted; with none left they are back to awaiting a reply', async () => {
+  const phone = number();
+  const l = await lead('Deleted Reply Ltd', phone);
+  const r = await paste(`[10:00, 18/06/2025] ${phone.shown}: Wrong person, sorry`);
+  assert.equal((await get(`/api/leads/${l.id}`)).body.lead.status, 'replied');
+  const del = await req('DELETE', `/api/replies/${r.body.reply_id}`);
+  assert.equal(del.status, 204);
+  assert.equal(repliesFor(l.id).length, 0);
+  assert.equal((await get(`/api/leads/${l.id}`)).body.lead.status, 'sent');
+  assert.equal((await req('DELETE', `/api/replies/${r.body.reply_id}`)).status, 404);
+  // Its messages are no longer "already filed": pasted again, it files.
+  assert.equal((await paste(`[10:00, 18/06/2025] ${phone.shown}: Wrong person, sorry`)).status, 201);
 });

@@ -132,6 +132,21 @@ export default async function repliesView(root, _p, { refresh }) {
 
   /* ---- per-reply actions ---- */
 
+  on(root, 'click', '[data-act="del-reply"]', async (_e, el) => {
+    if (!await confirmDialog({
+      title: 'Delete this reply',
+      message: `Delete this reply from ${el.dataset.name}? If it was their only one, they go back to awaiting a reply.`,
+      confirmLabel: 'Delete', danger: true,
+    })) return;
+    try {
+      await api.del(`/api/replies/${el.dataset.id}`);
+      toast('Reply deleted');
+      refresh();
+    } catch (err) {
+      toast(err.message ?? 'Could not delete it', { error: true });
+    }
+  });
+
   on(root, 'click', '[data-act="reextract"]', async (_e, el) => {
     el.disabled = true;
     try {
@@ -326,6 +341,8 @@ function replyCard(r) {
         </h3>
         <span class="meta">${r.channel}</span>
         <span class="meta nw" title="${fmtDateTime(r.received_at)}">${relative(r.received_at)}</span>
+        <button class="mini danger" data-act="del-reply" data-id="${r.id}"
+          data-name="${r.business_name ?? 'this business'}" title="Delete this reply">Delete</button>
       </div>
       <div class="panel-bd">
         ${r.subject ? html`<div class="meta" style="margin-bottom:6px">${r.subject}</div>` : ''}

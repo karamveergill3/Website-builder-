@@ -4,10 +4,12 @@
  *   GET    /api/replies                 what has come back, with briefs
  *   POST   /api/replies/sync            pull new replies from Gmail
  *   POST   /api/replies/manual          record a reply that came another way
+ *   POST   /api/replies/whatsapp-read   read a WhatsApp paste: whose, and the answer
  *   POST   /api/replies/whatsapp-paste  file messages copied out of WhatsApp
  *   POST   /api/replies/:id/extract     re-run the brief extractor
  *   PATCH  /api/replies/:id/brief       user corrections to the brief
  *   POST   /api/replies/:id/read        mark as read
+ *   DELETE /api/replies/:id             take a reply off
  *   POST   /api/replies/:id/reply        send a reply via Resend
  *   POST   /api/mockups                 generate a site from a brief
  *   GET    /api/mockups                 list generated mockups
@@ -19,7 +21,7 @@ import { Router } from 'express';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db } from '../db.js';
-import { wrap, badRequest, notFound, nowIso, str, int } from '../lib/http.js';
+import { wrap, badRequest, notFound, conflict, nowIso, str, int } from '../lib/http.js';
 import {
   syncReplies, extractBriefFor, listReplies, markRead, recordManualReply,
   readiness, briefToApi, insertReply,
@@ -31,10 +33,10 @@ import { getUserById } from '../lib/auth.js';
 import { sendingDomain } from '../lib/sending-policy.js';
 import { looksLikeEmail } from '../lib/http.js';
 import { renderSite, writeSite, newToken, PAGES, SINGLE_PAGE } from '../lib/site-builder.js';
-import { briefForBuild, CTAS } from '../lib/brief.js';
+import { briefForBuild, CTAS, extractByRules } from '../lib/brief.js';
 import { available as ollamaAvailable, model as ollamaModel } from '../lib/ollama.js';
 import { getSetting, getSettings } from '../db.js';
-import { draftReply } from '../lib/reply-draft.js';
+import { draftReply, classifyReply } from '../lib/reply-draft.js';
 import { askQuestions } from '../lib/ask.js';
 import { leadVoice } from '../lib/auth.js';
 import { senderContext, firstName } from '../lib/template.js';
@@ -42,7 +44,7 @@ import { normalisePhone } from '../lib/handoff.js';
 import { suppress } from '../lib/suppression.js';
 import { recordContact } from '../lib/recontact.js';
 import {
-  parseWhatsApp, theirSide, fingerprint, senderKey, senderPhone, nameFit,
+  parseWhatsApp, theirSide, fingerprint, textKey, senderKey, senderPhone, nameFit, nameWords,
 } from '../lib/wa-paste.js';
 
 /** The starting prices the "how much?" answer quotes, from the Prices screen. */
@@ -64,6 +66,18 @@ function draftFor(replyId, { user = null, origin = null, kind = null } = {}) {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(reply.lead_id);
   if (!lead) throw notFound('Lead not found');
   const brief = briefToApi(db.prepare('SELECT * FROM briefs WHERE reply_id = ?').get(replyId)) ?? {};
+  // A reply pasted from WhatsApp knows the number it came from: answer that
+  // chat, even when it is not the number the first message went to.
+  const cameFrom = reply.channel === 'whatsapp' && /^\+\d{8,15}$/.test(reply.thread_id ?? '')
+    ? reply.thread_id : null;
+  return { ...composeDraft({ lead, body: reply.body, brief, user, origin, kind, cameFrom }), reply_id: reply.id };
+}
+
+/**
+ * The drafted answer to `body` from `lead`, whether or not it has been filed
+ * yet (the paste box shows it before anything is saved).
+ */
+function composeDraft({ lead, body, brief = {}, user = null, origin = null, kind = null, cameFrom = null }) {
   const mockup = db.prepare(
     'SELECT token FROM mockups WHERE lead_id = ? AND error IS NULL ORDER BY generated_at DESC LIMIT 1'
   ).get(lead.id);
@@ -73,13 +87,9 @@ function draftFor(replyId, { user = null, origin = null, kind = null } = {}) {
       ORDER BY COALESCE(confirmed_sent_at, prepared_at) DESC LIMIT 1`
   ).get(lead.id)?.recipient;
   const phone = normalisePhone(sentTo ?? lead.phone ?? '');
-  // A reply pasted from WhatsApp knows the number it came from: answer that
-  // chat, even when it is not the number the first message went to.
-  const cameFrom = reply.channel === 'whatsapp' && /^\+\d{8,15}$/.test(reply.thread_id ?? '')
-    ? reply.thread_id : null;
 
   const draft = draftReply({
-    body: reply.body,
+    body,
     brief,
     lead,
     sender: senderContext(undefined, leadVoice(lead, user)).my_name,
@@ -90,7 +100,7 @@ function draftFor(replyId, { user = null, origin = null, kind = null } = {}) {
   });
   return {
     ...draft,
-    reply_id: reply.id,
+    reply_id: null,
     lead_id: lead.id,
     business_name: lead.business_name,
     wa_number: cameFrom ? cameFrom.slice(1) : (phone.ok ? phone.e164.replace(/^\+/, '') : null),
@@ -208,47 +218,276 @@ function leadsForNumber(e164) {
   return { ids, sent };
 }
 
-/** A lead as the "whose reply is this?" list shows it. */
+/** A lead as the "whose reply is this?" list shows it, grouped by owner. */
 const candidate = (row, fit = null) => ({
   id: row.id,
   business_name: row.business_name,
   location: row.location,
   status: row.status,
   whatsapp_sent_at: row.wa_at ?? null,
+  owner_id: row.assigned_to ?? null,
+  owner: row.owner_name ? firstName(row.owner_name) : null,
   fit,
 });
 
-const CANDIDATE_SQL = `SELECT l.*, (SELECT MAX(oe.confirmed_sent_at) FROM outreach_events oe
-  WHERE oe.lead_id = l.id AND oe.channel = 'whatsapp') AS wa_at FROM leads l`;
+const CANDIDATE_SQL = `SELECT l.*, u.name AS owner_name,
+  (SELECT MAX(oe.confirmed_sent_at) FROM outreach_events oe
+    WHERE oe.lead_id = l.id AND oe.channel = 'whatsapp') AS wa_at
+  FROM leads l LEFT JOIN users u ON u.id = l.assigned_to`;
 
 /**
- * Who it might be when the paste does not say: leads whose name fits a saved
- * contact name, then everyone messaged on WhatsApp lately, awaiting a reply
- * first.
+ * Everyone messaged on WhatsApp, the ones a reply is likeliest from first:
+ * awaiting a reply, then replied, then won, then lost; newest send first.
  */
-function candidatesFor({ ids = [], name = null } = {}) {
-  const out = [];
-  const seen = new Set();
-  const push = (row, fit) => { if (row && !seen.has(row.id)) { seen.add(row.id); out.push(candidate(row, fit)); } };
-  for (const id of ids) push(db.prepare(`${CANDIDATE_SQL} WHERE l.id = ?`).get(id));
-  const recent = db.prepare(
-    `${CANDIDATE_SQL} WHERE EXISTS (SELECT 1 FROM outreach_events oe WHERE oe.lead_id = l.id
-       AND oe.channel = 'whatsapp' AND oe.confirmed_sent_at IS NOT NULL)
-     ORDER BY (l.status = 'sent') DESC, wa_at DESC LIMIT 300`
-  ).all();
-  if (name) {
-    recent.map((row) => ({ row, fit: nameFit(name, row.business_name) }))
-      .filter((x) => x.fit > 0)
-      .sort((a, b) => b.fit - a.fit)
-      .slice(0, 5)
-      .forEach((x) => push(x.row, Math.round(x.fit * 100)));
+const whatsappLeads = () => db.prepare(
+  `${CANDIDATE_SQL} WHERE EXISTS (SELECT 1 FROM outreach_events oe WHERE oe.lead_id = l.id
+     AND oe.channel = 'whatsapp' AND oe.confirmed_sent_at IS NOT NULL)
+   ORDER BY CASE l.status WHEN 'sent' THEN 0 WHEN 'replied' THEN 1 WHEN 'new' THEN 2
+                          WHEN 'won' THEN 3 ELSE 4 END, wa_at DESC LIMIT 500`
+).all();
+
+/**
+ * Which business a message is from, going by what it says: its own name
+ * ("Hi, it's Perfect Paws here"), or our first message quoted back ("I came
+ * across Perfect Paws Burton Ltd in Burton"). Words many businesses share
+ * ("hair", "building") count for little; a word only one of them has counts
+ * for a lot. Null when nothing in it points anywhere.
+ */
+/** Words every reply is full of, which name no business however they are spelt. */
+const CHAT_WORDS = new Set(`yes yeah yep no nope please thanks thank cheers ta hi hello hey here there go
+  ahead ok okay sure great good fine lovely nice love like want need get got can could would will
+  should you your we our us me my it its is are be do did done how much what when where who why
+  this that with for from about just not now then time day week today tomorrow again one two
+  right back sounds sound look looks send sent message mate sorry maybe later soon`.split(/\s+/));
+
+function guessFromText(text, rows) {
+  const words = new Set(nameWords(text).filter((w) => !CHAT_WORDS.has(w)));
+  if (!words.size) return null;
+  const flat = ` ${nameWords(text).join(' ')} `;
+  const df = new Map();
+  for (const row of rows) for (const w of new Set(nameWords(row.business_name))) df.set(w, (df.get(w) ?? 0) + 1);
+  const weight = (w) => 1 / (df.get(w) ?? 1);
+  let best = null;
+  let second = 0;
+  for (const row of rows) {
+    const own = [...new Set(nameWords(row.business_name))];
+    if (!own.length) continue;
+    const hits = own.filter((w) => w.length >= 3 && words.has(w));
+    if (!hits.length) continue;
+    const whole = flat.includes(` ${nameWords(row.business_name).join(' ')} `);
+    const distinctive = hits.some((w) => df.get(w) === 1);
+    if (!whole && !distinctive) continue;
+    const score = hits.reduce((n, w) => n + weight(w), 0) / own.reduce((n, w) => n + weight(w), 0)
+      + (whole ? 1 : 0);
+    if (!best || score > best.score) { second = best?.score ?? 0; best = { row, score, hits }; }
+    else if (score > second) second = score;
   }
-  for (const row of recent) {
-    if (out.length >= 8) break;
-    push(row, null);
-  }
-  return out;
+  if (!best || best.score < 0.5 || best.score - second < 0.2) return null;
+  return best;
 }
+
+/**
+ * Whose a paste is, and what in it is theirs. The paste's own sender number
+ * settles it; failing that the rep's choice; failing that a guess (a saved
+ * contact's name, what the message says, or the business most recently
+ * messaged), which is only ever offered, never filed on its own.
+ *
+ *   how: 'chosen' | 'number' | 'several' | 'name' | 'text' | 'recent' | null
+ */
+function identify(text, { chosenId = null, userId = null, forced = null } = {}) {
+  const chosen = chosenId ? db.prepare('SELECT * FROM leads WHERE id = ?').get(chosenId) : null;
+  if (chosenId && !chosen) throw notFound('Lead not found');
+
+  const parsed = parseWhatsApp(text);
+  if (!parsed.messages.length) throw badRequest('There is no message in that paste');
+  const isUs = ourSide();
+
+  // Everyone in the paste who is not us, with the leads their number is on.
+  let people = [];
+  for (const m of parsed.messages) {
+    if (isUs(m) || people.some((p) => p.key === senderKey(m))) continue;
+    people.push({ key: senderKey(m), sender: m.sender, phone: m.phone, found: m.phone ? leadsForNumber(m.phone) : null });
+  }
+  if (!people.length) throw badRequest('Those are all your own messages. Copy theirs too');
+
+  // WhatsApp labels our own copied messages with our profile name, which can
+  // be anything ("Kam", "Karam | Web"). When there are two named senders, the
+  // one whose words are ours (our business name, or the opener we sent) is us.
+  if (people.length > 1) {
+    const ours = oursByWords();
+    const lines = (key) => parsed.messages.filter((m) => senderKey(m) === key);
+    const rest = people.filter((p) => !lines(p.key).some((m) => ours(m.text)));
+    if (rest.length) people = rest;
+  }
+  // Still more than one: the rep can say which is them; otherwise a number
+  // beats a name, a name that fits the chosen business beats one that
+  // doesn't, and a reply being answered is the last thing in the paste.
+  const last = parsed.messages[parsed.messages.length - 1];
+  const rank = (p) => (forced && p.key === forced ? 16 : 0) + (p.phone ? 4 : 0)
+    + (chosen && nameFit(p.sender, chosen.business_name) > 0 ? 2 : 0)
+    + (last && senderKey(last) === p.key ? 1 : 0);
+  people = [...people].sort((a, b) => rank(b) - rank(a));
+
+  const matched = people.filter((p) => p.found?.ids.length);
+  const byId = (id) => db.prepare('SELECT * FROM leads WHERE id = ?').get(id);
+  let who = null;
+  let lead = null;
+  let how = null;
+  let why = null;
+
+  let clash = [];
+  if (chosen) {
+    lead = chosen;
+    how = 'chosen';
+    // The person whose number is on that lead, else the likeliest in the paste.
+    who = people.find((p) => p.found?.ids.includes(lead.id)) ?? people[0];
+    // Their number is on other businesses and not this one: filed here, the
+    // reply (and a "stop") would land on the wrong business.
+    if (who.found?.ids.length && !who.found.ids.includes(lead.id)) clash = who.found.ids;
+  } else if (matched.length === 1 && !(forced && people[0].key === forced && !people[0].found?.ids.length)) {
+    who = matched[0];
+    const { ids, sent } = who.found;
+    lead = byId(ids[0]);
+    // One lead, or the number a WhatsApp of ours actually went to: that is
+    // the conversation. Several leads sharing a phone and no send: a guess.
+    how = ids.length === 1 || sent > 0 ? 'number' : 'several';
+    why = how === 'number'
+      ? `Matched by their number, ${who.phone}`
+      : 'That number is on more than one business. Check it is the right one';
+  }
+
+  const first = who ?? people[0];
+  who = who ?? first;
+  const theirs = theirSide(parsed.messages, (m) => senderKey(m) !== who.key).latest[who.key] ?? [];
+  if (!theirs.length) throw badRequest('There is nothing from them in that paste');
+  const theirText = theirs.map((m) => m.text).join('\n');
+
+  const pool = whatsappLeads();
+  let fit = null;
+  if (!lead && !first.phone && parsed.headed && first.sender) {
+    // Saved in the phone under a name: go by the name.
+    const named = pool.map((row) => ({ row, f: nameFit(first.sender, row.business_name) }))
+      .filter((x) => x.f >= 0.5).sort((a, b) => b.f - a.f)[0];
+    if (named) {
+      lead = byId(named.row.id); how = 'name'; fit = Math.round(named.f * 100);
+      why = `They are saved in the phone as “${first.sender}”`;
+    }
+  }
+  if (!lead) {
+    // What they wrote, and anything of ours quoted in the paste, can name them.
+    const guess = guessFromText(text, pool);
+    if (guess) {
+      lead = byId(guess.row.id); how = 'text';
+      why = `The message mentions “${guess.hits.join(' ')}”`;
+    }
+  }
+  if (!lead) {
+    const recent = pool.find((r) => r.status === 'sent' && r.assigned_to === userId)
+      ?? pool.find((r) => r.status === 'sent') ?? pool[0];
+    if (recent) {
+      lead = byId(recent.id); how = 'recent';
+      why = 'A best guess: the business messaged most recently';
+    }
+  }
+
+  // The list to choose from: the likeliest first, then everyone messaged.
+  const candidates = [];
+  const seen = new Set();
+  const push = (row, f = null) => { if (row && !seen.has(row.id)) { seen.add(row.id); candidates.push(candidate(row, f)); } };
+  if (lead) push(db.prepare(`${CANDIDATE_SQL} WHERE l.id = ?`).get(lead.id), fit);
+  for (const p of matched) for (const id of p.found.ids) push(db.prepare(`${CANDIDATE_SQL} WHERE l.id = ?`).get(id));
+  for (const row of pool) if (candidates.length < 80) push(row);
+
+  return {
+    parsed, people, matched, who, first, theirs, theirText, lead, how, why, candidates,
+    clash: clash.map((id) => byId(id)).filter(Boolean),
+    senders: people.map((p) => ({ key: p.key, name: p.phone ?? p.sender, chosen: p.key === who.key })),
+    sure: how === 'chosen' || how === 'number',
+  };
+}
+
+/**
+ * Whether a message reads as ours: it names our business, or it is the start
+ * of a WhatsApp we sent (the opener's first line, as prepared on Reach).
+ */
+function oursByWords() {
+  const flat = (t) => String(t ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const biz = flat(getSettings().biz_name);
+  const sent = db.prepare(
+    `SELECT body_snapshot FROM outreach_events
+      WHERE channel = 'whatsapp' AND body_snapshot IS NOT NULL
+      ORDER BY id DESC LIMIT 300`
+  ).all().map((r) => flat(r.body_snapshot).slice(0, 50)).filter((t) => t.length >= 25);
+  return (text) => {
+    const t = flat(text);
+    return Boolean((biz.length >= 4 && t.includes(biz)) || sent.some((opening) => t.startsWith(opening)));
+  };
+}
+
+/**
+ * The earlier filing of this message, if it has been pasted before. With its
+ * header, by its time and words, or by its words alone if it was pasted once
+ * on its own after it was sent. With no header, only as a repeat of the very
+ * last thing filed for them, within the hour: a new "Yes" days later is new.
+ */
+function seenBefore(leadId, m) {
+  if (m.at) {
+    const exact = db.prepare('SELECT reply_id FROM wa_paste_seen WHERE fingerprint = ?').get(fingerprint(leadId, m));
+    if (exact) return exact;
+    const at = new Date(m.at).getTime();
+    return db.prepare(
+      `SELECT reply_id FROM wa_paste_seen
+        WHERE text_key = ? AND sent_at IS NULL AND seen_at >= ? AND seen_at <= ?
+        ORDER BY seen_at DESC LIMIT 1`
+    ).get(textKey(leadId, m.text), new Date(at - 5 * 60_000).toISOString(),
+      new Date(at + 3 * 86_400_000).toISOString()) ?? null;
+  }
+  const last = db.prepare(
+    'SELECT reply_id, text_key, seen_at FROM wa_paste_seen WHERE lead_id = ? ORDER BY seen_at DESC, rowid DESC LIMIT 1'
+  ).get(leadId);
+  return last && last.text_key === textKey(leadId, m.text)
+    && last.seen_at >= new Date(Date.now() - 60 * 60_000).toISOString() ? last : null;
+}
+
+/** Whether every message in `theirs` has already been filed for this lead. */
+const allFiled = (leadId, theirs) => theirs.every((m) => seenBefore(leadId, m));
+
+/**
+ * POST /api/replies/whatsapp-read { text, lead_id?, origin }
+ *
+ * What the paste box shows the moment something is pasted: whose reply it is
+ * (or the best guess, with the list to change it), what they said, and the
+ * answer drafted. Nothing is saved: the rep checks the business, and the
+ * reply is filed when they copy the answer (whatsapp-paste, below).
+ */
+router.post('/replies/whatsapp-read', wrap((req, res) => {
+  const text = str(req.body?.text);
+  if (!text) throw badRequest('Paste the WhatsApp messages they sent');
+  const found = identify(text, {
+    chosenId: int(req.body?.lead_id), userId: req.user?.id ?? null, forced: str(req.body?.sender),
+  });
+  const { lead } = found;
+  res.json({
+    lead: lead ? { id: lead.id, business_name: lead.business_name, location: lead.location } : null,
+    how: found.how,
+    why: found.why,
+    sure: found.sure,
+    their_text: found.theirText,
+    from: found.who.phone ?? found.who.sender ?? null,
+    senders: found.senders.length > 1 ? found.senders : [],
+    already: lead ? allFiled(lead.id, found.theirs) : false,
+    clash: found.clash.map((l) => ({ id: l.id, business_name: l.business_name })),
+    candidates: found.candidates,
+    draft: lead ? composeDraft({
+      lead,
+      body: found.theirText,
+      brief: extractByRules(found.theirText, lead),
+      user: req.user,
+      origin: str(req.body?.origin),
+      cameFrom: found.who.phone,
+    }) : null,
+  });
+}));
 
 /**
  * POST /api/replies/whatsapp-paste { text, lead_id?, origin }
@@ -257,7 +496,8 @@ function candidatesFor({ ids = [], name = null } = {}) {
  * answered. Copied from WhatsApp Desktop, each message carries who sent it,
  * which for a prospect not saved in the phone is their number; that finds the
  * lead with nobody choosing it. Our own messages in the same paste are left
- * out, and anything already pasted before is not filed twice.
+ * out, and anything already pasted before is not filed twice. Only a number
+ * or the rep's own choice files a reply; a guess is only ever offered.
  *
  * Nothing is sent: the answer comes back drafted, to copy into WhatsApp.
  *
@@ -268,65 +508,33 @@ function candidatesFor({ ids = [], name = null } = {}) {
 router.post('/replies/whatsapp-paste', wrap(async (req, res) => {
   const text = str(req.body?.text);
   if (!text) throw badRequest('Paste the WhatsApp messages they sent');
-  const chosen = int(req.body?.lead_id);
-  const chosenLead = chosen ? db.prepare('SELECT * FROM leads WHERE id = ?').get(chosen) : null;
-  if (chosen && !chosenLead) throw notFound('Lead not found');
+  const found = identify(text, {
+    chosenId: int(req.body?.lead_id), userId: req.user?.id ?? null, forced: str(req.body?.sender),
+  });
+  const { who, theirs, first, parsed } = found;
 
-  const parsed = parseWhatsApp(text);
-  if (!parsed.messages.length) throw badRequest('There is no message in that paste');
-  const isUs = ourSide();
-
-  // Everyone in the paste who is not us, with the leads their number is on.
-  const people = [];
-  for (const m of parsed.messages) {
-    if (isUs(m) || people.some((p) => p.key === senderKey(m))) continue;
-    people.push({ key: senderKey(m), sender: m.sender, phone: m.phone, found: m.phone ? leadsForNumber(m.phone) : null });
+  if (!found.sure) {
+    const reason = !parsed.headed ? 'no-header'
+      : found.matched.length ? 'several'
+      : first.phone ? 'unknown-number' : 'name';
+    return res.json({
+      need_lead: true,
+      reason,
+      sender: { name: first.phone ? null : first.sender, phone: first.phone },
+      preview: found.theirText.slice(0, 600),
+      candidates: found.candidates,
+    });
   }
-  if (!people.length) throw badRequest('Those are all your own messages. Copy theirs too');
-
-  let who = null;
-  let lead = chosenLead;
-  if (lead) {
-    // The rep said whose it is: take the person whose number is on that lead,
-    // else the one person in the paste.
-    who = people.find((p) => p.found?.ids.includes(lead.id)) ?? people.find((p) => p.phone) ?? people[0];
-  } else {
-    const matched = people.filter((p) => p.found?.ids.length);
-    if (matched.length === 1) {
-      who = matched[0];
-      const { ids, sent } = who.found;
-      // One lead, or the number a WhatsApp of ours actually went to: that is
-      // the conversation. Several leads sharing a phone and no send: ask.
-      if (ids.length === 1 || sent > 0) lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(ids[0]);
-    }
-    if (!lead) {
-      const first = who ?? people.find((p) => p.phone) ?? people[0];
-      const their = theirSide(parsed.messages, (m) => senderKey(m) !== first.key).latest[first.key] ?? [];
-      const reason = !parsed.headed ? 'no-header'
-        : matched.length ? 'several'
-        : first.phone ? 'unknown-number' : 'name';
-      return res.json({
-        need_lead: true,
-        reason,
-        sender: { name: first.phone ? null : first.sender, phone: first.phone },
-        preview: their.map((m) => m.text).join('\n').slice(0, 600),
-        candidates: candidatesFor({
-          ids: matched.flatMap((p) => p.found.ids),
-          name: first.phone ? null : first.sender,
-        }),
-      });
-    }
+  const { lead } = found;
+  if (found.clash.length) {
+    const names = found.clash.map((l) => l.business_name).join(' and ');
+    throw conflict(`Those messages came from ${who.phone}, which is ${names}'s number. Choose ${names} instead.`);
   }
-
-  // In a one-to-one chat, whoever is not them is us, whatever name we sign with.
-  const theirs = theirSide(parsed.messages, (m) => senderKey(m) !== who.key).latest[who.key] ?? [];
-  if (!theirs.length) throw badRequest('There is nothing from them in that paste');
 
   const filed = db.transaction(() => {
-    const prints = theirs.map((m) => fingerprint(lead.id, m));
-    const seenRow = db.prepare('SELECT reply_id FROM wa_paste_seen WHERE fingerprint = ?');
-    const fresh = theirs.filter((_, i) => !seenRow.get(prints[i]));
-    if (!fresh.length) return { replyId: seenRow.get(prints[prints.length - 1]).reply_id, fresh: 0 };
+    const now = nowIso();
+    const fresh = theirs.filter((m) => !seenBefore(lead.id, m));
+    if (!fresh.length) return { replyId: seenBefore(lead.id, theirs[theirs.length - 1]).reply_id, fresh: [] };
     const replyId = insertReply({
       leadId: lead.id,
       channel: 'whatsapp',
@@ -335,23 +543,28 @@ router.post('/replies/whatsapp-paste', wrap(async (req, res) => {
       threadId: who.phone,
     });
     const mark = db.prepare(
-      'INSERT OR IGNORE INTO wa_paste_seen (fingerprint, lead_id, reply_id, seen_at) VALUES (?, ?, ?, ?)'
+      `INSERT INTO wa_paste_seen (fingerprint, lead_id, reply_id, seen_at, text_key, sent_at)
+       VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(fingerprint) DO NOTHING`
     );
-    theirs.forEach((m, i) => mark.run(prints[i], lead.id, replyId, nowIso()));
+    for (const m of fresh) {
+      mark.run(fingerprint(lead.id, m), lead.id, replyId, now, textKey(lead.id, m.text), m.at ?? null);
+    }
     // A number the rep has just told us is this lead's: next time it matches
-    // by itself.
-    if (who.phone && !who.found?.ids.includes(lead.id)) {
+    // by itself (and a directory's copy of it is vouched for now).
+    if (who.phone && !who.found?.ids.length) {
       db.prepare(
         `INSERT INTO contact_signals
-           (lead_id, kind, value, source, confidence, note, first_seen_at, last_seen_at)
-         VALUES (?, 'whatsapp', ?, 'user:manual', 100, 'their WhatsApp, from a pasted reply', ?, ?)
-         ON CONFLICT(lead_id, kind, value) DO UPDATE SET last_seen_at = excluded.last_seen_at`
-      ).run(lead.id, who.phone, nowIso(), nowIso());
+           (lead_id, kind, value, source, confidence, note, first_seen_at, last_seen_at, promoted_at)
+         VALUES (?, 'whatsapp', ?, 'user:manual', 100, 'their WhatsApp, from a pasted reply', ?, ?, ?)
+         ON CONFLICT(lead_id, kind, value) DO UPDATE SET
+           last_seen_at = excluded.last_seen_at, source = 'user:manual', confidence = 100,
+           promoted_at = COALESCE(contact_signals.promoted_at, excluded.promoted_at)`
+      ).run(lead.id, who.phone, now, now, now);
     }
-    return { replyId, fresh: fresh.length };
+    return { replyId, fresh };
   })();
 
-  if (filed.fresh) {
+  if (filed.fresh.length) {
     try {
       await extractBriefFor(filed.replyId, lead);
     } catch (err) {
@@ -360,18 +573,46 @@ router.post('/replies/whatsapp-paste', wrap(async (req, res) => {
     }
   }
   const draft = draftFor(filed.replyId, { user: req.user, origin: str(req.body?.origin) });
-  // They asked us to stop: honoured the moment it is filed, as a typed-in
-  // reply would be.
-  if (filed.fresh && draft.intent === 'stop' && !lead.opted_out) optOut(lead);
+  // They asked us to stop, in any one of their messages: honoured the moment
+  // it is read, for every business that number is on, since it is the person
+  // on the end of it who asked.
+  const stop = draft.intent === 'stop' || theirs.some((m) => classifyReply(m.text, {}, lead) === 'stop');
+  if (stop) {
+    const ids = new Set([lead.id, ...(who.phone ? leadsForNumber(who.phone).ids : [])]);
+    for (const id of ids) {
+      const row = db.prepare('SELECT * FROM leads WHERE id = ?').get(id);
+      if (row && !row.opted_out) optOut(row);
+    }
+  }
 
-  res.status(filed.fresh ? 201 : 200).json({
-    filed: Boolean(filed.fresh),
-    already: !filed.fresh,
+  res.status(filed.fresh.length ? 201 : 200).json({
+    filed: Boolean(filed.fresh.length),
+    already: !filed.fresh.length,
+    stopped: stop,
     reply_id: filed.replyId,
-    messages: filed.fresh,
+    messages: filed.fresh.length,
     lead: { id: lead.id, business_name: lead.business_name },
     draft,
   });
+}));
+
+/**
+ * DELETE /api/replies/:id — take a reply off (filed against the wrong
+ * business, or pasted by mistake). Its brief goes with it; a mock up built
+ * from it stays. If it was their only reply, they are back to awaiting one.
+ */
+router.delete('/replies/:id', wrap((req, res) => {
+  const id = int(req.params.id);
+  if (!id) throw badRequest('Bad reply id');
+  const reply = db.prepare('SELECT id, lead_id FROM replies WHERE id = ?').get(id);
+  if (!reply) throw notFound('Reply not found');
+  db.transaction(() => {
+    db.prepare('DELETE FROM replies WHERE id = ?').run(id);
+    if (reply.lead_id && !db.prepare('SELECT 1 FROM replies WHERE lead_id = ?').get(reply.lead_id)) {
+      db.prepare("UPDATE leads SET status = 'sent' WHERE id = ? AND status = 'replied'").run(reply.lead_id);
+    }
+  })();
+  res.status(204).end();
 }));
 
 /** GET /api/replies/:id/draft?origin=&kind=mockup — the answer, drafted again. */

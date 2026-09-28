@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 process.env.COMPANIES_HOUSE_API_KEY = 'test-key';
 process.env.GOOGLE_MAPS_API_KEY = 'test-places-key';
+// The website check spaces its web searches out; not in a test.
+process.env.SITE_SEARCH_GAP_MS = '0';
 
 const { get, post, patch, put, del, teardown } = await import('./helpers.js');
 const { db } = await import('../server/db.js');
@@ -21,6 +23,8 @@ let search = [];        // queued Companies House name-search replies (findCompa
 let places = [];        // queued Places replies
 let calls = { register: 0, search: 0, places: 0 };
 let placesLog = [];     // what each Places request asked for, and with which field mask
+let sites = {};         // the web, for the website check: url -> page html
+let siteLog = [];       // every other URL the hunt asked for
 
 function stub() {
   register = [];
@@ -28,8 +32,14 @@ function stub() {
   places = [];
   calls = { register: 0, search: 0, places: 0 };
   placesLog = [];
+  sites = {};
+  siteLog = [];
   globalThis.fetch = async (url, opts = {}) => {
     const u = String(url);
+    // The test's own calls to the app go through for real.
+    if (u.startsWith('http://127.0.0.1') || u.startsWith('http://localhost')) {
+      return realFetch(url, opts);
+    }
     const reply = (body, status = 200) => new Response(JSON.stringify(body), {
       status, headers: { 'Content-Type': 'application/json' },
     });
@@ -67,7 +77,16 @@ function stub() {
       const next = places.shift() ?? { places: [] };
       return reply(next.body ?? next, next.status ?? 200);
     }
-    return realFetch(url, opts);
+    // Anything else is the website check looking at the web. Nothing here
+    // reaches the real internet: a page the test set up answers, and every
+    // other address fails the way an unregistered domain does.
+    siteLog.push(u);
+    if (Object.hasOwn(sites, u)) {
+      return new Response(sites[u], { status: 200, headers: { 'Content-Type': 'text/html' } });
+    }
+    const err = new TypeError('fetch failed');
+    err.cause = { code: 'ENOTFOUND' };
+    throw err;
   };
 }
 
@@ -120,6 +139,9 @@ const configure = (over = {}) => put('/api/settings', {
   // only. The by-name lookup has its own tests below.
   hunt_max_company_lookups: '0',
   hunt_include_sole_traders: '0',
+  // Off here, so the tests above measure the filters they are about. The
+  // website check has its own tests below.
+  hunt_check_websites: '0',
   ...over,
 });
 
@@ -160,8 +182,35 @@ test('a company Google lists with no website is a prospect', () => {
 });
 
 test('a registered name matches a shorter trading name', () => {
-  const byName = new Map([[normaliseName('Hillside Roofing'), { has_website: true }]]);
-  assert.equal(judge(company('HILLSIDE ROOFING AND LEADWORK LIMITED', '01'), byName).prospect, false);
+  const byName = new Map([[normaliseName('Hillside Roofing'), {
+    has_website: true, display_name: 'Hillside Roofing', address: '1 High St, Otley',
+  }]]);
+  assert.equal(judge(company('HILLSIDE ROOFING AND LEADWORK LIMITED', '01'), byName,
+    { area: 'Otley' }).prospect, false);
+});
+
+test('a looser name match must be in the same place', () => {
+  // The listing is "Hillside Roofing" in Leeds; this company is in Otley.
+  const byName = new Map([[normaliseName('Hillside Roofing'), {
+    has_website: false, phone: '07700 900001', display_name: 'Hillside Roofing', address: '9 Park Rd, Leeds',
+  }]]);
+  const v = judge(company('HILLSIDE ROOFING AND LEADWORK LIMITED', '01'), byName, { area: 'Otley' });
+  assert.equal(v.unlisted, true, 'not taken as the same firm');
+  assert.equal(v.phone, undefined, 'and not given that listing’s number');
+});
+
+test('a one-word name does not borrow a longer listing that starts with it', () => {
+  // COSELEY SERVICES LIMITED normalises to "coseley": it must not take on the
+  // phone and "no website" of Coseley Plumbing & Heating down the road.
+  const byName = new Map([[normaliseName('Coseley Plumbing & Heating'), {
+    has_website: false, phone: '07700 900002', display_name: 'Coseley Plumbing & Heating',
+    address: '3 Bilston Rd, Wolverhampton WV4 6AA',
+  }]]);
+  const v = judge(company('COSELEY SERVICES LIMITED', '04562432', {
+    registered_office_address: { locality: 'Wolverhampton', postal_code: 'WV4 6DW' },
+  }), byName, { area: 'Wolverhampton' });
+  assert.equal(v.unlisted, true);
+  assert.equal(v.phone, undefined);
 });
 
 test('a company absent from Google is a prospect, flagged as such', () => {
@@ -1482,4 +1531,87 @@ test('call-only sole traders outside the town are not filed under it', async () 
   const names = (await get('/api/leads')).body.leads.map((l) => l.business_name);
   assert.ok(names.includes('Local Dave'), 'the Otley one is filed call-only');
   assert.ok(!names.includes('Faraway Dave'), 'the Ilkley one is not filed as Otley');
+});
+
+/* ------------------------------------------- a website Google doesn't show */
+
+// COSELEY SERVICES LIMITED was filed as having no website because its Google
+// listing links none; it has one at its own name, dot co dot uk. These run the
+// whole hunt with the web check on, against pages the test sets up.
+
+const ownSite = (name, town, phone = '') => `<!doctype html><title>${name} Ltd</title>
+  <h1>${name}</h1><p>Family firm based in ${town}. ${phone ? `Call ${phone}.` : ''}</p>`;
+
+test('a Google business with a site of its own is not filed, even call-only', async () => {
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_messageable_only: '1', hunt_include_places: '1', hunt_daily_target: '5',
+    hunt_include_sole_traders: '1', hunt_check_websites: '1',
+  });
+
+  register = [{ body: { hits: 1, items: [company('AREA FILLER SITE LIMITED', '76000001')] } }];
+  places = [{ places: [place('Chevin Haulage Services', { phone: '07700 920001' })] }];
+  search = [{ body: { items: [hit('CHEVIN HAULAGE SERVICES LIMITED', '76000002', 'Otley')] } }];
+  sites['https://chevinhaulageservices.co.uk/'] = ownSite('Chevin Haulage Services', 'Otley', '07700 920001');
+
+  const run = await runAndWait();
+  assert.equal(run.error, null, run.error ?? '');
+  const names = (await get('/api/leads')).body.leads.map((l) => l.business_name);
+  assert.ok(!names.includes('Chevin Haulage Services'), 'not filed as a company');
+  assert.equal(run.had_website, 1, 'counted as a business that already has a website');
+
+  const saved = db.prepare("SELECT verdict, url FROM site_checks WHERE subject = 'ch:76000002'").get();
+  assert.deepEqual(saved, { verdict: 'site', url: 'https://chevinhaulageservices.co.uk/' });
+
+  // Next run: the answer is remembered, so the site is not fetched again.
+  db.prepare('UPDATE hunt_targets SET cursor = 0, last_run_at = NULL').run();
+  stub();
+  register = [{ body: { hits: 1, items: [company('AREA FILLER SITE LIMITED', '76000001')] } }];
+  places = [{ places: [place('Chevin Haulage Services', { phone: '07700 920001' })] }];
+  search = [{ body: { items: [hit('CHEVIN HAULAGE SERVICES LIMITED', '76000002', 'Otley')] } }];
+  const again = await runAndWait();
+  assert.equal(again.had_website, 1);
+  assert.ok(!siteLog.some((u) => u.includes('chevinhaulage')), 'not fetched a second time');
+  assert.ok(!(await get('/api/leads')).body.leads.some((l) => l.business_name === 'Chevin Haulage Services'));
+});
+
+test('the register path turns away a company with its own site, and files the one without', async () => {
+  stub();
+  await clearLeads();
+  await configure({ hunt_check_websites: '1', hunt_daily_target: '5' });
+
+  register = [{ body: { hits: 2, items: [
+    company('OTLEY SCAFFOLDING LIMITED', '76000011'),
+    company('WHARFE SCAFFOLDING LIMITED', '76000012'),
+  ] } }];
+  places = [{ places: [] }];   // Google lists neither
+  sites['https://otleyscaffolding.co.uk/'] = ownSite('Otley Scaffolding', 'Otley');
+
+  const run = await runAndWait();
+  assert.equal(run.error, null, run.error ?? '');
+  const leads = (await get('/api/leads')).body.leads;
+  assert.deepEqual(leads.map((l) => l.business_name), ['WHARFE SCAFFOLDING LIMITED']);
+  assert.equal(run.had_website, 1);
+  assert.equal(leads[0].website_evidence, 'places-absent+web',
+    'the lead says the web was checked as well as Google');
+
+  // Only their own guessed addresses and a web search were asked: nothing else.
+  for (const u of siteLog) {
+    assert.match(u, /^https?:\/\/(www\.)?((otley|wharfe)-?scaffolding\.(co\.uk|com|uk)\/|html\.duckduckgo\.com\/)/,
+      `unexpected request ${u}`);
+  }
+});
+
+test('with the web check off, the hunt fetches nothing but the registers', async () => {
+  stub();
+  await clearLeads();
+  await configure({ hunt_check_websites: '0', hunt_daily_target: '5' });
+  register = [{ body: { hits: 1, items: [company('OTLEY SCAFFOLDING LIMITED', '76000021')] } }];
+  places = [{ places: [] }];
+  sites['https://otleyscaffolding.co.uk/'] = ownSite('Otley Scaffolding', 'Otley');
+
+  const run = await runAndWait();
+  assert.equal(run.found, 1, 'filed on Google’s word alone, as before');
+  assert.deepEqual(siteLog, []);
 });

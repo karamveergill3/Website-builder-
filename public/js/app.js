@@ -16,10 +16,12 @@ import invoicesView from './views/invoices.js';
 import websitesView from './views/websites.js';
 import pricesView from './views/prices.js';
 import phase2View from './views/phase2.js';
+import whatsappView from './views/whatsapp.js';
 import { api } from './api.js';
 
 const ROUTES = {
   '/leads':     leadsView,
+  '/whatsapp':  whatsappView,
   '/hunt':      huntView,
   '/places':    searchView,
   '/search':    searchView,

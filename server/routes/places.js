@@ -438,8 +438,12 @@ router.post('/check-website', wrap(async (req, res) => {
         results.push({ lead_id: lead.id, name, found: false });
       } else {
         const row = normalise(top);
-        db.prepare('UPDATE leads SET has_website = ?, website_checked_at = ? WHERE id = ?')
-          .run(row.has_website, nowIso(), lead.id);
+        // Google's top result is only ever allowed to ADD a website. A site
+        // found on the web, which Google's listing does not link, stays found.
+        db.prepare(
+          `UPDATE leads SET has_website = CASE WHEN has_website = 1 THEN 1 ELSE ? END,
+             website_checked_at = ? WHERE id = ?`
+        ).run(row.has_website, nowIso(), lead.id);
         results.push({
           lead_id: lead.id, name, found: true,
           has_website: row.has_website === 1,

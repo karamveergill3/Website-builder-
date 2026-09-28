@@ -108,9 +108,12 @@ export default async function leadsView(root, params, { refresh }) {
 
   const view = params.view ?? '';
   const who = params.who ?? '';
+  // Anyone already messaged on WhatsApp lives on their own screen, so this one
+  // is only ever the people still to approach (and the ones reached by email,
+  // text or phone).
   const [{ leads: allLeads }, stats, gmail, ch, rosterRes, meRes] = await Promise.all([
-    api.leads.list({ status, q, sort, assigned_to: who || undefined, limit: 1000 }),
-    api.leads.stats(),
+    api.leads.list({ status, q, sort, assigned_to: who || undefined, limit: 1000, pile: 'leads' }),
+    api.leads.stats({ pile: 'leads' }),
     api.get('/api/gmail/status').catch(() => null),
     api.get('/api/companies/status').catch(() => null),
     api.auth.roster().catch(() => ({ roster: [] })),
@@ -146,6 +149,8 @@ export default async function leadsView(root, params, { refresh }) {
     duecall:   (l) => l.callback_due === true,
     noemail:   (l) => l.can_email === false && l.block_code === 'NO_EMAIL',
     nosite:    (l) => l.has_website === 0,
+    // Turned out to have a website after all: not prospects.
+    hassite:   (l) => l.has_website === 1,
     // Has an 07 mobile — the ones you can actually WhatsApp. This is what you
     // want after a Find contacts sweep if WhatsApp is the channel.
     mobile:    (l) => isMobile(l.phone),
@@ -172,6 +177,7 @@ export default async function leadsView(root, params, { refresh }) {
     (l.entity_type === 'corporate' || Boolean(l.messaging_consent_at))
     && (has(l.phone) || l.can_email === true);
   const bucketOf = (l) => {
+    if (l.has_website === 1) return 'site';
     if (l.contacted_before === true) return 'done';
     if (messageableNow(l)) return 'message';
     if (has(l.phone)) return 'call';
@@ -182,6 +188,7 @@ export default async function leadsView(root, params, { refresh }) {
     ['call',     'To call first — then message if they agree', 'var(--clay)'],
     ['nonumber', 'Need a contact — run Find contacts',         'var(--ink-3)'],
     ['done',     'Already contacted',                          'var(--ink-3)'],
+    ['site',     'Has a website: not a prospect',              'var(--ink-3)'],
   ];
   const grouped = new Map(GROUPS.map(([k]) => [k, []]));
   for (const l of leads) grouped.get(bucketOf(l)).push(l);
@@ -232,7 +239,7 @@ export default async function leadsView(root, params, { refresh }) {
         <button class="pill" data-filter="all" aria-pressed="${status === 'all'}">All <b>${stats.total}</b></button>
         ${STATUSES.map((s) => html`
           <button class="pill" data-filter="${s}" aria-pressed="${status === s}">${s} <b>${stats.by_status[s] ?? 0}</b></button>`)}
-        ${(counts.unchecked || counts.tocall || counts.duecall || counts.noemail || counts.nosite || counts.mobile || counts.reachable || counts.nocontact || view) ? html`<span class="sep"></span>` : ''}
+        ${(counts.unchecked || counts.tocall || counts.duecall || counts.noemail || counts.nosite || counts.hassite || counts.mobile || counts.reachable || counts.nocontact || view) ? html`<span class="sep"></span>` : ''}
         ${counts.duecall ? html`
           <button class="pill" data-view="duecall" aria-pressed="${view === 'duecall'}"
             title="Call-backs you arranged that are now due">call-backs due <b>${counts.duecall}</b></button>` : ''}
@@ -259,6 +266,9 @@ export default async function leadsView(root, params, { refresh }) {
           <button class="pill" data-view="noemail" aria-pressed="${view === 'noemail'}">no email <b>${counts.noemail}</b></button>` : ''}
         ${counts.nosite ? html`
           <button class="pill" data-view="nosite" aria-pressed="${view === 'nosite'}">no website <b>${counts.nosite}</b></button>` : ''}
+        ${counts.hassite ? html`
+          <button class="pill" data-view="hassite" aria-pressed="${view === 'hassite'}"
+            title="Found to have a website after all: not prospects. Select this to delete them.">has a website <b>${counts.hassite}</b></button>` : ''}
       </div>
       <div class="grow"></div>
       ${isTeam ? html`
@@ -277,11 +287,15 @@ export default async function leadsView(root, params, { refresh }) {
         <option value="contacted" ${sort === 'contacted' ? 'selected' : ''}>Last contacted</option>
       </select>
       <button class="primary" data-act="add">New lead</button>
+      ${allLeads.some((l) => l.has_website !== 1) ? html`
+        <button data-act="site-all" title="Look on the web for a website Google doesn't show">Check for websites</button>` : ''}
       ${leads.length ? html`
         <button class="danger" data-act="wipe"
           title="${filtered ? 'Delete the leads this filter is showing' : 'Delete every lead'}"
           >${filtered ? `Delete these ${leads.length}` : 'Delete all'}</button>` : ''}
     </div>
+
+    <div id="site-prog" hidden class="msg msg-info" style="margin-bottom:10px"></div>
 
     <div id="bulk" hidden class="bar" style="background:var(--green-lift);border:1px solid #bcd0c0;
          border-radius:var(--r-sm);padding:5px 10px;margin-bottom:10px">
@@ -351,7 +365,12 @@ export default async function leadsView(root, params, { refresh }) {
                 </td>
                 <td class="meta">${l.category ?? '—'}
                   ${l.has_website === 0 ? html`<span class="flag" data-ok
-                        title="Google returned no website">no site</span>` : ''}</td>
+                        title="${String(l.website_evidence ?? '').includes('web')
+                          ? 'No website on Google or on the web' : 'Google shows no website'}">no site</span>` : ''}
+                  ${l.has_website === 1 ? (/^https?:\/\//i.test(l.website ?? '')
+                    ? html`<a class="flag" href="${l.website}" target="_blank" rel="noopener"
+                          title="Has a website: ${l.website}">has a site ↗</a>`
+                    : html`<span class="flag" title="Has a website">has a site</span>`) : ''}</td>
                 ${isTeam ? html`<td class="meta nw">${nameOf(l.assigned_to)
                   ? html`<span class="flag"${me && l.assigned_to === me.id ? ' data-ok' : ''}>${nameOf(l.assigned_to)}</span>`
                   : '—'}</td>` : ''}
@@ -488,7 +507,8 @@ export default async function leadsView(root, params, { refresh }) {
     if (!answer) return;
 
     const res = await api.leads.bulkDelete({
-      ...(all ? { all: true } : { ids }),
+      // "All" is all of this screen: the WhatsApp screen's leads are not on it.
+      ...(all ? { all: true, pile: 'leads' } : { ids }),
       forget: answer.forget,
     });
     toast(`Deleted ${res.deleted}`
@@ -678,24 +698,61 @@ export default async function leadsView(root, params, { refresh }) {
     }, 1500));
   });
 
-  on(root, 'click', '[data-act="bulk-site"]', async (_e, btn) => {
-    const ids = picked().map((c) => Number(c.value));
-    if (!ids.length) return toast('Select some leads first', { error: true });
+  /**
+   * Look on the web for a website Google's listing doesn't show: the lead's
+   * name as a web address, its email's domain, then a search. Free, but a few
+   * seconds a lead, so it runs in the background and reports as it goes.
+   */
+  async function checkSites(ids) {
+    if (!ids.length) return toast('Nothing to check', { error: true });
+    const mins = Math.max(1, Math.ceil((ids.length * 6) / 60));
     if (!await confirmDialog({
-      title: 'Check for websites',
-      message: `One billed Google lookup each for ${ids.length} lead(s). Only the yes/no answer is kept.`,
+      title: `Check ${ids.length} lead${ids.length === 1 ? '' : 's'} for a website`,
+      message: 'Tries each business’s name as a web address and searches for it, '
+        + 'and marks the ones that turn out to have a site of their own. Free, '
+        + `and it takes about ${mins} minute${mins === 1 ? '' : 's'}.`,
       confirmLabel: 'Check',
     })) return;
-    btn.disabled = true;
     try {
-      const res = await api.post('/api/places/check-website', { lead_ids: ids });
-      toast(`${res.without_website} of ${res.checked} have no website`, { ms: 6000 });
-      refresh();
+      const res = await api.post('/api/leads/site-check', { lead_ids: ids });
+      if (!res.started) return toast(res.reason ?? 'Nothing to check');
+      toast(`Checking ${res.total}…`);
+      watchSites();
     } catch (err) {
-      toast(err.message, { error: true, ms: 7000 });
-      btn.disabled = false;
+      toast(err.message ?? 'Could not start', { error: true, ms: 7000 });
     }
-  });
+  }
+
+  function watchSites() {
+    const tick = registerInterval(setInterval(async () => {
+      const { run } = await api.get('/api/leads/site-check/status').catch(() => ({ run: null }));
+      if (!run) { clearInterval(tick); return; }
+      const bar = $('#site-prog', root);
+      if (bar) {
+        bar.hidden = !run.running;
+        bar.textContent = `Checking for websites: ${run.done} of ${run.total}`
+          + (run.with_site ? `, ${run.with_site} have one` : '') + '…';
+      }
+      if (!run.running) {
+        clearInterval(tick);
+        toast(`${run.with_site} of ${run.done} have a website of their own`
+          + (run.search_blocked ? '. Web search was busy, so a few may have been missed' : ''),
+        { ms: 8000 });
+        refresh();
+      }
+    }, 1500));
+  }
+
+  on(root, 'click', '[data-act="site-all"]', () =>
+    checkSites(allLeads.filter((l) => l.has_website !== 1).map((l) => l.id)));
+
+  on(root, 'click', '[data-act="bulk-site"]', () =>
+    checkSites(picked().map((c) => Number(c.value))));
+
+  // A check started before this screen was opened is still going: follow it.
+  api.get('/api/leads/site-check/status')
+    .then(({ run }) => { if (run?.running) watchSites(); })
+    .catch(() => {});
 
   on(root, 'click', '[data-act="bulk-queue"]', async () => {
     const ready = picked().filter((c) => c.dataset.ok === 'true').map((c) => Number(c.value));

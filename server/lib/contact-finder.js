@@ -38,6 +38,7 @@ import { normalisePhone } from './handoff.js';
 import { FREE_MAIL_DOMAINS } from './pecr.js';
 import { configured as placesConfigured, textSearch, normalise as normalisePlace } from './places.js';
 import { normaliseName } from './companies-house.js';
+import { isOwnSiteUrl } from './site-check.js';
 
 const USER_AGENT = 'ProspectBook/1.0 (+contact discovery for personal outreach)';
 const HTTP_TIMEOUT_MS = 12_000;
@@ -390,6 +391,14 @@ export async function discover(lead, opts = {}) {
       if (p?.website_uri) {
         push('website', p.website_uri, 'places', 90);
         placesWebsite = p.website_uri;
+        // Google now lists a site for a business we filed as having none:
+        // the lead is wrong, so correct it. A Facebook page is not a site.
+        if (lead.has_website !== 1 && isOwnSiteUrl(p.website_uri)) {
+          db.prepare(
+            `UPDATE leads SET has_website = 1, website = ?, website_checked_at = ?,
+               website_evidence = 'places-find-contacts' WHERE id = ?`
+          ).run(p.website_uri, nowIso(), lead.id);
+        }
       }
     } catch (e) { errors.push(`places: ${e.message}`); }
   }

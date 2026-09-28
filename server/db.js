@@ -1629,6 +1629,26 @@ Thanks so much, and have a lovely day.
       }
     },
   },
+  {
+    name: '055_site_checks',
+    up: `
+      -- Whether a business has a website of its own, found by looking (its
+      -- name as a domain, its email's domain, a web search) rather than by
+      -- trusting Google's listing, which many firms never link their site
+      -- from. Keyed 'ch:<company number>' or 'pl:<place id>' so a company
+      -- the hunt turned away is not fetched again on every run.
+      CREATE TABLE site_checks (
+        subject    TEXT PRIMARY KEY,
+        verdict    TEXT NOT NULL CHECK (verdict IN ('site', 'none')),
+        url        TEXT,
+        how        TEXT,
+        checked_at TEXT NOT NULL
+      );
+
+      -- The site itself, when a lead turns out to have one.
+      ALTER TABLE leads ADD COLUMN website TEXT;
+    `,
+  },
 ];
 
 function migrate() {

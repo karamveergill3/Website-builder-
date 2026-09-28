@@ -18,7 +18,37 @@ const SORTS = {
   oldest:   'created_at ASC, id ASC',
   name:     'business_name COLLATE NOCASE ASC',
   contacted:'last_contacted_at DESC NULLS LAST, id DESC',
+  // Most recently messaged on WhatsApp first, so a cap trims the oldest sends.
+  whatsapp: `(SELECT MAX(oe.confirmed_sent_at) FROM outreach_events oe
+               WHERE oe.lead_id = leads.id AND oe.channel = 'whatsapp') DESC NULLS LAST, id DESC`,
 };
+
+/**
+ * Which pile a lead sits in. A lead someone has messaged on WhatsApp (a send
+ * confirmed in the Reach dialog) moves off the Leads screen and onto its own
+ * "Sent via WhatsApp" screen, so Leads stays a list of people still to
+ * approach. Worked out from the send record rather than a flag, so it moves
+ * itself the moment the send is confirmed and nothing can leave it stale.
+ */
+const WHATSAPPED = `EXISTS (SELECT 1 FROM outreach_events oe
+  WHERE oe.lead_id = leads.id AND oe.channel = 'whatsapp'
+    AND oe.confirmed_sent_at IS NOT NULL)`;
+const PILES = { leads: `NOT ${WHATSAPPED}`, whatsapp: WHATSAPPED };
+
+/** The SQL condition for `?pile=`, or null for every lead. */
+function pileWhere(value) {
+  const pile = str(value);
+  if (!pile || pile === 'all') return null;
+  if (!Object.hasOwn(PILES, pile)) throw badRequest(`unknown pile "${pile}"`);
+  return PILES[pile];
+}
+
+/** The latest confirmed WhatsApp send to this lead: when, and to which number. */
+const lastWhatsApp = (id) => db.prepare(
+  `SELECT confirmed_sent_at AS at, recipient FROM outreach_events
+    WHERE lead_id = ? AND channel = 'whatsapp' AND confirmed_sent_at IS NOT NULL
+    ORDER BY confirmed_sent_at DESC LIMIT 1`
+).get(id) ?? null;
 
 /**
  * Shape a DB row for the client: SQLite has no booleans, and every lead
@@ -53,6 +83,12 @@ function toApi(row) {
     contact_block_reason: again.allowed ? null : again.reason,
     // A scheduled call-back that has come due (its time is now or past).
     callback_due: Boolean(row.next_call_at) && row.next_call_at <= nowIso(),
+    // When it was last sent on WhatsApp (set means it lives on that screen),
+    // and the number it went to, which is the chat to open for the reply.
+    ...(() => {
+      const wa = lastWhatsApp(row.id);
+      return { whatsapp_sent_at: wa?.at ?? null, whatsapp_to: wa?.recipient ?? null };
+    })(),
   };
 }
 
@@ -152,6 +188,9 @@ router.get('/', wrap((req, res) => {
     params.status = status;
   }
 
+  const pile = pileWhere(req.query.pile);
+  if (pile) where.push(pile);
+
   const q = str(req.query.q);
   if (q) {
     where.push(`(business_name LIKE @q OR category LIKE @q OR location LIKE @q
@@ -194,38 +233,50 @@ router.get('/', wrap((req, res) => {
  * "Awaiting reply" is deliberately the count of leads sat at `sent`: contacted
  * but not yet heard back from.
  */
-router.get('/stats', wrap((_req, res) => {
+router.get('/stats', wrap((req, res) => {
+  // `?pile=` counts one screen's leads only, so the tiles above a list add up
+  // to the list under them.
+  const pile = pileWhere(req.query.pile);
+  const scoped = (cond) => {
+    const all = [cond, pile].filter(Boolean);
+    return all.length ? `WHERE ${all.map((c) => `(${c})`).join(' AND ')}` : '';
+  };
   const byStatus = Object.fromEntries(STATUSES.map((s) => [s, 0]));
-  for (const row of db.prepare('SELECT status, COUNT(*) n FROM leads GROUP BY status').all()) {
+  for (const row of db.prepare(
+    `SELECT status, COUNT(*) n FROM leads ${scoped(null)} GROUP BY status`
+  ).all()) {
     byStatus[row.status] = row.n;
   }
-  const one = (sql) => db.prepare(sql).get().n;
+  const count = (cond) => db.prepare(`SELECT COUNT(*) n FROM leads ${scoped(cond)}`).get().n;
 
   res.json({
-    total:          one('SELECT COUNT(*) n FROM leads'),
+    total:          count(null),
     awaiting_reply: byStatus.sent,
     replied:        byStatus.replied,
     won:            byStatus.won,
     lost:           byStatus.lost,
     new:            byStatus.new,
     by_status:      byStatus,
-    opted_out:      one('SELECT COUNT(*) n FROM leads WHERE opted_out = 1'),
-    no_email:       one("SELECT COUNT(*) n FROM leads WHERE email IS NULL OR email = ''"),
+    opted_out:      count('opted_out = 1'),
+    no_email:       count("email IS NULL OR email = ''"),
     // "Emailable" means lawfully emailable, not merely "has an address".
-    emailable:      db.prepare('SELECT * FROM leads').all()
+    emailable:      db.prepare(`SELECT * FROM leads ${scoped(null)}`).all()
                       .filter((l) => sendability(l, { suppressed: isSuppressed(l.email) }).allowed).length,
     // Everything whose legal form is not yet confirmed — this is what
     // "Check register" actually looks up, so the count must match it. It used
     // to also require an email (a leftover from when leads arrived with one),
     // which read 0 for the phone-only leads the hunt files now and made the
     // "Check register" dialog claim there was nothing to check.
-    unclassified:   one(`SELECT COUNT(*) n FROM leads
-                         WHERE entity_type = 'unknown' AND opted_out = 0`),
-    corporate:      one("SELECT COUNT(*) n FROM leads WHERE entity_type = 'corporate'"),
-    individual:     one("SELECT COUNT(*) n FROM leads WHERE entity_type = 'individual'"),
-    suppressed:     one('SELECT COUNT(*) n FROM suppression_list'),
+    // Every pile, deliberately: Check register looks them all up.
+    unclassified:   db.prepare(`SELECT COUNT(*) n FROM leads
+                                 WHERE entity_type = 'unknown' AND opted_out = 0`).get().n,
+    corporate:      count("entity_type = 'corporate'"),
+    individual:     count("entity_type = 'individual'"),
+    suppressed:     db.prepare('SELECT COUNT(*) n FROM suppression_list').get().n,
     // How many leads each rep has been given today, keyed by user id (plus
     // "none" for unassigned). The Leads screen turns this into "You 5 · …".
+    // Every pile: a lead found this morning and WhatsApped by lunch was
+    // still found today.
     by_assignee_today: Object.fromEntries(
       db.prepare(
         `SELECT COALESCE(assigned_to, 'none') AS id, COUNT(*) AS n FROM leads
@@ -315,6 +366,54 @@ router.post('/:id/call-outcome', wrap((req, res) => {
   res.json({ lead: toApi(db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)) });
 }));
 
+/**
+ * POST /api/leads/:id/whatsapp-unsend — "that WhatsApp never went".
+ *
+ * Tapping "Open WhatsApp" in Reach is taken as the send, because it is the
+ * only moment the tool sees. When it did not go (the number is not on
+ * WhatsApp, the tab was closed), this puts things back: the lead returns to
+ * Leads. If that WhatsApp was the only contact the company has had, the
+ * contact is taken off the record too, so it can be approached properly.
+ * Any other contact (an email, a text, a call) is left exactly as it was.
+ */
+router.post('/:id/whatsapp-unsend', wrap((req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+  if (!lead) throw notFound('Lead not found');
+  const sends = db.prepare(
+    `SELECT id FROM outreach_events
+      WHERE lead_id = ? AND channel = 'whatsapp' AND confirmed_sent_at IS NOT NULL`
+  ).all(lead.id);
+  if (!sends.length) throw badRequest('No WhatsApp is recorded as sent to this lead.');
+
+  const otherContact = Boolean(
+    db.prepare(
+      `SELECT 1 FROM outreach_events
+        WHERE lead_id = ? AND channel != 'whatsapp' AND confirmed_sent_at IS NOT NULL`
+    ).get(lead.id)
+    || db.prepare('SELECT 1 FROM email_log WHERE lead_id = ?').get(lead.id)
+  );
+
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE outreach_events SET confirmed_sent_at = NULL
+        WHERE lead_id = ? AND channel = 'whatsapp'`
+    ).run(lead.id);
+    if (otherContact) return;
+    if (lead.status === 'sent') {
+      db.prepare("UPDATE leads SET status = 'new', last_contacted_at = NULL WHERE id = ?").run(lead.id);
+    }
+    const filed = ledgerFor(lead);
+    if (filed && filed.last_channel === 'whatsapp' && filed.times_contacted <= sends.length) {
+      db.prepare(
+        `UPDATE company_ledger SET contacted_at = NULL, last_channel = NULL, times_contacted = 0
+          WHERE company_key = ?`
+      ).run(filed.company_key);
+    }
+  })();
+
+  res.json({ lead: toApi(db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)) });
+}));
+
 router.post('/', wrap((req, res) => {
   const lead = parseLeadBody(req.body);
   requireCorporateEvidence(lead);
@@ -369,9 +468,11 @@ router.patch('/:id', wrap((req, res) => {
   requireCorporateEvidence({ ...existing, ...patch });
 
   // Moving a lead to "sent" by hand should stamp the contact date, unless the
-  // caller set one explicitly.
+  // caller set one explicitly — or the lead already has one. Setting a lead
+  // that replied back to "awaiting reply" is a correction, not a second
+  // approach, and must not file one (bulk-status has always worked this way).
   if (patch.status === 'sent' && existing.status !== 'sent' && !('last_contacted_at' in patch)) {
-    patch.last_contacted_at = nowIso();
+    patch.last_contacted_at = existing.last_contacted_at ?? nowIso();
   }
   // Whatever route stamped the contact date, the ledger has to hear about
   // it — it is the only record that survives this lead being deleted.
@@ -458,6 +559,9 @@ router.post('/bulk-delete', wrap((req, res) => {
   if (!all && ids.length === 0) {
     throw badRequest('Pass ids, or all: true to clear the whole list.');
   }
+  // "Delete all" on the Leads screen means all of THAT screen. Without the
+  // pile it also took every lead on the WhatsApp screen, which it never showed.
+  const pile = pileWhere(req.body?.pile);
 
   // One row at a time rather than an IN list: SQLite caps a statement at 999
   // parameters, and "delete all" on a list of a thousand-odd is exactly the
@@ -492,7 +596,9 @@ router.post('/bulk-delete', wrap((req, res) => {
     }
   });
 
-  run(all ? db.prepare('SELECT id FROM leads').all().map((r) => r.id) : ids);
+  run(all
+    ? db.prepare(`SELECT id FROM leads ${pile ? `WHERE ${pile}` : ''}`).all().map((r) => r.id)
+    : ids);
 
   // Clearing the ledger is not enough on its own. The hunt reads the register
   // one page at a time and remembers how far it got (the target's cursor), and

@@ -36,6 +36,7 @@ import { normalisePhone } from './handoff.js';
 import { recordFound, knownCompanyNumbers, ledgerFor } from './recontact.js';
 import { nextAssignee } from './assign.js';
 import { expandAreas } from './towns.js';
+import { findWebsite, postcodeIn } from './site-check.js';
 
 const PAGE = 100;
 /** Re-open an exhausted trade/town after this long; new companies incorporate. */
@@ -44,6 +45,18 @@ const REOPEN_AFTER_DAYS = 30;
 const RECHECK_AFTER_DAYS = 30;
 /** Per-company Google lookups one trade/town may spend before the next gets a turn. */
 const LOOKUPS_PER_TARGET = 8;
+/**
+ * How long a website verdict is trusted. A firm found WITH a site keeps it;
+ * one found without may get one, so that answer is re-checked monthly.
+ */
+const SITE_KEEP_DAYS = { site: 180, none: 30 };
+/** Web searches one run may make; DuckDuckGo is free but not unlimited. */
+const SITE_SEARCHES_PER_RUN = 40;
+/** The pause between web searches (tests set SITE_SEARCH_GAP_MS=0). */
+export const searchGapMs = () => {
+  const n = Number(process.env.SITE_SEARCH_GAP_MS);
+  return Number.isFinite(n) && n >= 0 ? n : 4_000;
+};
 
 const lines = (v) => String(v ?? '').split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
 
@@ -79,6 +92,10 @@ export function huntConfig() {
     maxRegisterPages: num('hunt_max_register_pages', 200),
     maxPerTrade: num('hunt_max_per_trade', 3),
     requireNoWebsite: getSetting('hunt_require_no_website', '1') === '1',
+    // Google's listing is not the last word on "no website": plenty of firms
+    // never link their site from it. On, every business about to be filed is
+    // looked for on the web first (its name as a domain, then a search).
+    checkWebsites: getSetting('hunt_check_websites', '1') === '1',
     // A mobile is a phone, so asking for one asks for the other. Left as two
     // independent flags, ticking "must be a mobile" while "must have a phone"
     // was off would skip the Places lookup entirely and then reject every
@@ -314,12 +331,16 @@ async function websiteMap(phrase, area, counters) {
       const row = normalisePlace(place);
       if (!row.place_id || !row.display_name) continue;
       // Held in memory for this run only, to match register companies against.
+      // The name and address are what place a listing: judge() needs them to
+      // tell "Coseley Services" from any other listing starting "Coseley".
       byName.set(normaliseName(row.display_name), {
         place_id: row.place_id,
         has_website: row.has_website === 1,
         phone: row.phone,
         editorial_summary: row.editorial_summary,
         primary_type: row.primary_type,
+        display_name: row.display_name,
+        address: row.address ?? null,
       });
       rows.push(row);
       remember.run(row.place_id, row.has_website, nowIso(), nowIso(), area ?? phrase);
@@ -450,8 +471,73 @@ async function lookupCompany(company, area, counters) {
     ? { prospect: false, reason: 'has a website', phone: match.phone }
     : {
         prospect: true, has_website: 0, evidence: 'places-name-lookup', phone: match.phone,
-        place_id: match.place_id,
+        place_id: match.place_id, display_name: match.display_name, address: match.address ?? null,
       };
+}
+
+/* ------------------------------------------- a website Google doesn't show */
+
+/** Our own answer on whether this business has a website, while still fresh. */
+function siteVerdict(subjects) {
+  for (const subject of subjects.filter(Boolean)) {
+    const r = db.prepare(
+      'SELECT verdict, url, how, checked_at FROM site_checks WHERE subject = ?'
+    ).get(subject);
+    if (!r) continue;
+    const cutoff = new Date(Date.now() - SITE_KEEP_DAYS[r.verdict] * 86_400_000).toISOString();
+    if (r.checked_at >= cutoff) return r;
+  }
+  return null;
+}
+
+/** Remember an answer under every name the business goes by here. */
+export function recordSiteVerdict(subjects, verdict, { url = null, how = null } = {}) {
+  const put = db.prepare(
+    `INSERT INTO site_checks (subject, verdict, url, how, checked_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(subject) DO UPDATE SET
+       verdict = excluded.verdict, url = excluded.url, how = excluded.how,
+       checked_at = excluded.checked_at`
+  );
+  for (const subject of subjects.filter(Boolean)) put.run(subject, verdict, url, how, nowIso());
+}
+
+/**
+ * Before a business is filed as having no website: does it have one anyway?
+ *
+ * Google's listing is where the "no website" came from, and many firms never
+ * link their site there. So look the way a person would (their name as a
+ * domain, then a search) and turn away anyone whose own site turns up.
+ * Returns { url, how } when there is a site, null when there is none to see.
+ *
+ * A "none" is only remembered when the whole check ran, search included: a
+ * search that was blocked or over budget leaves the question open, so the
+ * next run asks again rather than trusting a half-answer for a month.
+ */
+async function ownWebsite(biz, subjects, cfg, counters) {
+  if (!cfg.checkWebsites) return null;
+  const prior = siteVerdict(subjects);
+  if (prior) return prior.verdict === 'site' ? { url: prior.url, how: prior.how } : null;
+
+  const canSearch = !counters.site_search_blocked
+    && counters.site_searches < SITE_SEARCHES_PER_RUN;
+  const name = [biz.names ?? []].flat().find(Boolean) ?? 'a business';
+  if (active) active.doing = `Checking whether ${name} has a website`;
+  let r;
+  try {
+    r = await findWebsite(biz, { search: canSearch ? { gapMs: searchGapMs() } : false });
+  } finally {
+    if (active) active.doing = null;
+  }
+  counters.site_checks++;
+  if (r.searched) counters.site_searches++;
+  if (r.searchBlocked) counters.site_search_blocked = true;
+
+  if (r.found) {
+    recordSiteVerdict(subjects, 'site', r);
+    return { url: r.url, how: r.how };
+  }
+  if (canSearch && r.searched && !r.searchBlocked) recordSiteVerdict(subjects, 'none');
+  return null;
 }
 
 /**
@@ -461,15 +547,29 @@ async function lookupCompany(company, area, counters) {
  * unknown), exactly like a manual Places import, so it never auto-unblocks a
  * cold email — that still needs a Companies House match.
  */
-function importPlaceLead(place, trade, area) {
+/**
+ * How we know a lead has no website: Google's word, and — with "+web" — our
+ * own look on the web as well.
+ */
+const evidenceOf = (base, webChecked) => (webChecked ? `${base}+web` : base);
+
+/** What the website check needs to know about a business found on Google. */
+const placeBiz = (row, area) => ({
+  names: [row.display_name],
+  phones: [row.phone],
+  postcode: postcodeIn(row.address),
+  towns: [area],
+});
+
+function importPlaceLead(place, trade, area, { webChecked = false } = {}) {
   const info = db.prepare(
     `INSERT INTO leads
        (business_name, category, location, phone, google_place_id, status,
-        notes, source, opted_out, entity_type, has_website, website_checked_at,
+        notes, source, opted_out, entity_type, has_website, website_checked_at, website_evidence,
         editorial_summary, primary_type,
         details_source, details_imported_at, assigned_to, created_at)
      VALUES (@name, @trade, @town, @phone, @place_id, 'new', @notes, 'Daily hunt (Google)', 0,
-             'unknown', 0, @now,
+             'unknown', 0, @now, @evidence,
              @summary, @primary_type,
              'google_places', @now, @assigned, @now)`
   ).run({
@@ -478,6 +578,7 @@ function importPlaceLead(place, trade, area) {
     town: area ?? null,
     phone: place.phone ?? null,
     place_id: place.place_id,
+    evidence: evidenceOf('places-no-website', webChecked),
     notes: place.address ? `Address: ${place.address}` : null,
     summary: place.editorial_summary ?? null,
     primary_type: place.primary_type ?? null,
@@ -497,7 +598,7 @@ function importPlaceLead(place, trade, area) {
  * company's register details, so it lands ready to message rather than blocked
  * and waiting on a check. `company` is the auto-match from findCompany.
  */
-function importConfirmedPlaceLead(row, company, trade, area) {
+function importConfirmedPlaceLead(row, company, trade, area, { webChecked = false } = {}) {
   const info = db.prepare(
     `INSERT INTO leads
        (business_name, category, location, phone, google_place_id, status, source, opted_out,
@@ -510,11 +611,12 @@ function importConfirmedPlaceLead(row, company, trade, area) {
      VALUES (@name, @trade, @town, @phone, @place_id, 'new', 'Daily hunt', 0,
              'corporate', @number, @regname, @address, @status,
              @type, @inc, @sic, @note, @now,
-             0, @now, 'places-no-website',
+             0, @now, @evidence,
              @summary, @primary_type,
              'google_places', @now,
              @assigned, @now)`
   ).run({
+    evidence: evidenceOf('places-no-website', webChecked),
     name: row.display_name ?? company.company_name,
     trade,
     town: company.locality ?? area ?? null,
@@ -572,7 +674,7 @@ const CLEAR_MARGIN = 0.15;
  * there by a clear margin, and Google's address for the listing must agree
  * (sameFirm), which also turns away listings Google pulled in from nearby.
  */
-async function confirmAndImportPlaceLead(row, trade, area, seen) {
+async function confirmAndImportPlaceLead(row, trade, area, seen, { checkSite = null } = {}) {
   const ranked = (await searchByName(row.display_name, { limit: 50 }))
     .map((c) => ({ ...c, score: matchScore(row.display_name, c) }))
     .filter((c) => c.score > 0)
@@ -607,8 +709,20 @@ async function confirmAndImportPlaceLead(row, trade, area, seen) {
     return { filed: false, reason: 'known' };
   }
 
+  // Last, because it is the slow one: Google shows no website, but does the
+  // firm have one Google doesn't link? Asked only of a company about to be filed.
+  if (checkSite) {
+    const site = await checkSite({
+      names: [row.display_name, auto.company_name],
+      phones: [row.phone],
+      postcode: auto.postal_code ?? postcodeIn(row.address),
+      towns: [auto.locality, area],
+    }, [`ch:${number}`, `pl:${row.place_id}`]);
+    if (site) return { filed: false, reason: 'has_website', site };
+  }
+
   try {
-    importConfirmedPlaceLead(row, auto, trade, area);
+    importConfirmedPlaceLead(row, auto, trade, area, { webChecked: Boolean(checkSite) });
   } catch (err) {
     if (String(err.message).includes('leads.company_number')) return { filed: false, reason: 'known' };
     throw err;
@@ -661,8 +775,16 @@ export function sameTown(area, locality) {
   return true;
 }
 
-/** Website evidence for one company, read off the Places page for its town. */
-export function judge(company, byName, { includeUnlisted = true } = {}) {
+/**
+ * Website evidence for one company, read off the Places page for its town.
+ *
+ * An exact name match is taken as it is. A looser one ("HILLSIDE ROOFING LTD"
+ * against a listing "Hillside Roofing & Guttering") must also be the same
+ * firm by address: normalising drops "Services", so COSELEY SERVICES LIMITED
+ * is just "coseley", and without that check any listing starting "Coseley"
+ * lent it a phone number and a "no website" it had no claim to.
+ */
+export function judge(company, byName, { includeUnlisted = true, area = null } = {}) {
   const key = normaliseName(company.company_name);
   if (!key) return { prospect: false, reason: 'no usable name' };
 
@@ -678,6 +800,8 @@ export function judge(company, byName, { includeUnlisted = true } = {}) {
         place_id: info.place_id ?? null,
         editorial_summary: info.editorial_summary ?? null,
         primary_type: info.primary_type ?? null,
+        display_name: info.display_name ?? null,
+        address: info.address ?? null,
       });
 
   const exact = byName.get(key);
@@ -685,8 +809,15 @@ export function judge(company, byName, { includeUnlisted = true } = {}) {
 
   // Registered names carry words a trading name drops, and the other way
   // round: "HILLSIDE ROOFING LTD" against a listing for "Hillside Roofing".
+  // Only between names of two words or more (a one-word name prefixes half
+  // the listings in town), and only for a listing whose address is where the
+  // company is.
+  const placed = (addr) => Boolean(addr)
+    && [company.locality, area, outwardCode(company.postal_code)].some((p) => mentions(addr, p));
   for (const [name, info] of byName) {
-    if (name && (name.startsWith(key) || key.startsWith(name))) return found(info);
+    if (!name || !(name.startsWith(key) || key.startsWith(name))) continue;
+    if (key.split(' ').length < 2 || name.split(' ').length < 2) continue;
+    if (placed(info.address)) return found(info);
   }
 
   // `unlisted` says the trade search simply did not return it — not that
@@ -821,7 +952,15 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
     // Of places_requests, how many looked one company up by name.
     company_lookups: 0,
     maxPlacesRequests: cfg.maxPlacesRequests,
+    // Our own look for a website Google doesn't show (in memory only; a hit
+    // is counted in had_website like any other business with a site).
+    site_checks: 0,
+    site_searches: 0,
+    site_search_blocked: false,
   };
+  const checkSite = cfg.checkWebsites && cfg.requireNoWebsite
+    ? (biz, subjects) => ownWebsite(biz, subjects, cfg, counters)
+    : null;
   const covered = new Set();
   active = { id: runId, trigger, target: want, running: true, started_at: nowIso(), ...counters };
 
@@ -983,7 +1122,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
                 if (counters.register_requests >= cfg.maxRegisterPages) break;
                 counters.register_requests++;
                 try {
-                  outcome = await confirmAndImportPlaceLead(row, t.trade, t.area, seen);
+                  outcome = await confirmAndImportPlaceLead(row, t.trade, t.area, seen, { checkSite });
                 } catch (err) {
                   if (err instanceof CompaniesHouseError && err.retryable) throw err;
                   counters.not_confirmed++;
@@ -997,6 +1136,9 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
               }
               if (!outcome.filed) {
                 if (outcome.reason === 'known') { counters.already_known++; continue; }
+                // A confirmed company with a site of its own, just not on its
+                // Google listing. Not a sole trader, so never filed call-only.
+                if (outcome.reason === 'has_website') { counters.had_website++; continue; }
                 // The register can't confirm it's a limited company in this
                 // town — a sole trader, most likely. File it call-only when
                 // that's switched on; otherwise leave it off the list.
@@ -1011,7 +1153,10 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
                 if (ledgerFor({ business_name: row.display_name, location: t.area })) {
                   counters.already_known++; continue;
                 }
-                importPlaceLead(row, t.trade, t.area);
+                if (checkSite && await checkSite(placeBiz(row, t.area), [`pl:${row.place_id}`])) {
+                  counters.had_website++; continue;
+                }
+                importPlaceLead(row, t.trade, t.area, { webChecked: Boolean(checkSite) });
               } else {
                 // A confirmed company is what a messageable-only hunt is for,
                 // so it counts toward this trade's yield.
@@ -1023,7 +1168,10 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
               if (ledgerFor({ business_name: row.display_name, location: t.area })) {
                 counters.already_known++; continue;
               }
-              importPlaceLead(row, t.trade, t.area);
+              if (checkSite && await checkSite(placeBiz(row, t.area), [`pl:${row.place_id}`])) {
+                counters.had_website++; continue;
+              }
+              importPlaceLead(row, t.trade, t.area, { webChecked: Boolean(checkSite) });
             }
             counters.found++;
             takenPerTrade.set(t.trade, taken(t.trade) + 1);
@@ -1091,7 +1239,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
         // shows a website, and what phone number it holds. When only the
         // phone is wanted, its website verdict is ignored.
         let verdict = needPlaces
-          ? judge(company, byName, cfg)
+          ? judge(company, byName, { includeUnlisted: cfg.includeUnlisted, area: t.area })
           : { prospect: true };
 
         // The trade search did not return it, but a number is required: ask
@@ -1120,8 +1268,23 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
           continue;
         }
 
+        // Last and slowest: Google shows no site (or no listing at all), so
+        // look for one on the web before calling it a business without.
+        if (checkSite) {
+          const number = String(company.company_number ?? '').trim().toUpperCase();
+          const site = await checkSite({
+            names: [verdict.display_name, company.company_name],
+            phones: [verdict.phone],
+            postcode: company.postal_code ?? postcodeIn(verdict.address),
+            towns: [company.locality, t.area],
+          }, [number && `ch:${number}`, verdict.place_id && `pl:${verdict.place_id}`]);
+          if (site) { counters.had_website++; continue; }
+        }
+
         try {
-          importLead(company, verdict, t.trade);
+          importLead(company, checkSite
+            ? { ...verdict, evidence: evidenceOf(verdict.evidence ?? 'no-website', true) }
+            : verdict, t.trade);
         } catch (err) {
           // The partial UNIQUE index from migration 016. Two hunt processes
           // can pass the SELECT above before either INSERTs — `active` is a

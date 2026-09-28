@@ -12,6 +12,7 @@ import settings from './routes/settings.js';
 import suppression from './routes/suppression.js';
 import outreach from './routes/outreach.js';
 import mockups, { MOCKUP_ROOT } from './routes/mockups.js';
+import siteCheck from './routes/site-check.js';
 import { seedIdentityFromEnv } from './lib/identity.js';
 import authRouter from './routes/auth.js';
 import invoices from './routes/invoices.js';
@@ -95,6 +96,8 @@ app.use('/api/websites', websites);
 // first only within one Router.
 app.use('/api', outreach);
 app.use('/api', mockups);
+// Also under /api/leads/..., so after the leads router for the same reason.
+app.use('/api', siteCheck);
 
 /**
  * Generated mockup sites, served read-only from data/mockups/<token>/.

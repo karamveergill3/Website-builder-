@@ -38,7 +38,7 @@ export const api = {
 
   leads: {
     list:    (params)     => request('GET', '/api/leads' + qs(params)),
-    stats:   ()           => request('GET', '/api/leads/stats'),
+    stats:   (params)     => request('GET', '/api/leads/stats' + qs(params)),
     get:     (id)         => request('GET', `/api/leads/${id}`),
     create:  (body)       => request('POST', '/api/leads', body),
     update:  (id, body)   => request('PATCH', `/api/leads/${id}`, body),

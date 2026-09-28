@@ -183,6 +183,12 @@ function leadSummary(lead) {
           <span>✉ ${lead.email ?? '—'}</span> ·
           <span>Legal form: ${lead.entity_type}</span>
         </div>
+        ${lead.has_website === 1 ? html`
+          <div class="msg msg-warn" style="margin-top:8px"><div class="grow">
+            <b>This business already has a website</b>${/^https?:\/\//i.test(lead.website ?? '')
+              ? html`: <a href="${lead.website}" target="_blank" rel="noopener">${lead.website}</a>` : ''}.
+            It isn't a no-website prospect, so a "you don't have a website" message would be wrong.
+          </div></div>` : ''}
         ${!lead.can_email && lead.block_reason ? html`
           <div class="msg msg-warn" style="margin-top:8px"><div class="grow">${lead.block_reason}</div></div>` : ''}
         ${lead.contacted_before ? html`
@@ -213,7 +219,9 @@ function signalsPanel(state) {
       <div class="panel-bd">
         ${noWeb ? html`
           <div class="msg msg-info" style="margin-bottom:10px"><div class="grow">
-            This business has no website — that is why it is in the tool.
+            ${String(lead.website_evidence ?? '').includes('web')
+              ? 'No website on Google or on the web: that is why it is in the tool.'
+              : 'Google shows no website for this business: that is why it is in the tool.'}
             Email addresses rarely exist for these leads (a business with no site
             is usually phone-first). <b>Find contacts</b> looks for their
             Yell, Facebook and Checkatrade listings instead, which usually
@@ -460,8 +468,10 @@ function preparedPanel(prep) {
         </div>
         <p class="tip">"Open" launches ${CHANNEL_LABEL[prep.channel]} with the message,
           and marks this company as approached — so tomorrow's list will not offer
-          it to you again. If you close ${CHANNEL_LABEL[prep.channel]} without
-          sending, undo it from the lead.</p>
+          it to you again.${prep.channel === 'whatsapp'
+            ? html` If it never went (say the number isn't on WhatsApp), use <b>Not sent</b>
+              on the <a href="#/whatsapp" data-act="tpl-hop">Sent via WhatsApp</a> screen to put it back.`
+            : ''}</p>
       </div>
     </div>`;
 }
@@ -550,8 +560,12 @@ function wire(dlg, state) {
     try {
       const r = await api.leads.unconsent(state.lead.id);
       state.lead = r.lead ?? r;
-      // Messaging is blocked again, so drop back to the call channel.
-      if (state.channel !== 'call' && state.lead.entity_type !== 'corporate') state.channel = 'call';
+      // Messaging is blocked again, so drop back to the call channel, and
+      // take away a message already prepared: it may no longer be sent.
+      if (state.channel !== 'call' && state.lead.entity_type !== 'corporate') {
+        state.channel = 'call';
+        state.lastPrepare = null;
+      }
       toast('Consent removed');
       rerender();
     } catch (err) {
@@ -658,7 +672,9 @@ function wire(dlg, state) {
   on(dlg, 'click', '[data-act="mark-sent"]', async (_e, el) => {
     try {
       await api.outreach.sent(el.dataset.event);
-      toast('Marked sent');
+      toast(state.lastPrepare?.channel === 'whatsapp'
+        ? 'Marked sent. It has moved to Sent via WhatsApp'
+        : 'Marked sent');
       // Refresh the lead so status/last_contacted updates.
       const fresh = await api.leads.get(state.lead.id);
       state.lead = fresh.lead ?? fresh;

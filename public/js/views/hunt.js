@@ -315,6 +315,16 @@ export default async function huntView(root, _p, { refresh }) {
             <label for="h-nosite">Only businesses with no website
               ${!s.places_configured ? html`<span class="flag">needs a Google key</span>` : ''}</label>
           </div>
+          <div class="check" style="margin-top:8px">
+            <input id="h-sitecheck" name="hunt_check_websites" type="checkbox"
+                   ${c.checkWebsites ? 'checked' : ''}>
+            <label for="h-sitecheck">Double-check on the web before filing (recommended)
+              <span class="tip" style="display:block;font-weight:400">
+                Lots of firms never add their website to Google. Before a business is
+                filed, the hunt tries its name as a web address (hillsideroofing.co.uk,
+                .com…) and searches for it, and leaves it off if it turns out to have a
+                site. Free, but adds a few seconds per business.</span></label>
+          </div>
           ${!s.places_configured ? html`
             <p class="tip" style="margin-top:4px">
               Whether a business has a website is a question only Google can
@@ -745,7 +755,8 @@ export default async function huntView(root, _p, { refresh }) {
       if (el) {
         el.innerHTML = '';
         el.textContent = `Found ${next.active.found} of ${next.active.target} — `
-                       + `${next.active.companies_seen} companies looked at`;
+                       + `${next.active.companies_seen} companies looked at`
+                       + (next.active.doing ? ` · ${next.active.doing}…` : '');
       }
     }, 1500));
   }

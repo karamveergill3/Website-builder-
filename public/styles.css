@@ -342,20 +342,60 @@ kbd {
   border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px;
 }
 
-/* ---------- Replies pasted from WhatsApp ---------- */
+/* ---------- Sent via WhatsApp: replies pasted in ---------- */
 
 .paste-in { margin-bottom: 12px; }
+.paste-title { margin: 0 0 8px; font-size: .9rem; }
+.steps {
+  list-style: none; counter-reset: step; margin: 0 0 10px; padding: 0;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;
+}
+.steps li {
+  counter-increment: step; position: relative; padding: 8px 10px 8px 38px;
+  background: var(--sunk); border-radius: var(--r-sm); font-size: .8rem; line-height: 1.45; color: var(--ink-2);
+}
+.steps li::before {
+  content: counter(step); position: absolute; left: 10px; top: 8px;
+  width: 20px; height: 20px; border-radius: 50%; background: var(--green-deep); color: #f7f6ef;
+  font-size: .72rem; font-weight: 700; display: grid; place-items: center;
+}
+.steps b { color: var(--ink); }
 .paste-in textarea { min-height: 44px; }
-.c-name .said { display: block; margin-top: 2px; color: var(--ink-2); font-style: italic; }
+.c-name .said { display: block; margin-top: 3px; font-size: .78rem; color: var(--ink-2); }
 blockquote.quote {
   padding: 8px 10px; background: var(--sunk); border-left: 3px solid var(--rule);
   border-radius: 3px; font-size: .82rem; color: var(--ink-2);
 }
 
+/* A select that is only as wide as what it says, so it never spills into the next column. */
+select.fit { width: auto; max-width: 150px; }
+/* The status select is the status: coloured like the pill it replaces. */
+.st-select { font-weight: 700; font-size: .7rem; letter-spacing: .03em; text-transform: uppercase; }
+.st-select[data-s="new"]     { background: var(--st-new-bg);     color: var(--st-new-fg); }
+.st-select[data-s="sent"]    { background: var(--st-sent-bg);    color: var(--st-sent-fg); }
+.st-select[data-s="replied"] { background: var(--st-replied-bg); color: var(--st-replied-fg); }
+.st-select[data-s="won"]     { background: var(--st-won-bg);     color: var(--st-won-fg); }
+.st-select[data-s="lost"]    { background: var(--st-lost-bg);    color: var(--st-lost-fg); }
+.st-select option { background: var(--raised); color: var(--ink); text-transform: none; font-weight: 400; }
+
+/* The ⋯ menu: the actions a row needs now and then. */
+.more { position: relative; display: inline-block; vertical-align: middle; margin-left: 4px; }
+.more > summary { list-style: none; cursor: pointer; padding: 2px 8px; }
+.more > summary::-webkit-details-marker { display: none; }
+.more-menu {
+  position: fixed; z-index: 30; min-width: 170px;
+  display: flex; flex-direction: column; gap: 2px; padding: 5px;
+  background: var(--raised); border: 1px solid var(--rule); border-radius: var(--r-sm); box-shadow: var(--shadow-pop);
+}
+.more-menu button { text-align: left; border-color: transparent; background: transparent; }
+.more-menu button:hover { background: var(--green-lift); }
+.more-menu button.danger { color: var(--clay); }
+
 /* ---------- Small screens ---------- */
 
 @media (max-width: 760px) {
   main { padding: 14px 12px 70px; }
+  .steps { grid-template-columns: 1fr; }
   .masthead-inner { padding: 0 12px; }
   .readout { flex-wrap: wrap; }
   .readout div { flex: 1 0 40%; }

@@ -10,13 +10,19 @@
  */
 import { api } from '../api.js';
 import {
-  html, mount, on, $, confirmDialog, toast, statusPill, relative, viewKeys, modal,
+  html, mount, on, $, confirmDialog, toast, relative, viewKeys, modal,
 } from '../dom.js';
 import { openLeadForm } from './leads.js';
 
 /** What can happen after a WhatsApp goes out. */
 const AFTER = ['sent', 'replied', 'won', 'lost'];
 const label = (s) => (s === 'sent' ? 'awaiting reply' : s);
+
+/** "+447700900123" as a UK reader writes it: "07700 900123". */
+const ukNumber = (v) => {
+  const d = String(v ?? '').replace(/\D/g, '');
+  return /^44\d{10}$/.test(d) ? `0${d.slice(2, 6)} ${d.slice(6)}` : v;
+};
 
 /** The chat to open: the number the WhatsApp actually went to. */
 const chatLink = (l) => {
@@ -70,13 +76,18 @@ export default async function whatsappView(root, params, { refresh }) {
 
     <div class="panel paste-in">
       <div class="panel-bd">
-        <div class="f" style="margin:0">
-          <label for="wa-paste"><b>Got a reply?</b> In WhatsApp, select their messages and press
-            <kbd>Ctrl</kbd>+<kbd>C</kbd>, then press <kbd>Ctrl</kbd>+<kbd>V</kbd> anywhere on this screen.</label>
-          <textarea id="wa-paste" rows="2" autocomplete="off"
-            placeholder="Or paste them here. It finds whose reply it is from their number and writes your answer."></textarea>
-          <p class="tip">Nothing is sent: you get the answer to copy back into WhatsApp.</p>
-        </div>
+        <h3 class="paste-title">Got a reply on WhatsApp? Get your answer in three steps</h3>
+        <ol class="steps">
+          <li><b>Copy their messages.</b> In WhatsApp on your computer, drag over their
+            messages to select them, then press <kbd>Ctrl</kbd>+<kbd>C</kbd>.</li>
+          <li><b>Paste here.</b> Come back to this screen and press <kbd>Ctrl</kbd>+<kbd>V</kbd>
+            (or paste into the box below). It works out which business it is from their number.</li>
+          <li><b>Send your answer.</b> Your reply pops up already written. Press <b>Copy</b>,
+            paste it into their WhatsApp chat and send it yourself.</li>
+        </ol>
+        <textarea id="wa-paste" rows="2" autocomplete="off" aria-label="Paste their WhatsApp messages"
+          placeholder="Paste their WhatsApp messages here"></textarea>
+        <p class="tip">Nothing is ever sent from here. If it can't tell whose reply it is, it asks you.</p>
       </div>
     </div>
 
@@ -111,62 +122,62 @@ export default async function whatsappView(root, params, { refresh }) {
             confirm it went, the lead moves over here.`}
         </div>` : html`
         <div class="scroll-x">
-        <table class="rows">
+        <table class="rows wa-rows">
           <thead><tr>
-            <th>Business</th><th>Phone</th><th>Trade</th>${isTeam ? html`<th>Owner</th>` : ''}<th>Status</th><th class="nw">Sent</th><th></th>
+            <th>Business</th><th>Their WhatsApp</th>${isTeam ? html`<th>Owner</th>` : ''}<th>Status</th><th class="nw">Messaged</th><th></th>
           </tr></thead>
           <tbody>
             ${leads.map((l) => {
               const chat = chatLink(l);
+              const statuses = AFTER.includes(l.status) ? AFTER : [l.status, ...AFTER];
               return html`
               <tr data-id="${l.id}">
                 <td class="c-name">
                   <span class="name">${l.business_name}</span>
-                  <span class="meta">
-                    ${l.location ?? '—'}${l.company_number ? html` · <span class="mono">${l.company_number}</span>` : ''}
-                  </span>
+                  <span class="meta">${[l.category, l.location].filter(Boolean).join(' · ') || '—'}</span>
                   ${l.last_reply ? html`
-                    <span class="meta said" title="${l.last_reply}">“${l.last_reply.length > 90
-                      ? `${l.last_reply.slice(0, 90)}…` : l.last_reply}” · ${relative(l.last_reply_at)}</span>` : ''}
+                    <span class="said" title="${l.last_reply}">They said: “${l.last_reply.length > 90
+                      ? `${l.last_reply.slice(0, 90)}…` : l.last_reply}” <span class="meta">${relative(l.last_reply_at)}</span></span>` : ''}
                 </td>
-                <td>
-                  <span class="meta mono" style="display:block">${l.whatsapp_to ?? l.phone ?? '—'}</span>
+                <td class="nw">
+                  <span class="meta mono" style="display:block">${ukNumber(l.whatsapp_to ?? l.phone) ?? '—'}</span>
                   ${chat ? html`<a href="${chat}" target="_blank" rel="noopener"
-                       title="Open the chat to see if they've replied">Open chat ↗</a>` : ''}
+                       title="Open your chat with them in WhatsApp">Open chat ↗</a>` : ''}
                   ${l.next_call_at ? html`<span class="flag" style="display:inline-block;margin-top:2px"
                        title="Call-back arranged">call back ${relative(l.next_call_at)}</span>` : ''}
                 </td>
-                <td class="meta">${l.category ?? '—'}</td>
-                ${isTeam ? html`<td class="nw">
-                  <select class="mini" data-act="owner" data-id="${l.id}" aria-label="Owner" style="max-width:130px">
+                ${isTeam ? html`<td>
+                  <select class="mini fit" data-act="owner" data-id="${l.id}" aria-label="Owner">
                     <option value="none" ${l.assigned_to == null ? 'selected' : ''}>Unassigned</option>
                     ${roster.filter((u) => u.active || u.id === l.assigned_to).map((u) => html`
                       <option value="${u.id}" ${u.id === l.assigned_to ? 'selected' : ''}>${
                         me && u.id === me.id ? 'Me' : (nameOf(u.id) ?? u.name)}</option>`)}
                   </select></td>` : ''}
-                <td class="nw">
-                  ${statusPill(l.status)}
-                  <select class="mini" data-act="status" data-id="${l.id}" aria-label="Change status"
-                          style="max-width:120px;margin-left:6px">
-                    <option value="">Mark as…</option>
-                    ${AFTER.filter((s) => s !== l.status).map((s) => html`
-                      <option value="${s}">${label(s)}</option>`)}
+                <td>
+                  <select class="mini fit st-select" data-act="status" data-id="${l.id}" data-s="${l.status}"
+                          data-was="${l.status}" aria-label="Status" title="Change their status">
+                    ${statuses.map((s) => html`
+                      <option value="${s}" ${s === l.status ? 'selected' : ''}>${label(s)}</option>`)}
                   </select>
                 </td>
                 <td class="meta nw">${l.whatsapp_sent_at ? relative(l.whatsapp_sent_at) : '—'}</td>
                 <td class="c-act">
                   ${l.last_reply_id ? html`
                     <button class="mini primary" data-act="draft" data-reply="${l.last_reply_id}"
-                      title="Their last message, with your answer written">Draft reply</button>` : ''}
-                  <button class="mini${l.last_reply_id ? '' : ' primary'}" data-act="paste" data-id="${l.id}" data-name="${l.business_name}"
-                    title="They replied on WhatsApp: paste it in and it is read into a brief">Paste reply</button>
-                  <button class="mini" data-act="reach" data-id="${l.id}"
-                    title="Follow up, call, arrange a call-back or find contact details">Reach</button>
-                  <button class="mini" data-act="edit" data-id="${l.id}">Edit</button>
-                  <button class="mini ghost" data-act="unsend" data-id="${l.id}" data-name="${l.business_name}"
-                    title="The WhatsApp never actually went: put this lead back on Leads">Not sent</button>
-                  <button class="mini danger" data-act="del" data-id="${l.id}"
-                          data-name="${l.business_name}" aria-label="Delete">✕</button>
+                      title="Their last message, with your answer written">Answer them</button>` : html`
+                    <button class="mini primary" data-act="paste" data-id="${l.id}" data-name="${l.business_name}"
+                      title="They replied: paste what they sent and your answer is written">Paste their reply</button>`}
+                  <details class="more">
+                    <summary class="btn mini" aria-label="More for ${l.business_name}" title="More">⋯</summary>
+                    <div class="more-menu">
+                      ${l.last_reply_id ? html`
+                        <button type="button" class="mini" data-act="paste" data-id="${l.id}" data-name="${l.business_name}">Paste another reply</button>` : ''}
+                      <button type="button" class="mini" data-act="reach" data-id="${l.id}">Follow up or call</button>
+                      <button type="button" class="mini" data-act="edit" data-id="${l.id}">Edit details</button>
+                      <button type="button" class="mini" data-act="unsend" data-id="${l.id}" data-name="${l.business_name}">It never sent</button>
+                      <button type="button" class="mini danger" data-act="del" data-id="${l.id}" data-name="${l.business_name}">Delete</button>
+                    </div>
+                  </details>
                 </td>
               </tr>`;
             })}
@@ -199,16 +210,53 @@ export default async function whatsappView(root, params, { refresh }) {
   }
 
   on(root, 'change', '[data-act="status"]', async (_e, el) => {
-    if (!el.value) return;
+    if (!el.value || el.value === el.dataset.was) return;
     try {
       await api.leads.update(el.dataset.id, { status: el.value });
       toast(`Marked ${label(el.value)}`);
       refresh();
     } catch (err) {
       toast(err.message ?? 'Could not change it', { error: true });
-      el.value = '';
+      el.value = el.dataset.was;
     }
   });
+
+  // The ⋯ menu: one open at a time, and it closes once something in it is picked.
+  on(root, 'click', '.more-menu button', (_e, el) => el.closest('details')?.removeAttribute('open'));
+  // Placed against the window, not the table, so the bottom rows' menus are
+  // not cut off by the table's scroll box; upwards when there's no room below.
+  const place = (open) => {
+    const menu = open.querySelector('.more-menu');
+    const at = open.querySelector('summary').getBoundingClientRect();
+    menu.style.right = `${Math.max(8, window.innerWidth - at.right)}px`;
+    const below = at.bottom + 4;
+    menu.style.top = below + menu.offsetHeight > window.innerHeight - 8
+      ? `${Math.max(8, at.top - 4 - menu.offsetHeight)}px` : `${below}px`;
+  };
+  root.addEventListener('toggle', (ev) => {
+    const open = ev.target;
+    if (!open.matches?.('details.more') || !open.open) return;
+    for (const d of root.querySelectorAll('details.more[open]')) if (d !== open) d.removeAttribute('open');
+    place(open);
+  }, true);
+  const closeMenus = (ev) => {
+    if (!root.isConnected) {
+      document.removeEventListener('click', closeMenus);
+      window.removeEventListener('scroll', followMenus, true);
+      window.removeEventListener('resize', followMenus);
+      return;
+    }
+    if (ev.target instanceof Element && ev.target.closest('details.more')) return;
+    for (const d of root.querySelectorAll('details.more[open]')) d.removeAttribute('open');
+  };
+  // An open menu stays with its button while the page scrolls.
+  const followMenus = () => {
+    if (!root.isConnected) return;
+    for (const d of root.querySelectorAll('details.more[open]')) place(d);
+  };
+  document.addEventListener('click', closeMenus);
+  window.addEventListener('scroll', followMenus, true);
+  window.addEventListener('resize', followMenus);
 
   on(root, 'change', '[data-act="owner"]', async (_e, el) => {
     const userId = el.value === 'none' ? null : Number(el.value);

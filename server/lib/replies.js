@@ -283,18 +283,30 @@ export function markRead(replyId) {
 export async function recordManualReply({ leadId, body, channel = 'manual', subject = null }) {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
   if (!lead) throw new Error(`No lead ${leadId}`);
+  const replyId = insertReply({ leadId, body, channel, subject });
+  const brief = await extractBriefFor(replyId, lead);
+  return { replyId, brief };
+}
 
+/**
+ * The filing half of that, with no brief: synchronous, so a caller can do it
+ * inside a transaction. `receivedAt` is when they sent it, when that is known;
+ * `threadId` is, for WhatsApp, the number it came from (so the answer goes
+ * back to the same chat). `from_address` stays the lead's email either way,
+ * because the Replies screen offers it as the address to answer by email.
+ */
+export function insertReply({
+  leadId, body, channel = 'manual', subject = null, receivedAt = null, threadId = null,
+}) {
+  const lead = db.prepare('SELECT email FROM leads WHERE id = ?').get(leadId);
+  if (!lead) throw new Error(`No lead ${leadId}`);
   const info = db.prepare(
-    `INSERT INTO replies (lead_id, channel, from_address, subject, body, received_at, fetched_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(leadId, channel, lead.email ?? null, subject, body, nowIso(), nowIso());
-
-  const replyId = Number(info.lastInsertRowid);
+    `INSERT INTO replies (lead_id, channel, thread_id, from_address, subject, body, received_at, fetched_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(leadId, channel, threadId, lead.email ?? null, subject, body, receivedAt ?? nowIso(), nowIso());
   db.prepare(
     `UPDATE leads SET status = CASE WHEN status IN ('new','sent') THEN 'replied' ELSE status END
       WHERE id = ?`
   ).run(leadId);
-
-  const brief = await extractBriefFor(replyId, lead);
-  return { replyId, brief };
+  return Number(info.lastInsertRowid);
 }

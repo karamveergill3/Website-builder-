@@ -1703,6 +1703,22 @@ Thanks so much, and have a lovely day.
       }
     },
   },
+  {
+    name: '059_whatsapp_paste_seen',
+    up: `
+      -- Each WhatsApp message a rep has pasted in, by fingerprint (the lead,
+      -- the minute it was sent, what it said), so pasting the same messages
+      -- again, or a longer stretch of the chat that takes them in, files
+      -- only what is new.
+      CREATE TABLE wa_paste_seen (
+        fingerprint TEXT PRIMARY KEY,
+        lead_id     INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+        reply_id    INTEGER NOT NULL REFERENCES replies(id) ON DELETE CASCADE,
+        seen_at     TEXT NOT NULL
+      );
+      CREATE INDEX idx_wa_paste_seen_reply ON wa_paste_seen(reply_id);
+    `,
+  },
 ];
 
 function migrate() {

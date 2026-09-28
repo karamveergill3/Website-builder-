@@ -50,6 +50,12 @@ const lastWhatsApp = (id) => db.prepare(
     ORDER BY confirmed_sent_at DESC LIMIT 1`
 ).get(id) ?? null;
 
+/** Their latest reply, however it came in, for the screens that answer it. */
+const lastReply = (id) => db.prepare(
+  `SELECT id, received_at AS at, body FROM replies WHERE lead_id = ?
+    ORDER BY received_at DESC, id DESC LIMIT 1`
+).get(id) ?? null;
+
 /**
  * Shape a DB row for the client: SQLite has no booleans, and every lead
  * carries the verdict on whether it may lawfully be emailed.
@@ -88,6 +94,15 @@ function toApi(row) {
     ...(() => {
       const wa = lastWhatsApp(row.id);
       return { whatsapp_sent_at: wa?.at ?? null, whatsapp_to: wa?.recipient ?? null };
+    })(),
+    // What they said last, so it can be answered from the list.
+    ...(() => {
+      const r = lastReply(row.id);
+      return {
+        last_reply_id: r?.id ?? null,
+        last_reply_at: r?.at ?? null,
+        last_reply: r ? String(r.body).replace(/\s+/g, ' ').trim().slice(0, 160) : null,
+      };
     })(),
   };
 }

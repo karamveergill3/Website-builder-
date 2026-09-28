@@ -2,10 +2,11 @@
  *
  * They move here from Leads the moment a send is confirmed in the Reach
  * dialog, so Leads stays a list of people still to approach. This is where
- * the follow-up happens: open the chat to see if they've replied, mark them
- * replied, won or lost, and open Reach for anything after that (a follow-up,
- * a call, a call-back). Changing the status keeps them here; the screen is
- * about how they were reached, not how it went.
+ * the follow-up happens: paste in what they sent back (copied from WhatsApp,
+ * it finds its own lead) and get the answer drafted, mark them replied, won
+ * or lost, and open Reach for anything after that (a follow-up, a call, a
+ * call-back). Changing the status keeps them here; the screen is about how
+ * they were reached, not how it went.
  */
 import { api } from '../api.js';
 import {
@@ -67,6 +68,18 @@ export default async function whatsappView(root, params, { refresh }) {
       <div><b class="num">${stats.lost}</b><span>Lost</span></div>
     </div>
 
+    <div class="panel paste-in">
+      <div class="panel-bd">
+        <div class="f" style="margin:0">
+          <label for="wa-paste"><b>Got a reply?</b> In WhatsApp, select their messages and press
+            <kbd>Ctrl</kbd>+<kbd>C</kbd>, then press <kbd>Ctrl</kbd>+<kbd>V</kbd> anywhere on this screen.</label>
+          <textarea id="wa-paste" rows="2" autocomplete="off"
+            placeholder="Or paste them here. It finds whose reply it is from their number and writes your answer."></textarea>
+          <p class="tip">Nothing is sent: you get the answer to copy back into WhatsApp.</p>
+        </div>
+      </div>
+    </div>
+
     <div class="bar">
       <div class="pills">
         <button class="pill" data-filter="all" aria-pressed="${status === 'all'}">All <b>${stats.total}</b></button>
@@ -112,6 +125,9 @@ export default async function whatsappView(root, params, { refresh }) {
                   <span class="meta">
                     ${l.location ?? '—'}${l.company_number ? html` · <span class="mono">${l.company_number}</span>` : ''}
                   </span>
+                  ${l.last_reply ? html`
+                    <span class="meta said" title="${l.last_reply}">“${l.last_reply.length > 90
+                      ? `${l.last_reply.slice(0, 90)}…` : l.last_reply}” · ${relative(l.last_reply_at)}</span>` : ''}
                 </td>
                 <td>
                   <span class="meta mono" style="display:block">${l.whatsapp_to ?? l.phone ?? '—'}</span>
@@ -139,7 +155,10 @@ export default async function whatsappView(root, params, { refresh }) {
                 </td>
                 <td class="meta nw">${l.whatsapp_sent_at ? relative(l.whatsapp_sent_at) : '—'}</td>
                 <td class="c-act">
-                  <button class="mini primary" data-act="paste" data-id="${l.id}" data-name="${l.business_name}"
+                  ${l.last_reply_id ? html`
+                    <button class="mini primary" data-act="draft" data-reply="${l.last_reply_id}"
+                      title="Their last message, with your answer written">Draft reply</button>` : ''}
+                  <button class="mini${l.last_reply_id ? '' : ' primary'}" data-act="paste" data-id="${l.id}" data-name="${l.business_name}"
                     title="They replied on WhatsApp: paste it in and it is read into a brief">Paste reply</button>
                   <button class="mini" data-act="reach" data-id="${l.id}"
                     title="Follow up, call, arrange a call-back or find contact details">Reach</button>
@@ -217,28 +236,93 @@ export default async function whatsappView(root, params, { refresh }) {
           <label for="wr-body">Paste what they sent</label>
           <textarea id="wr-body" name="body" rows="9" required
             placeholder="1. Barlows Window Cleaning&#10;2. Ring us&#10;3. Stoke and Newcastle&#10;4. No logo, got photos&#10;5. Blue"></textarea>
-          <p class="tip">Copy it from WhatsApp (press and hold the message, then Copy; or
-            select it on WhatsApp Desktop). Several messages can go in together. Your
-            reply back is written for you next, ready to send.</p>
+          <p class="tip">Copy it from WhatsApp (select their messages on WhatsApp Desktop and
+            press Ctrl+C, or press and hold one on the phone, then Copy). Several messages can
+            go in together, and anything pasted before is not filed twice. Your answer is
+            written for you next, to copy back into WhatsApp.</p>
         </div>`,
       footer: html`
         <button type="button" data-close>Cancel</button>
         <button type="submit" class="primary">Save and read it</button>`,
       onSubmit: async (form) => {
         if (!form.body?.trim()) throw new Error('Paste what they sent');
-        return api.post('/api/replies/manual', {
-          lead_id: Number(el.dataset.id), channel: 'whatsapp', body: form.body, origin: location.origin,
+        return api.post('/api/replies/whatsapp-paste', {
+          lead_id: Number(el.dataset.id), text: form.body, origin: location.origin,
         });
       },
     });
     if (!saved) return;
-    // Straight on to the answer: read, drafted, one tap from sent.
+    await answer(saved);
+  });
+
+  on(root, 'click', '[data-act="draft"]', async (_e, el) => {
+    try {
+      const { fetchDraft, showReplyDraft } = await import('./reply-draft.js');
+      if (await showReplyDraft(await fetchDraft(el.dataset.reply))) refresh();
+    } catch (err) {
+      toast(err.message ?? 'Could not draft it', { error: true });
+    }
+  });
+
+  /** Straight on to the answer: read, drafted, ready to copy back. */
+  async function answer(saved) {
+    if (saved.already) toast(`Already filed for ${saved.lead.business_name}: here is the answer again`);
+    else if (saved.lead) toast(`Filed for ${saved.lead.business_name}`);
     if (saved.draft) {
       const { showReplyDraft } = await import('./reply-draft.js');
       await showReplyDraft(saved.draft);
     }
     refresh();
+  }
+
+  /**
+   * Messages copied out of WhatsApp, pasted anywhere on this screen. Their
+   * number finds the lead; when it can't (a saved contact, a single message
+   * with no header, a number on no lead) the rep picks, and the number is
+   * remembered for next time.
+   */
+  // One paste read at a time, so a double Ctrl+V does not open two answers.
+  let reading = false;
+  const done = () => { reading = false; };
+  async function readPaste(text, leadId = null) {
+    if (!text?.trim() || reading) return;
+    reading = true;
+    let res;
+    try {
+      res = await api.post('/api/replies/whatsapp-paste', {
+        text, lead_id: leadId ?? undefined, origin: location.origin,
+      });
+    } catch (err) {
+      toast(err.message ?? 'Could not read that', { error: true });
+      return;
+    } finally {
+      done();
+    }
+    if (res.need_lead) {
+      const picked = await pickLead(res);
+      if (picked) await readPaste(text, picked);
+      return;
+    }
+    await answer(res);
+  }
+
+  const box = $('#wa-paste', root);
+  box?.addEventListener('paste', () => setTimeout(() => readPaste(box.value), 0));
+  box?.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); readPaste(box.value); }
   });
+
+  const onPaste = (ev) => {
+    if (!root.isConnected) return document.removeEventListener('paste', onPaste);
+    const t = ev.target;
+    if (t instanceof HTMLElement && t.closest('input, textarea, select, [contenteditable]')) return;
+    if (document.querySelector('.veil')) return;   // a dialog is open
+    const text = ev.clipboardData?.getData('text/plain');
+    if (!text?.trim()) return;
+    ev.preventDefault();
+    readPaste(text);
+  };
+  document.addEventListener('paste', onPaste);
 
   on(root, 'click', '[data-act="reach"]', async (_e, el) => {
     const { openReachDialog } = await import('./reach.js');
@@ -285,3 +369,58 @@ export default async function whatsappView(root, params, { refresh }) {
 
 /** Caret position to restore after a search-triggered re-render. */
 let pendingCaret = null;
+
+const WHY = {
+  'no-header': 'That paste doesn’t say who sent it (a single copied message never does). Whose reply is it?',
+  'unknown-number': 'No lead has that number on it yet. Whose reply is it? The number is remembered for next time.',
+  name: 'They’re saved in the phone under a name, so there’s no number to go on. Whose reply is it?',
+  several: 'That number is on more than one lead. Which one is it?',
+};
+
+/** "Whose reply is this?" Resolves to a lead id, or null if cancelled. */
+async function pickLead(res) {
+  const option = (c, i) => html`
+    <label class="pick-row" style="display:flex;gap:8px;align-items:baseline;padding:4px 0">
+      <input type="radio" name="lead_id" value="${c.id}" ${i === 0 ? 'checked' : ''}>
+      <span><b>${c.business_name}</b>
+        <span class="meta">${c.location ?? ''}${c.whatsapp_sent_at ? ` · messaged ${relative(c.whatsapp_sent_at)}` : ''}${
+          c.status ? ` · ${label(c.status)}` : ''}${c.fit ? ` · name fits ${c.fit}%` : ''}</span></span>
+    </label>`;
+  return modal({
+    title: 'Whose reply is this?',
+    wide: true,
+    body: html`
+      <p style="margin:0 0 8px">${WHY[res.reason] ?? WHY['no-header']}</p>
+      ${res.sender?.phone || res.sender?.name ? html`
+        <p class="meta" style="margin:0 0 8px">From <b class="mono">${res.sender.phone ?? res.sender.name}</b></p>` : ''}
+      ${res.preview ? html`<blockquote class="quote" style="white-space:pre-wrap;max-height:120px;overflow:auto;margin:0 0 10px">${res.preview}</blockquote>` : ''}
+      <div class="f">
+        <label for="pick-q">Find a lead</label>
+        <input type="search" id="pick-q" placeholder="Business name, town or phone" autocomplete="off">
+      </div>
+      <div data-picks>${(res.candidates ?? []).map(option)}</div>`,
+    footer: html`
+      <button type="button" data-close>Cancel</button>
+      <button type="submit" class="primary">File it for them</button>`,
+    onMount: (dlg) => {
+      const list = dlg.querySelector('[data-picks]');
+      const q = dlg.querySelector('#pick-q');
+      let t;
+      q?.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(async () => {
+          const term = q.value.trim();
+          const rows = term
+            ? (await api.leads.list({ q: term, limit: 12 }).catch(() => ({ leads: [] }))).leads
+            : res.candidates ?? [];
+          mount(list, html`${rows.length ? rows.map(option) : html`<p class="meta">No lead matches.</p>`}`);
+        }, 250);
+      });
+    },
+    onSubmit: async (form) => {
+      const id = Number(form.lead_id);
+      if (!id) throw new Error('Pick whose reply it is');
+      return id;
+    },
+  });
+}

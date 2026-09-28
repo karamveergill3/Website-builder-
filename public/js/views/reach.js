@@ -120,6 +120,7 @@ async function fillFrom(state, id) {
     state.text = r.body;
     state.rendered = r.body;
     state.empty = r.empty ?? [];
+    state.sender = r.sender ?? null;
   } catch (err) {
     toast(err.message ?? 'Could not fill that template in', { error: true, ms: 5000 });
   }
@@ -407,8 +408,10 @@ function messagePanel(state) {
       <div class="panel-bd">
         <p class="tip" style="margin-top:0">
           Written for <b>${lead.business_name}</b>${lead.location ? ` in ${lead.location}` : ''}${
-            lead.category ? ` · ${lead.category}` : ''} — the name, town and trade
-          are filled in from the lead, and your own details from Settings.
+            lead.category ? ` · ${lead.category}` : ''}. The name, town and trade
+          come from the lead${state.sender?.owns_lead && state.sender.name
+            ? html`, and it is signed by <b>${state.sender.name}</b>, who owns this lead`
+            : ', and your own details from Settings'}.
         </p>
         ${state.empty?.length ? html`
           <div class="msg msg-warn" style="margin-bottom:10px"><div class="grow">

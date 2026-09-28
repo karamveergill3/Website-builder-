@@ -18,6 +18,7 @@ import { isSuppressed } from '../lib/suppression.js';
 import { discover, signalsForLead, promoteSignal, recentFinds, autoPromote } from '../lib/contact-finder.js';
 import { handoff } from '../lib/handoff.js';
 import { renderTemplate } from '../lib/template.js';
+import { leadVoice } from '../lib/auth.js';
 
 const router = Router();
 
@@ -234,7 +235,7 @@ router.post('/outreach/prepare', wrap((req, res) => {
           `Template "${tpl.name}" is for ${tpl.channel}, not ${channel}.`
         );
       }
-      const r = renderTemplate(tpl, lead, undefined, req.user);
+      const r = renderTemplate(tpl, lead, undefined, leadVoice(lead, req.user));
       text = r.body;
       subject = r.subject;
     } else {

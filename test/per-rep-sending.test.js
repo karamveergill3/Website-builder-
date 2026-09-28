@@ -10,8 +10,9 @@
  * The rules these tests pin down:
  *
  *   - the address is stored per user, validated, and clearable
- *   - a message goes out as whoever QUEUED it, read at send time, so a queue
- *     row that waits overnight is still theirs
+ *   - a message goes out as the rep who OWNS the lead, whoever queues or
+ *     sends it; an unowned lead goes out as whoever queued it. Decided when
+ *     it is staged, so a queue row that waits overnight is still theirs
  *   - a rep with no address of their own falls back to the shared identity —
  *     name AND address together, never a mix, because "Cailan <karam@...>"
  *     reads as spoofing
@@ -60,13 +61,15 @@ async function call(method, path, { body, cookie } = {}) {
 }
 
 let seedN = 0;
-const seed = async (name) => (await post('/api/leads', {
+/** A lead, owned by `owner` (a user id, or null for nobody). */
+const seed = async (name, owner) => (await post('/api/leads', {
   business_name: name,
   email: `perrep${++seedN}@example.co.uk`,
   entity_type: 'corporate',
   company_number: nextCompanyNumber(),
   category: 'roofers',
   location: 'Leeds',
+  ...(owner === undefined ? {} : { assigned_to: owner }),
 })).body.lead;
 
 /** Wait for the background send loop to finish. */
@@ -94,6 +97,7 @@ async function sendOneAs(cookie, leadId) {
 
 let templateId;
 let repCookie;
+let repId;
 
 test('setup: identity, a template, and a rep with their own address', async () => {
   await put('/api/settings', {
@@ -112,6 +116,7 @@ test('setup: identity, a template, and a rep with their own address', async () =
   });
   assert.equal(created.status, 201, JSON.stringify(created.body));
   assert.equal(created.body.user.work_email, 'cailan@test.example');
+  repId = created.body.user.id;
 
   const login = await call('POST', '/api/auth/login',
     { body: { email: 'cailan@personal.example', password: 'rep-pass-123' } });
@@ -148,7 +153,7 @@ test('a rep can set their own sending address without an admin', async () => {
 /* -------------------------------------------------------------- the send */
 
 test('a rep’s email goes out from their own mailbox, and replies come back to it', async () => {
-  const lead = await seed('Rep Sends Ltd');
+  const lead = await seed('Rep Sends Ltd', repId);
   const sent = await sendOneAs(repCookie, lead.id);
 
   assert.equal(sent.from, 'Cailan Test <cailan@test.example>');
@@ -157,7 +162,7 @@ test('a rep’s email goes out from their own mailbox, and replies come back to 
 });
 
 test('the body names the same mailbox as the From header', async () => {
-  const lead = await seed('Token Match Ltd');
+  const lead = await seed('Token Match Ltd', repId);
   const sent = await sendOneAs(repCookie, lead.id);
 
   assert.match(sent.text, /Reply to cailan@test\.example\./,
@@ -186,7 +191,7 @@ test('the shared fallback takes the shared name too, never a mixed pair', async 
   const me = await call('GET', '/api/auth/me', { cookie: repCookie });
   assert.equal(me.body.user.work_email, '', 'blank clears it');
 
-  const lead = await seed('Mixed Pair Ltd');
+  const lead = await seed('Mixed Pair Ltd', repId);
   const sent = await sendOneAs(repCookie, lead.id);
 
   assert.equal(sent.from, 'Test Web Studio <sender@test.example>');
@@ -197,7 +202,7 @@ test('the queue says who each message will come from before it is sent', async (
   await call('PATCH', '/api/auth/me',
     { cookie: repCookie, body: { work_email: 'cailan@test.example' } });
 
-  const mine = await seed('Shown In Outbox Ltd');
+  const mine = await seed('Shown In Outbox Ltd', repId);
   await call('POST', '/api/gmail/queue',
     { cookie: repCookie, body: { template_id: templateId, lead_ids: [mine.id] } });
 
@@ -208,10 +213,10 @@ test('the queue says who each message will come from before it is sent', async (
   await post('/api/gmail/queue/clear');
 });
 
-test('the sender is whoever queued it, not whoever pressed send', async () => {
+test('the sender is the lead’s owner, not whoever pressed send', async () => {
   // A rep stages their leads; the admin presses Send (an end-of-day sweep, or
   // the queue sat overnight). The message is still the rep's.
-  const lead = await seed('Queued By Rep Ltd');
+  const lead = await seed('Queued By Rep Ltd', repId);
   sends = [];
   await call('POST', '/api/gmail/queue',
     { cookie: repCookie, body: { template_id: templateId, lead_ids: [lead.id] } });
@@ -228,7 +233,7 @@ test('changing a sending address cannot split a staged message in two', async ()
   // resolved later instead, this sequence produced headers naming the new
   // mailbox and a body still saying "reply to" the old one — the message
   // contradicting itself, which is exactly what a spam filter reads as forgery.
-  const lead = await seed('Stale Sender Ltd');
+  const lead = await seed('Stale Sender Ltd', repId);
 
   // Staged while they still had no address of their own.
   await call('PATCH', '/api/auth/me', { cookie: repCookie, body: { work_email: '' } });
@@ -251,6 +256,76 @@ test('changing a sending address cannot split a staged message in two', async ()
 
   // And it is the one the message was composed with, not the later one.
   assert.equal(sends[0].from, 'Test Web Studio <sender@test.example>');
+});
+
+/* ----------------------------------------------------- the lead's owner */
+
+test('a lead owned by a rep is written as that rep, even when someone else queues it', async () => {
+  // Karam opens Javier's lead and sends it. The prospect should still hear
+  // from Javier, who is the one that will pick up the reply.
+  await call('PATCH', '/api/auth/me',
+    { cookie: repCookie, body: { work_email: 'cailan@test.example' } });
+  const lead = await seed('Owned By Rep Ltd', repId);
+  sends = [];
+  await post('/api/gmail/queue', { template_id: templateId, lead_ids: [lead.id] });
+  await post('/api/gmail/send', { confirm: true, expected_count: 1 });
+  await waitForSend();
+
+  assert.equal(sends.length, 1);
+  assert.equal(sends[0].from, 'Cailan Test <cailan@test.example>');
+  assert.match(sends[0].text, /Reply to cailan@test\.example\./);
+});
+
+test('an unowned lead is written as whoever queues it', async () => {
+  const lead = await seed('Nobody Owns Ltd', null);
+  assert.equal(lead.assigned_to, null);
+  const sent = await sendOneAs(repCookie, lead.id);
+  assert.equal(sent.from, 'Cailan Test <cailan@test.example>');
+});
+
+test('a lead owned by the admin is not sent as a rep who queues it', async () => {
+  // The admin in the fixture has no address of their own, so their leads go
+  // out under the shared identity even when Cailan presses the button.
+  const lead = await seed('Admin Owns Ltd');
+  const sent = await sendOneAs(repCookie, lead.id);
+  assert.equal(sent.from, 'Test Web Studio <sender@test.example>');
+});
+
+test('the message box is signed by the lead’s owner', async () => {
+  const wa = (await post('/api/templates', {
+    name: 'Owner voice', channel: 'whatsapp', subject: '',
+    body: 'Hi, my name is {{my_name}}. Thanks, {{my_name}}',
+  })).body.template;
+  const lead = await seed('Signed By Owner Ltd', repId);
+
+  // Rendered for the admin, who is signed in, but the lead is Cailan's.
+  const r = (await get(`/api/templates/${wa.id}/render?lead_id=${lead.id}`)).body;
+  assert.equal(r.body, 'Hi, my name is Cailan Test. Thanks, Cailan Test');
+  assert.equal(r.sender.name, 'Cailan Test');
+  assert.equal(r.sender.owns_lead, true);
+
+  // Nobody owns it: whoever is looking at it signs it.
+  const loose = await seed('Signed By Viewer Ltd', null);
+  const r2 = (await call('GET', `/api/templates/${wa.id}/render?lead_id=${loose.id}`,
+    { cookie: repCookie })).body;
+  assert.equal(r2.body, 'Hi, my name is Cailan Test. Thanks, Cailan Test');
+  assert.equal(r2.sender.owns_lead, false);
+});
+
+test('a suspended owner hands the message back to whoever is sending', async () => {
+  const lead = await seed('Suspended Owner Ltd', repId);
+  const wa = (await get('/api/templates')).body.templates.find((t) => t.name === 'Owner voice');
+  const adminCookie = (await call('POST', '/api/auth/login', {
+    body: { email: 'admin@test.example', password: 'test-pass-123' },
+  })).cookie;
+  await call('PATCH', `/api/auth/users/${repId}`, { cookie: adminCookie, body: { active: false } });
+  try {
+    const r = (await get(`/api/templates/${wa.id}/render?lead_id=${lead.id}`)).body;
+    assert.equal(r.body, 'Hi, my name is Test Admin. Thanks, Test Admin');
+    assert.equal(r.sender.owns_lead, false);
+  } finally {
+    await call('PATCH', `/api/auth/users/${repId}`, { cookie: adminCookie, body: { active: true } });
+  }
 });
 
 test('an admin can set a rep’s sending address for them', async () => {

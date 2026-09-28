@@ -68,6 +68,19 @@ export function getUserById(id) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id) ?? null;
 }
 
+/**
+ * Who a message to this lead is written as: the rep who owns the lead.
+ *
+ * Leads are shared round the team, and the prospect should hear from the
+ * person who will pick up their reply, whoever happens to press the button.
+ * An unowned lead, or one whose owner has been suspended, is written as
+ * `fallback` (the signed-in user) instead.
+ */
+export function leadVoice(lead, fallback = null) {
+  const owner = lead?.assigned_to ? getUserById(lead.assigned_to) : null;
+  return owner?.active ? owner : fallback;
+}
+
 export function listUsers() {
   return db.prepare(
     `SELECT id, email, name, phone, work_email, role, active, created_at, last_login_at

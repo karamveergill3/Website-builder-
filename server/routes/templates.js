@@ -6,6 +6,7 @@ import {
   unknownPlaceholders, renderTemplate, emptyPlaceholders,
 } from '../lib/template.js';
 import { STARTERS, missingStarters } from '../lib/starters.js';
+import { leadVoice } from '../lib/auth.js';
 
 const router = Router();
 
@@ -88,7 +89,9 @@ router.get('/:id/render', wrap((req, res) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId);
   if (!lead) throw notFound('Lead not found');
 
-  const rendered = renderTemplate(t, lead, undefined, req.user);
+  // Signed by the rep who owns the lead, not whoever opened the dialog.
+  const voice = leadVoice(lead, req.user);
+  const rendered = renderTemplate(t, lead, undefined, voice);
   res.json({
     template: { id: t.id, name: t.name, channel: t.channel },
     lead: { id: lead.id, business_name: lead.business_name, location: lead.location },
@@ -96,7 +99,12 @@ router.get('/:id/render', wrap((req, res) => {
     body: rendered.body,
     // Tokens that rendered to nothing. "{{my_name}} from " with the name
     // missing reads as a bug in the message rather than a gap in Settings.
-    empty: emptyPlaceholders(t, lead, undefined, req.user),
+    empty: emptyPlaceholders(t, lead, undefined, voice),
+    sender: voice ? {
+      id: voice.id ?? null,
+      name: voice.name ?? null,
+      owns_lead: Boolean(lead.assigned_to) && voice.id === lead.assigned_to,
+    } : null,
   });
 }));
 

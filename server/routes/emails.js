@@ -7,6 +7,7 @@ import { sendability } from '../lib/pecr.js';
 import { scoreDraft } from '../lib/deliverability.js';
 import { isSuppressed } from '../lib/suppression.js';
 import { recontactCheck, recordContact } from '../lib/recontact.js';
+import { leadVoice } from '../lib/auth.js';
 
 const router = Router();
 
@@ -33,7 +34,10 @@ export function composeFor(leadId, templateId,
     throw badRequest(`${lead.business_name} has no usable email address`);
   }
 
-  const rendered = renderTemplate(template, lead, undefined, user);
+  // Written as the rep who owns the lead; `user` (whoever is signed in) only
+  // when nobody does. The queue sends from the same person's mailbox.
+  const sender = leadVoice(lead, user);
+  const rendered = renderTemplate(template, lead, undefined, sender);
   const settings = getSettings();
   const footer = buildFooter(settings);
 
@@ -56,6 +60,7 @@ export function composeFor(leadId, templateId,
     lead,
     verdict,
     template,
+    sender,
     subject: rendered.subject,
     // Body without the footer, plus the compliant body, so the UI can show both.
     body_without_footer: rendered.body,
@@ -69,10 +74,10 @@ export function composeFor(leadId, templateId,
         ? [`Unrecognised placeholder(s): ${unknownPlaceholders(template.subject, template.body).map((u) => `{{${u}}}`).join(', ')}`]
         : []),
       ...(looksLikeEmail(lead.email ?? '') ? [] : ['This lead has no email address — you can still copy the text or phone them.']),
-      ...(emptyPlaceholders(template, lead, undefined, user).length
-        ? [`This lead has no ${emptyPlaceholders(template, lead, undefined, user).join(' or ')}, so ` +
-           `${emptyPlaceholders(template, lead, undefined, user).map((k) => `{{${k}}}`).join(' and ')} ` +
-           `render${emptyPlaceholders(template, lead, undefined, user).length === 1 ? 's' : ''} as nothing — ` +
+      ...(emptyPlaceholders(template, lead, undefined, sender).length
+        ? [`This lead has no ${emptyPlaceholders(template, lead, undefined, sender).join(' or ')}, so ` +
+           `${emptyPlaceholders(template, lead, undefined, sender).map((k) => `{{${k}}}`).join(' and ')} ` +
+           `render${emptyPlaceholders(template, lead, undefined, sender).length === 1 ? 's' : ''} as nothing — ` +
            'read the text above before you send it.']
         : []),
       ...(verdict.allowed || verdict.code === 'NO_EMAIL' ? [] : [verdict.reason]),

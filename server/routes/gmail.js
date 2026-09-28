@@ -229,8 +229,9 @@ router.post('/queue', wrap(async (req, res) => {
       const c = composeFor(leadId, templateId,
         { requireEmail: true, requireCompliance: true, user: req.user });
       // Decided here, with the body, so the From line and the {{my_email}} the
-      // body was just rendered with can never name different mailboxes.
-      const from = senderFor(req.user?.id, shared);
+      // body was just rendered with can never name different mailboxes. Both
+      // follow the rep who owns the lead, not whoever pressed Queue.
+      const from = senderFor(c.sender?.id, shared);
       const info = db.prepare(
         `INSERT INTO send_queue
            (lead_id, template_id, to_email, subject, body, status, created_at,

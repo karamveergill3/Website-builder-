@@ -140,8 +140,16 @@ const THEMES = {
     sections: ['areas', 'prices'],
   },
   pro: {
-    font: 'Inter:wght@600;800',
-    display: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    // Manrope, not Inter. Inter-by-default is a named tell of a machine-made
+    // page (WEB-CRAFT.md T2), and swapping to a deliberately chosen face is
+    // the cheapest fix in the ruleset. Manrope reads professional-modern
+    // without landing on the framework default. (The ruleset names Satoshi
+    // on Fontshare as the ideal anti-Inter face — that upgrade is a
+    // separate change that widens the outbound-host allow-list, deliberately
+    // left for a follow-up.) Falls through to a real system face if the
+    // webfont fails.
+    font: 'Manrope:wght@500;700;800',
+    display: "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     weight: 800, tracking: '-.045em', transform: 'none',
     size: 'clamp(2.3rem,4.5vw,3.9rem)',
     eyebrowTracking: '.16em',
@@ -194,18 +202,54 @@ const NAMED_COLOURS = {
   beige: '#8a7355', white: '#374151',
 };
 
+/**
+ * Colour names that signal "this is the ground, not the accent".
+ *
+ * A prospect writing "white and brown" means the page opens on a warm white
+ * with brown as the accent, not that the accent is a mid grey (which is
+ * what mapping `white` through NAMED_COLOURS as an accent would produce).
+ * When one of these appears in brand_colours the palette flips to light
+ * mode, the ground token becomes the warm tone they named, and the accent
+ * is picked from the first NON-ground brand colour further in the list.
+ */
+const GROUND_SIGNALS = {
+  white: '#fafaf7', cream: '#faf6ee', ivory: '#fbfaf5', beige: '#f4ecdf',
+};
+
 export function resolvePalette(trade, brandColours = []) {
   const base = { ...PALETTES[tradeFamily(trade)] };
   base.mode ??= 'dark';
   base.ground ??= base.ink;
+  // Always carry a dark-ground the toggle can flip to. Dark-default palettes
+  // reuse their own ground; light-default palettes borrow the sector's ink,
+  // deepened a shade further so it still reads as a real dark rather than
+  // a slightly dark ink.
+  base.darkGround = base.ground;
+
+  const lower = brandColours.map((c) => String(c).trim().toLowerCase());
+
+  // Ground signals win first: if the prospect named white/cream/ivory/beige,
+  // the palette flips to a light-ground variant of the sector theme. Ink
+  // stays as the sector's dark text colour; wash and line derive from the
+  // named ground so the whole system reads warm together.
+  const groundHit = lower.find((c) => c in GROUND_SIGNALS);
+  if (groundHit) {
+    base.mode = 'light';
+    base.ground = GROUND_SIGNALS[groundHit];
+    base.wash = shade(base.ground, -0.06);
+    base.line = shade(base.ground, -0.14);
+    base.darkGround = shade(base.ink, -0.18);
+  }
+
+  // Pick the accent from the first named or hex colour that isn't a ground
+  // signal. Reordering means `['white', 'brown', 'cream']` gives a cream
+  // ground with brown accent, not a grey accent as the flat mapping would.
   for (const raw of brandColours) {
     const c = String(raw).trim().toLowerCase();
+    if (c in GROUND_SIGNALS) continue;
     const hit = /^#[0-9a-f]{3,8}$/i.test(c) ? c : NAMED_COLOURS[c];
     if (!hit) continue;
     base.accent = hit;
-    // The mesh sits on a dark ink, so its second hue has to be LIGHTER than
-    // the brand colour or the gradient reads as one lit corner and a flat
-    // rest. Lightening keeps the two obviously related.
     base.glow = shade(hit, 0.42);
     return base;
   }
@@ -890,6 +934,11 @@ function css(p, t) {
     --ink:${p.ink}; --accent:${p.accent}; --glow:${p.glow ?? p.accent};
     --wash:${p.wash}; --line:${p.line}; --muted:${p.muted};
     --ground:${p.ground ?? p.ink};
+    /* The ground the toggle flips to. On a dark-default palette it equals
+       --ground; on a light-default one it is the sector's ink deepened, so
+       the toggle produces a real dark surface rather than a slightly-off
+       cream. */
+    --dark-ground:${p.darkGround ?? p.ground ?? p.ink};
     --radius:${t.radius};
     --btn-radius:${t.btnRadius};
     --display:${t.display};
@@ -998,8 +1047,12 @@ function css(p, t) {
   nav a:hover{color:var(--ink)}
   nav a:hover::after,nav a[aria-current]::after{transform:scaleX(1)}
   nav a[aria-current]{color:var(--ink)}
-  .tel{background:var(--ink);color:#fff;padding:11px 20px;border-radius:var(--btn-radius);
+  /* The tel button carries the phone number, the single most tapped element
+     on the page for this market. Padding lifts its hit area past the 44px
+     minimum without changing how it reads visually. */
+  .tel{background:var(--ink);color:#fff;padding:13px 22px;border-radius:var(--btn-radius);
     text-decoration:none;font-weight:700;white-space:nowrap;font-size:.92rem;
+    min-height:44px;display:inline-flex;align-items:center;
     transition:transform .25s var(--ease),box-shadow .25s var(--ease)}
   .tel:hover{transform:translateY(-2px);box-shadow:var(--shadow-2)}
 
@@ -1281,8 +1334,9 @@ function css(p, t) {
 
   /* Areas covered */
   .chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:32px}
-  .chip{border:1px solid var(--line);border-radius:100px;padding:9px 20px;
-    font-weight:600;font-size:.94rem;background:#fff;
+  .chip{border:1px solid var(--line);border-radius:100px;padding:11px 20px;
+    font-weight:600;font-size:.94rem;background:#fff;min-height:44px;
+    display:inline-flex;align-items:center;
     transition:border-color .25s,transform .25s var(--ease)}
   .chip:hover{border-color:var(--accent);transform:translateY(-2px)}
   .chip-add{border-style:dashed;color:var(--muted);font-weight:500}
@@ -1328,7 +1382,9 @@ function css(p, t) {
       -webkit-mask-image:linear-gradient(90deg,#000 88%,transparent);
       mask-image:linear-gradient(90deg,#000 88%,transparent)}
     nav::-webkit-scrollbar{display:none}
-    nav a{font-size:.9rem;white-space:nowrap}
+    /* Padding-block gives each link a 44px vertical hit area on a phone
+       without changing the sideways-scroll behaviour of the strip. */
+    nav a{font-size:.9rem;white-space:nowrap;padding:14px 0}
     /* The sticky call bar already carries the number, so the header's
        copy of it is just taking room. */
     .tel{display:none}
@@ -1353,7 +1409,284 @@ function css(p, t) {
     .mesh,.grain,.ticker{display:none}
     .hero,.band{background:#fff;color:#000}
     .hero h1,.band h2{color:#000;-webkit-text-fill-color:#000}
-  }`;
+  }
+
+  /* ---------- theme toggle ----------
+     A hidden checkbox drives a CSS-only theme flip. The mockup CSP forbids
+     scripts, so :has() reads the checkbox state and everything below responds
+     to it — no JS, no localStorage, no flash of wrong theme. */
+  .theme-input{position:absolute;opacity:0;pointer-events:none;
+    width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .theme-toggle{display:inline-flex;align-items:center;justify-content:center;
+    width:44px;height:44px;border-radius:100px;cursor:pointer;flex-shrink:0;
+    color:var(--muted);border:1px solid var(--line);background:transparent;
+    transition:color .25s,background .25s,border-color .25s,transform .3s var(--ease)}
+  .theme-toggle:hover{color:var(--ink);transform:translateY(-1px)}
+  .theme-input:focus-visible ~ header .theme-toggle{outline:2px solid var(--accent);
+    outline-offset:3px}
+  .theme-toggle .ti{position:relative;display:block;width:18px;height:18px}
+  .theme-toggle .ti-sun,.theme-toggle .ti-moon{transform-origin:50% 50%;
+    transition:opacity .35s var(--ease),transform .5s var(--ease)}
+  .theme-toggle .ti-sun{opacity:0;transform:rotate(-90deg) scale(.6)}
+  .theme-toggle .ti-moon{opacity:1;transform:rotate(0) scale(1);
+    position:absolute;inset:0}
+  /* Over the dark hero the toggle sits on ink, so its default colour needs
+     to be a light muted. The scroll-driven header resolve doesn't touch it —
+     we let the base colour handle both, muted enough to read on either. */
+  header .theme-toggle{color:${light ? 'var(--muted)' : 'rgba(255,255,255,.7)'};
+    border-color:${light ? 'var(--line)' : 'rgba(255,255,255,.18)'}}
+  header .theme-toggle:hover{color:${light ? 'var(--ink)' : '#fff'};
+    background:${light ? 'rgba(0,0,0,.04)' : 'rgba(255,255,255,.08)'}}
+  @media (max-width:720px){
+    /* 44 stays 44 — the toggle is the second most tapped control after the
+       call bar, and shrinking it under the accessibility minimum to save
+       header space isn't a trade worth making. */
+    .theme-toggle{margin-left:auto}
+  }
+
+  /* ---------- keyboard focus ----------
+     Every interactive element gets a visible focus ring in the accent
+     colour. A mouse user never sees this (focus-visible, not focus), and a
+     keyboard user needs it to know where they are. The offset keeps the
+     ring off the element's own outline so it stays legible on both light
+     and dark surfaces. */
+  a:focus-visible,button:focus-visible,label:focus-visible,
+  .cta:focus-visible,.tel:focus-visible,.chip:focus-visible,
+  .brand:focus-visible{
+    outline:2px solid var(--accent);outline-offset:3px;
+    border-radius:${t.btnRadius === '100px' ? '100px' : '4px'}}
+  /* nav links use an underline, so a boxy ring reads as extra chrome —
+     switch to a solid underline for focus, matching the hover style. */
+  nav a:focus-visible{outline:none}
+  nav a:focus-visible::after{transform:scaleX(1);height:3px}
+  /* The visually-hidden checkbox is what actually receives focus for the
+     theme toggle; the ring is drawn on the sibling label instead. */
+  .theme-input:focus-visible{outline:none}
+  /* A caller who arrives here by keyboard finds it — that's the point of
+     it being 100% opacity in this state. */
+  .cta:focus-visible{transform:translateY(-1px)}
+
+  /* ---------- dark mode ----------
+     Two entry points, same overrides: the OS asks for it (auto), or the
+     viewer flips the toggle. Everything the light-body layout paints on
+     white gets rebedded on --ground; the hero and closing band are already
+     dark, so they stay put. */
+  ${['@media (prefers-color-scheme: dark)', 'body:has(.theme-input:checked)']
+    .map((sel) => `${sel}{
+    body{background:var(--dark-ground);color:#e7ebf3}
+    /* Hero and closing band flip too on a light-default palette; on a
+       dark-default palette --dark-ground equals --ground so these no-op. */
+    .hero,.band{background:var(--dark-ground);color:#fff}
+    .hero h1{background:linear-gradient(170deg,#fff 30%,rgba(255,255,255,.80));
+      -webkit-background-clip:text;background-clip:text;color:transparent}
+    .hero p.lede{color:rgba(255,255,255,.72)}
+    .hero .cta{background:var(--accent);color:#0b0b0b;
+      box-shadow:0 8px 30px -8px var(--accent)}
+    .hero .cta.ghost{background:transparent;color:#fff;
+      border-color:rgba(255,255,255,.28)}
+    .band .cta{background:#fff;color:var(--ink)}
+    .ticker{border-top-color:rgba(255,255,255,.12)}
+    .ticker span{color:rgba(255,255,255,.5)}
+    section.alt{background:color-mix(in srgb, var(--dark-ground) 90%, #000)}
+    .card,.bento-cell,.step,.chip{
+      background:color-mix(in srgb, var(--dark-ground) 84%, #fff 5%);
+      color:#eef1f7;border-color:rgba(255,255,255,.09)}
+    .card p,.bento-cell p,.step p{color:rgba(255,255,255,.66)}
+    .card h3,.bento-cell h3,.step h3{color:#f5f7fb}
+    .cell-no{color:rgba(255,255,255,.4)}
+    .shot{background:color-mix(in srgb, var(--dark-ground) 88%, #000);
+      color:rgba(255,255,255,.55);border-color:rgba(255,255,255,.1)}
+    .facts li,.sec-head,.price-row{border-color:rgba(255,255,255,.09)}
+    .facts b{color:rgba(255,255,255,.55)}
+    .price-val,.sec-note,.tip-line,.stat-label,.pull footer,.quote-note{
+      color:rgba(255,255,255,.6)}
+    .stat{border-top-color:#f5f7fb}
+    .steps{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.09)}
+    .step:hover{background:rgba(255,255,255,.04)}
+    .plate-label{background:rgba(11,14,20,.85);color:#f5f7fb}
+    footer{background:var(--dark-ground);color:rgba(255,255,255,.6);
+      border-top-color:rgba(255,255,255,.08)}
+    footer a{color:rgba(255,255,255,.75)}
+    /* Sticky header stays dark: the scroll animation would otherwise resolve
+       it to near-white, which reads as a bright bar on top of a dark page. */
+    header{background:rgba(0,0,0,.6) !important;
+      border-bottom-color:rgba(255,255,255,.08) !important;
+      backdrop-filter:saturate(160%) blur(14px);
+      -webkit-backdrop-filter:saturate(160%) blur(14px)}
+    header .brand{color:#f5f7fb}
+    header nav a{color:rgba(255,255,255,.7)}
+    header nav a:hover,header nav a[aria-current]{color:#fff}
+    header .tel{background:rgba(255,255,255,.14);color:#fff}
+    header .theme-toggle{color:rgba(255,255,255,.8);
+      border-color:rgba(255,255,255,.18)}
+    @supports (animation-timeline: scroll()){
+      header,header .brand,header nav a,header .tel{animation:none}
+    }
+    /* Flip the toggle icon: sun visible in dark mode ("click for light"). */
+    .theme-toggle .ti-moon{opacity:0;transform:rotate(90deg) scale(.6)}
+    .theme-toggle .ti-sun{opacity:1;transform:rotate(0) scale(1)}
+  }`).join('\n  ')}
+
+  /* When the OS is dark but the viewer explicitly UNchecked the toggle in
+     this session, the checkbox's own state wins — we can only detect the
+     checked side, so an "always dark from OS" cannot be manually escaped
+     without JS. That's the honest limit of the CSS-only pattern; it matters
+     less here than the fact that the toggle works at all under strict CSP. */
+
+  /* ---------- entrance animations ----------
+     The hero used to appear instantly. That's cheap. A three-beat entrance
+     — headline, lede, action — sets a cadence that the rest of the page's
+     scroll reveals build on. All CSS, all wrapped in prefers-reduced-motion. */
+  @keyframes hero-in{
+    from{opacity:0;transform:translate3d(0,18px,0);filter:blur(6px)}
+    to  {opacity:1;transform:none;filter:blur(0)}}
+  .hero .eyebrow{animation:hero-in .8s var(--ease) both .05s}
+  .hero h1     {animation:hero-in 1s   var(--ease) both .18s}
+  .hero p.lede {animation:hero-in .95s var(--ease) both .38s}
+  .hero .cta,.hero .cta.ghost{animation:hero-in .9s var(--ease) both .58s}
+  .hero-art    {animation:hero-in 1.1s var(--ease) both .32s}
+
+  /* The primary CTA breathes — a soft accent glow that pulses just enough to
+     draw a phone-first eye. Skipped on the ghost variant and the band's
+     white CTA where it would be muddy. */
+  @keyframes cta-breathe{
+    0%,100%{box-shadow:${light ? '0 8px 26px -10px rgba(26,22,19,.5)'
+                                : '0 8px 30px -8px var(--accent)'},
+      0 0 0 0 color-mix(in srgb, var(--accent) 40%, transparent)}
+    50%   {box-shadow:${light ? '0 14px 36px -10px rgba(26,22,19,.55)'
+                                : '0 14px 44px -8px var(--accent)'},
+      0 0 0 10px color-mix(in srgb, var(--accent) 0%, transparent)}}
+  .hero .cta:not(.ghost){animation:hero-in .9s var(--ease) both .58s,
+    cta-breathe 3.4s ease-in-out 1.6s infinite}
+
+  /* Cards enter in a stagger rather than all together. The .reveal rule
+     already handles opacity; we just add per-child delay so the eye tracks
+     across the row instead of blinking at all four at once. */
+  @supports (animation-timeline: view()){
+    .grid > .reveal:nth-child(1){animation-delay:0ms}
+    .grid > .reveal:nth-child(2){animation-delay:80ms}
+    .grid > .reveal:nth-child(3){animation-delay:160ms}
+    .grid > .reveal:nth-child(4){animation-delay:240ms}
+    .bento > .bento-cell.reveal:nth-child(1){animation-delay:0ms}
+    .bento > .bento-cell.reveal:nth-child(2){animation-delay:90ms}
+    .bento > .bento-cell.reveal:nth-child(3){animation-delay:180ms}
+    .bento > .bento-cell.reveal:nth-child(4){animation-delay:270ms}
+    .bento > .bento-cell.reveal:nth-child(5){animation-delay:360ms}
+    .bento > .bento-cell.reveal:nth-child(6){animation-delay:450ms}
+    .steps .step:nth-child(1){animation:hero-in .7s var(--ease) both}
+    .steps .step:nth-child(2){animation:hero-in .7s var(--ease) both .1s}
+    .steps .step:nth-child(3){animation:hero-in .7s var(--ease) both .2s}
+    .steps .step:nth-child(4){animation:hero-in .7s var(--ease) both .3s}
+    /* The plates get a subtle scale-in tied to scroll — a Ken Burns nudge,
+       just enough that they don't sit flat on the page. */
+    .plate{animation:plate-in 1s var(--ease) both;
+      animation-timeline:view();animation-range:entry 0% cover 40%}
+    @keyframes plate-in{from{opacity:.4;transform:scale(1.05)}to{opacity:1;transform:none}}
+  }
+
+  /* Reduced-motion honesty: every animation added here is decorative, so all
+     of them stop when the viewer has asked for less motion. The layout and
+     the content are identical either way. */
+  @media (prefers-reduced-motion: reduce){
+    .hero .eyebrow,.hero h1,.hero p.lede,.hero .cta,.hero .cta.ghost,.hero-art,
+    .hero .cta:not(.ghost),.steps .step,.plate{animation:none !important;
+      opacity:1 !important;transform:none !important;filter:none !important}
+  }
+
+  @media print{
+    .theme-toggle,.theme-input{display:none}
+  }
+
+  /* ---------- motion vocabulary (T19) ----------
+     WEB-CRAFT.md T19: "one gesture repeated on 37 elements reads as no
+     motion at all". Every section head used to fade-and-rise as one block;
+     now the label WIPES in from the left, the heading UNCOVERS from behind
+     a blur, and the note takes the plain gesture, so the eye reads the
+     sequence as choreographed rather than stamped. Same for stats: they
+     arrive from the side rather than up, and alternating the direction
+     stops a row landing as one block. All compositor-only transforms and
+     filters, drops out under prefers-reduced-motion. */
+  @supports (animation-timeline: view()){
+    /* Delegate: when a sec-head or stats row is a .reveal, it stops
+       animating as a unit and its children take vocabulary parts. */
+    .sec-head.reveal,.stats.reveal{opacity:1;transform:none;animation:none}
+
+    .sec-head.reveal .eyebrow{clip-path:inset(0 100% 0 0);opacity:.001;
+      animation:vocab-wipe .8s var(--ease) forwards;
+      animation-timeline:view();animation-range:entry 4% cover 24%}
+    @keyframes vocab-wipe{to{clip-path:inset(0 0 0 0);opacity:1}}
+
+    .sec-head.reveal h2{opacity:0;transform:translate3d(0,14px,0);
+      filter:blur(8px);
+      animation:vocab-uncover .95s var(--ease) forwards;
+      animation-timeline:view();animation-range:entry 4% cover 28%}
+    @keyframes vocab-uncover{to{opacity:1;transform:none;filter:blur(0)}}
+
+    .sec-head.reveal .sec-note{opacity:0;transform:translate3d(0,10px,0);
+      animation:vocab-plain .8s var(--ease) forwards .12s;
+      animation-timeline:view();animation-range:entry 6% cover 26%}
+    @keyframes vocab-plain{to{opacity:1;transform:none}}
+
+    .stats.reveal .stat{opacity:0;transform:translate3d(-24px,0,0);
+      animation:vocab-side .7s var(--ease) forwards;
+      animation-timeline:view();animation-range:entry 6% cover 24%}
+    .stats.reveal .stat:nth-child(3),
+    .stats.reveal .stat:nth-child(4){transform:translate3d(24px,0,0)}
+    .stats.reveal .stat:nth-child(2),
+    .stats.reveal .stat:nth-child(3){animation-delay:80ms}
+    .stats.reveal .stat:nth-child(4){animation-delay:160ms}
+    @keyframes vocab-side{to{opacity:1;transform:none}}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .sec-head.reveal .eyebrow,.sec-head.reveal h2,.sec-head.reveal .sec-note,
+    .stats.reveal .stat{
+      animation:none !important;opacity:1 !important;
+      transform:none !important;filter:none !important;
+      clip-path:none !important}
+  }
+
+  /* R2 upgrade (2026-08-19): a sampled linear() spring is now the preferred
+     way to express overshoot on arrival. A cubic-bezier mathematically
+     cannot cross 1, which is the whole reason the keyframe workaround
+     existed; linear() samples a real spring. Only used on the hero
+     entrance — R16 says one signature moment, calm everywhere else — with
+     an @supports fallback to the sector's own easing on older engines. */
+  @supports (animation-timing-function: linear(0,1)){
+    :root{--ease-spring:linear(
+      0 0%, 0.058 4%, 0.223 9%, 0.442 14%, 0.678 20%, 0.9 27%,
+      1.045 33%, 1.098 42%, 1.087 50%, 1.045 58%, 1.014 66%,
+      0.996 76%, 1 100%
+    )}
+    .hero .eyebrow,.hero h1,.hero p.lede,.hero .cta,.hero .cta.ghost,
+    .hero-art{animation-timing-function:var(--ease-spring)}
+  }
+
+  /* ---------- craft defaults ----------
+     The near-free pass WEB-CRAFT.md Part 2 calls "non-negotiable on every
+     build". Any one of these missing is a tell of a machine-made page: a
+     brand ::selection, hover underlines that animate thickness not colour,
+     scrollbar-color, headlines that balance, body copy capped at a
+     readable measure. All plain CSS, all mechanical. */
+  ::selection{background:var(--accent);color:${light ? 'var(--ground)' : '#0b0b0b'}}
+  :root{scrollbar-color:var(--accent) transparent}
+  /* text-wrap:balance rebalances the last two lines of a heading rather
+     than leaving the tail as one word — a hallmark of hand-set type. */
+  h1,h2,h3,.pull p{text-wrap:balance}
+  /* R16: body copy capped at ~65ch. Running paragraphs the full width of a
+     wide screen is one of the most common amateur tells. Scoped to prose
+     paragraphs — the hero lede has its own measure, and grid/card copy
+     is already narrow enough. */
+  .hero p.lede{max-width:min(52ch,100%)}
+  section p:not(.eyebrow):not(.sec-note):not(.tip-line):not(.quote-note){
+    max-width:65ch}
+  /* Footer links get an underline that animates in on hover — thickness
+     via a background-image gradient so it slides in cleanly under the
+     type, rather than a colour swap. */
+  footer a{background-image:linear-gradient(currentColor,currentColor);
+    background-position:0 100%;background-repeat:no-repeat;
+    background-size:0% 1px;
+    transition:background-size .28s var(--ease),color .2s}
+  footer a:hover{background-size:100% 1px}`;
 }
 
 function page({ title, brief, palette, theme, current, body, draftNote, single = false }) {
@@ -1368,6 +1701,20 @@ function page({ title, brief, palette, theme, current, body, draftNote, single =
     ? `${esc(brandParts.slice(0, -1).join(' '))} <span>${esc(brandParts.at(-1))}</span>`
     : esc(b.business_name);
 
+  // The theme toggle is a hidden checkbox with a label in the header. No JS
+  // is available under the mockup CSP, so :has() drives every dark-mode
+  // override off the checkbox's state. Default respects prefers-color-scheme;
+  // the label flips the opposite.
+  const toggleIcon = `<svg class="ti" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <g class="ti-sun" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/>
+      </g>
+      <g class="ti-moon" fill="currentColor">
+        <path d="M17.3 14.5A7 7 0 0 1 9 6.2a.7.7 0 0 0-1-.8 8.5 8.5 0 1 0 10.1 10.1.7.7 0 0 0-.8-1z"/>
+      </g>
+    </svg>`;
+
   return `<!doctype html>
 <html lang="en-GB">
 <head>
@@ -1376,12 +1723,21 @@ function page({ title, brief, palette, theme, current, body, draftNote, single =
 <title>${single ? esc(b.business_name) : `${esc(title)} — ${esc(b.business_name)}`}</title>
 <meta name="description" content="${esc(subhead(b)).slice(0, 155)}">
 <meta name="robots" content="noindex,nofollow">
+<meta name="color-scheme" content="light dark">
+<!-- A real favicon, not the browser's default document glyph. WEB-CRAFT.md
+     Part 2 counts a missing favicon as a machine tell — the mark is drawn
+     inline as a data URI in the sector's accent colour so no extra request
+     is needed and it comes through under the mockup CSP. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
+  `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='${palette.accent}'/><text x='16' y='22' font-family='ui-sans-serif,system-ui' font-weight='800' font-size='18' text-anchor='middle' fill='${palette.ink}'>${esc(String(b.business_name).trim().charAt(0).toUpperCase())}</text></svg>`
+)}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${t.font}&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${t.font}&display=swap">
 <style>${css(palette, t)}</style>
 </head>
 <body id="top">
+<input type="checkbox" id="theme-toggle" class="theme-input" aria-label="Toggle dark mode">
 ${draftNote ? `<div class="draft">${esc(draftNote)}</div>` : ''}
 <header>
   <div class="wrap bar">
@@ -1390,6 +1746,7 @@ ${draftNote ? `<div class="draft">${esc(draftNote)}</div>` : ''}
       ${links.map(([href, label]) =>
         `<a href="${href}"${href === current ? ' aria-current="page"' : ''}>${label}</a>`).join('\n      ')}
     </nav>
+    <label for="theme-toggle" class="theme-toggle" title="Toggle theme">${toggleIcon}</label>
     ${tel ? `<a class="tel" href="${tel}">${esc(b.phone)}</a>` : ''}
   </div>
 </header>
@@ -1933,9 +2290,19 @@ function singleBody(b, family = 'pro', sections = []) {
   const where = b.areas?.length ? b.areas.join(', ') : 'the local area';
   const tel = telHref(b.phone);
   const mail = mailtoHref(b.email);
-  const eyebrow = b.areas?.length
-    ? `${shortTrade(b.trade) ?? 'Local trade'} · ${b.areas[0]}`
-    : (shortTrade(b.trade) ?? 'Local trade');
+  // R18: every word pays rent. The trade word is already in the h1, so the
+  // eyebrow shouldn't restate it — it should add a beat the headline doesn't
+  // cover. Mapping from CTA gives a wayfinding label that changes the page
+  // per what the visitor is here to do, without inventing a claim.
+  const EYEBROW_BY_CTA = {
+    call:    'Speak to us',
+    quote:   'Free quotes',
+    book:    'Booking open',
+    prices:  'Price list',
+    gallery: 'Recent work',
+    enquire: 'Enquiries',
+  };
+  const eyebrow = EYEBROW_BY_CTA[b.primary_cta] ?? 'Local specialists';
 
   // The ticker needs its items twice: the track translates by -50%, so the
   // second copy is what is on screen as the first scrolls away.

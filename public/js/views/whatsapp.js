@@ -9,7 +9,7 @@
  */
 import { api } from '../api.js';
 import {
-  html, mount, on, $, confirmDialog, toast, statusPill, relative, viewKeys,
+  html, mount, on, $, confirmDialog, toast, statusPill, relative, viewKeys, modal,
 } from '../dom.js';
 import { openLeadForm } from './leads.js';
 
@@ -139,6 +139,8 @@ export default async function whatsappView(root, params, { refresh }) {
                 </td>
                 <td class="meta nw">${l.whatsapp_sent_at ? relative(l.whatsapp_sent_at) : '—'}</td>
                 <td class="c-act">
+                  <button class="mini primary" data-act="paste" data-id="${l.id}" data-name="${l.business_name}"
+                    title="They replied on WhatsApp: paste it in and it is read into a brief">Paste reply</button>
                   <button class="mini" data-act="reach" data-id="${l.id}"
                     title="Follow up, call, arrange a call-back or find contact details">Reach</button>
                   <button class="mini" data-act="edit" data-id="${l.id}">Edit</button>
@@ -198,6 +200,48 @@ export default async function whatsappView(root, params, { refresh }) {
     } catch (err) {
       toast(err.message ?? 'Could not reassign it', { error: true });
     }
+  });
+
+  /**
+   * WhatsApp keeps its chats to itself, so a reply comes in by copy and paste:
+   * long-press the message (or select it on WhatsApp Desktop), copy, paste
+   * here. It is filed against this lead and read into a brief, exactly as a
+   * reply by email is, and the lead is marked replied.
+   */
+  on(root, 'click', '[data-act="paste"]', async (_e, el) => {
+    const saved = await modal({
+      title: `${el.dataset.name} replied`,
+      wide: true,
+      body: html`
+        <div class="f">
+          <label for="wr-body">Paste what they sent</label>
+          <textarea id="wr-body" name="body" rows="9" required
+            placeholder="1. Barlows Window Cleaning&#10;2. Ring us&#10;3. Stoke and Newcastle&#10;4. No logo, got photos&#10;5. Blue"></textarea>
+          <p class="tip">Copy it from WhatsApp (press and hold the message, then Copy; or
+            select it on WhatsApp Desktop). Several messages can go in together. Answers
+            to the five questions on <a href="#/phase2" data-close>Ask</a> are read best.</p>
+        </div>`,
+      footer: html`
+        <button type="button" data-close>Cancel</button>
+        <button type="submit" class="primary">Save and read it</button>`,
+      onSubmit: async (form) => {
+        if (!form.body?.trim()) throw new Error('Paste what they sent');
+        return api.post('/api/replies/manual', {
+          lead_id: Number(el.dataset.id), channel: 'whatsapp', body: form.body,
+        });
+      },
+    });
+    if (!saved) return;
+    const b = saved.brief ?? {};
+    const got = [
+      b.trading_name && 'their name',
+      b.services?.length && `${b.services.length} service${b.services.length === 1 ? '' : 's'}`,
+      b.primary_cta && 'what visitors should do',
+      b.areas?.length && 'areas',
+    ].filter(Boolean);
+    toast(got.length ? `Read it: ${got.join(', ')}. The brief is on Replies.` : 'Saved. Check the brief on Replies.',
+      { ms: 7000 });
+    refresh();
   });
 
   on(root, 'click', '[data-act="reach"]', async (_e, el) => {

@@ -173,6 +173,38 @@ test('"Not sent" leaves any other contact on the record', async () => {
   await post('/api/leads/bulk-delete', { ids: [both.id] });
 });
 
+test('"Not sent" undoes only the latest WhatsApp; one that really went stays on record', async () => {
+  const twice = await lead('Messaged Twice Ltd');
+  await send(twice, 'whatsapp');                       // really went
+  const before = ledgerFor(twice);
+  await patch(`/api/leads/${twice.id}`, { status: 'replied' });
+  // A follow-up to a reply, confirmed but never actually sent.
+  const prep = await post('/api/outreach/prepare', { lead_id: twice.id, channel: 'whatsapp', text: 'Follow up' });
+  assert.equal(prep.status, 200, JSON.stringify(prep.body));
+  await post(`/api/outreach/${prep.body.event_id}/sent`, {});
+
+  const r = await post(`/api/leads/${twice.id}/whatsapp-unsend`, {});
+  assert.equal(r.status, 200);
+  assert.ok((await ids('whatsapp')).includes(twice.id), 'the first WhatsApp still counts');
+  const after = ledgerFor(twice);
+  assert.ok(after.contacted_at, 'the real contact is still on the record');
+  assert.equal(after.times_contacted, before.times_contacted);
+  assert.equal(r.body.lead.status, 'replied', 'and their reply is not forgotten');
+  await post('/api/leads/bulk-delete', { ids: [twice.id] });
+});
+
+test('tapping Open and then "I sent it" is one message, not two', async () => {
+  const tapped = await lead('Double Tapped Ltd');
+  const prep = await post('/api/outreach/prepare', { lead_id: tapped.id, channel: 'whatsapp', text: 'Hi' });
+  await post(`/api/outreach/${prep.body.event_id}/sent`, {});
+  await post(`/api/outreach/${prep.body.event_id}/sent`, {});
+  assert.equal(ledgerFor(tapped).times_contacted, 1);
+  // So "Not sent" puts it fully back, free to approach.
+  const r = await post(`/api/leads/${tapped.id}/whatsapp-unsend`, {});
+  assert.equal(r.body.lead.contacted_before, false);
+  await post('/api/leads/bulk-delete', { ids: [tapped.id] });
+});
+
 test('an unknown pile is refused rather than ignored', async () => {
   assert.equal((await get('/api/leads?pile=bogus')).status, 400);
   assert.equal((await get('/api/leads/stats?pile=bogus')).status, 400);

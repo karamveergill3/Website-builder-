@@ -206,6 +206,14 @@ router.post('/queue', wrap(async (req, res) => {
       if (!looksLikeEmail(lead.email ?? '')) {
         skipped.push({ lead_id: leadId, name: lead.business_name, reason: 'no email address' }); continue;
       }
+      // Found to have a website of its own: the opener tells them they don't.
+      if (lead.has_website === 1) {
+        skipped.push({
+          lead_id: leadId, name: lead.business_name, reason: 'has a website',
+          detail: lead.website ? `Their site: ${lead.website}` : null,
+        });
+        continue;
+      }
       // Already approached, on any channel, on any earlier day. The ledger is
       // keyed on the company rather than the lead, so a second lead row for
       // the same business is caught too. `allow_repeat` is the deliberate

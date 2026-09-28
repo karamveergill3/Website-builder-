@@ -12,19 +12,26 @@
  *   1. The domain their email is on, when it is their own and not Gmail.
  *   2. Their name as a domain: "Coseley Services" -> coseleyservices.co.uk,
  *      coseley-services.co.uk, .com, .uk. Most small firms use exactly that.
- *   3. A web search for their name and town, when the caller supplies one.
+ *   3. A web search for their name and town, when the caller allows one.
  *
- * A domain that answers is not proof on its own: it may be parked, for sale,
- * "coming soon", or a different firm with the same name in another town. So
- * the page has to be THEIRS before it counts:
+ * Getting this wrong the other way is just as bad: a genuine prospect dropped
+ * because somebody ELSE's page looked like theirs is a lead lost for months.
+ * "Premier Roofing" in Wolverhampton does not own premierroofing.co.uk; a
+ * salon called Glamour does not own glamour.com. So a page only counts as
+ * theirs on hard evidence:
  *
- *   confirmed  the page carries their phone number, or their name together
- *              with their town or postcode;
- *   likely     their full name as a domain, the page names them, and nothing
- *              on it places them somewhere else (a different postcode).
+ *   confirmed  their phone number is on it; or their full name, as a phrase,
+ *              with their exact postcode; or, on a domain tied to them (their
+ *              name or their email's), their full name with their postcode
+ *              district or town, and nothing on the page placing them
+ *              elsewhere. The name must have a word that identifies THEM:
+ *              not a town, a trade ("roofing") or a stock word ("premier").
+ *   possible   their distinctive name on their name-domain and nothing more,
+ *              or their name-domain refused to let us read it. Not enough to
+ *              drop a prospect; shown to the rep to check by eye.
  *
- * Either one means "has a website". A parked page, a domain that forwards to
- * a Facebook page, or a page about someone else does not.
+ * A parked page, a domain that forwards to a Facebook page, or a page about
+ * someone else counts for nothing.
  *
  * No database here, and every network call goes through `fetchImpl`, so the
  * logic can be tested without the internet and without a data file.
@@ -32,7 +39,9 @@
 import { normalisePhone } from './handoff.js';
 import { FREE_MAIL_DOMAINS } from './pecr.js';
 
-const USER_AGENT = 'ProspectBook/1.0 (+checking whether a business already has a website)';
+// A "compatible" agent: honest about what we are, and not turned away by the
+// hosts that refuse anything that doesn't start "Mozilla".
+const USER_AGENT = 'Mozilla/5.0 (compatible; ProspectBook/1.0; +checking whether a business already has a website)';
 const TLDS = ['co.uk', 'com', 'uk'];
 const MAX_SLUGS = 6;
 const MAX_BYTES = 400 * 1024;
@@ -49,49 +58,95 @@ const GENERIC = new Set([
   'trading', 'contractors', 'contracting', 'solutions', 'enterprises', 'ltd', 'limited',
 ]);
 
+/** What a business does. Half the firms in a town share these. */
+const TRADE = new Set([
+  'roofing', 'roofers', 'roofer', 'plumbing', 'plumber', 'plumbers', 'heating', 'gas',
+  'electrical', 'electrician', 'electricians', 'electrics', 'building', 'builders', 'builder',
+  'construction', 'joinery', 'joiners', 'joiner', 'carpentry', 'carpenters', 'decorating',
+  'decorators', 'decorator', 'painting', 'painters', 'plastering', 'plasterers', 'plasterer',
+  'landscaping', 'landscapes', 'landscape', 'gardening', 'gardens', 'garden', 'gardeners',
+  'cleaning', 'cleaners', 'cleaner', 'window', 'windows', 'glazing', 'glass', 'doors',
+  'flooring', 'floors', 'carpets', 'tiling', 'tiles', 'kitchens', 'kitchen', 'bathrooms',
+  'bathroom', 'scaffolding', 'haulage', 'transport', 'removals', 'logistics', 'couriers',
+  'motors', 'motor', 'garage', 'autos', 'auto', 'cars', 'car', 'tyres', 'mechanics', 'repairs',
+  'repair', 'maintenance', 'salon', 'hair', 'hairdressing', 'beauty', 'barbers', 'barber',
+  'nails', 'spa', 'aesthetics', 'cafe', 'coffee', 'restaurant', 'takeaway', 'kitchen',
+  'bakery', 'catering', 'fitness', 'gym', 'dental', 'care', 'security', 'fencing', 'paving',
+  'driveways', 'drainage', 'locksmiths', 'locksmith', 'installations', 'installation',
+  'engineering', 'fabrication', 'welding', 'property', 'properties', 'lettings', 'homes',
+  'interiors', 'design', 'print', 'printing', 'signs', 'photography', 'studio', 'studios',
+]);
+
+/** Stock words in trading names that identify nobody. */
+const STOCK = new Set([
+  'premier', 'elite', 'quality', 'pro', 'pros', 'express', 'royal', 'star', 'prime', 'first',
+  'best', 'top', 'a1', 'ace', 'city', 'county', 'local', 'national', 'united', 'general',
+  'modern', 'classic', 'superior', 'total', 'complete', 'perfect', 'professional',
+  'advanced', 'smart', 'super', 'golden', 'gold', 'silver', 'diamond', 'crown', 'regal',
+  'supreme', 'ultimate', 'alpha', 'apex', 'summit', 'pinnacle', 'precision', 'reliable',
+  'affordable', 'budget', 'value', 'direct', 'central', 'north', 'south', 'east', 'west',
+  'northern', 'southern', 'eastern', 'western', 'new', 'little', 'big', 'great', 'global',
+  'bespoke', 'expert', 'experts', 'master', 'masters', 'trusted', 'dependable', 'swift',
+  'rapid', 'quick', 'fast', 'green', 'eco', 'blue', 'red', 'bright', 'clean', 'pure',
+]);
+
+/** Towns that are also everyday words: a page saying them places nobody. */
+const WORD_TOWNS = new Set([
+  'reading', 'sale', 'bath', 'march', 'street', 'deal', 'hope', 'wells', 'hyde', 'stone',
+  'ware', 'eye', 'holt', 'hull', 'bury', 'rye', 'wick', 'par', 'ely', 'neath', 'send',
+]);
+
 /**
  * Where a domain can end up that is not a website of the business's own: a
- * directory or social page (the domain just forwards to their Facebook), or a
- * domain marketplace (it is parked and for sale).
+ * directory, social or messaging page (the domain just forwards there).
  */
 const NOT_A_SITE_HOSTS = [
-  'facebook.com', 'instagram.com', 'linkedin.com', 'twitter.com', 'x.com', 'tiktok.com',
-  'youtube.com', 'linktr.ee', 'yell.com', 'checkatrade.com', 'trustatrader.com',
-  'ratedpeople.com', 'mybuilder.com', 'bark.com', 'thomsonlocal.com', 'scoot.co.uk',
-  'freeindex.co.uk', 'yelp.co.uk', 'yelp.com', 'cylex-uk.co.uk', 'hotfrog.co.uk', '192.com',
-  'google.com', 'maps.google.com', 'business.google.com', 'companieshouse.gov.uk',
+  'facebook.com', 'fb.com', 'm.me', 'instagram.com', 'linkedin.com', 'twitter.com', 'x.com',
+  'tiktok.com', 'youtube.com', 'linktr.ee', 'wa.me', 'whatsapp.com', 'g.page', 'goo.gl',
+  'yell.com', 'checkatrade.com', 'trustatrader.com', 'ratedpeople.com', 'mybuilder.com',
+  'bark.com', 'thomsonlocal.com', 'scoot.co.uk', 'freeindex.co.uk', 'yelp.co.uk', 'yelp.com',
+  'cylex-uk.co.uk', 'hotfrog.co.uk', '192.com', 'google.com', 'maps.google.com',
+  'business.google.com', 'companieshouse.gov.uk',
   'find-and-update.company-information.service.gov.uk', 'gov.uk', 'endole.co.uk',
   'opencorporates.com', 'companycheck.co.uk', 'wikipedia.org', 'tripadvisor.co.uk',
   'tripadvisor.com', 'treatwell.co.uk', 'fresha.com', 'booksy.com', 'just-eat.co.uk',
-  'deliveroo.co.uk', 'ubereats.com',
+  'deliveroo.co.uk', 'ubereats.com', 'houzz.co.uk', 'nextdoor.co.uk', 'nextdoor.com',
 ];
+/** Domain marketplaces and parking services. */
 const PARKING_HOSTS = [
   'sedoparking.com', 'sedo.com', 'parkingcrew.net', 'bodis.com', 'dan.com', 'afternic.com',
   'hugedomains.com', 'sav.com', 'undeveloped.com', 'domainmarket.com', 'above.com',
   'parklogic.com', 'buydomains.com', 'uniregistry.com', 'squadhelp.com', 'atom.com',
   'brandbucket.com', 'efty.com', 'perfectdomain.com', 'epik.com', 'namebright.com',
-  'domainnamesales.com', 'godaddysites.com',
+  'domainnamesales.com',
 ];
 const hostIs = (host, list) => list.some((h) => host === h || host.endsWith(`.${h}`));
 
 /**
  * Text that means the page is not a working website, whoever owns the domain.
- * PARKED is decisive on any short page. SOON only on a near-empty one: a real
- * one-page site can say "online booking coming soon" in passing.
+ * Only on a short page, and never over their own phone number: a real site
+ * can say "our gift card is available to buy online".
  */
 const PARKED_RE = new RegExp([
   'domain (name )?(is |may be )?for sale', 'buy this domain', 'make an offer on this domain',
-  'this domain (name )?(has been|is) (registered|parked|for sale)', 'domain parking',
-  'parked (free|domain|by|courtesy)', 'is available for purchase', 'domain has expired',
-  'this domain has expired', 'renew (this|your) domain', 'website is currently unavailable',
-  'account (has been )?suspended', 'default web ?(site )?page', 'welcome to nginx',
-  'apache2? (ubuntu |debian )?default page', 'it works!', 'index of /',
+  'this domain (name )?(has|may have)? ?(just |recently )?been registered',
+  'this domain (name )?is (registered|parked|for sale)', 'domain parking',
+  'parked (for free|free|domain|by|courtesy)', 'this domain is available for purchase',
+  'domain has expired', 'this domain has expired', 'renew (this|your) domain',
+  'website is currently unavailable', 'account (has been )?suspended',
+  'domain default page', 'default web ?(site )?page', 'welcome to nginx',
+  'apache2? (ubuntu |debian )?default page', 'index of /',
 ].join('|'), 'i');
 const SOON_RE = /coming soon|under construction|launching soon|future home of|site is being built/i;
+/** A title of just "It works!" is a web server's placeholder. */
+const PLACEHOLDER_TITLE_RE = /^\s*(it works!?|test page|site not found|domain default page)\s*$/i;
+/** Bot challenges: a live site we were not allowed to read. */
+const CHALLENGE_RE = /just a moment|checking your browser|attention required|sgcaptcha|cf-chl|enable javascript and cookies to continue|verify you are human/i;
+const BLOCK_STATUSES = new Set([401, 403, 429, 503]);
 
 /* ------------------------------------------------------------------ names */
 
-/** A name as plain lower-case words, legal suffix and brackets gone. */
+/** A name as plain lower-case words: legal suffix, brackets and apostrophes gone. */
 export function nameWords(name) {
   return String(name ?? '')
     .toLowerCase()
@@ -163,16 +218,60 @@ export function candidateDomains({ names = [], email = null } = {}) {
   return out;
 }
 
+/**
+ * The forms their name is looked for in, as whole phrases: the full name,
+ * and the name with trailing filler dropped ("Barlows Window Cleaning
+ * Services" -> "barlows window cleaning") as long as something is left that
+ * is more than filler.
+ */
+function namePhrases(names) {
+  const out = new Map();
+  const add = (words) => {
+    if (words.length) out.set(words.join(' '), words);
+  };
+  for (const name of [names].flat()) {
+    const words = nameWords(name);
+    add(words);
+    const trimmed = [...words];
+    while (trimmed.length > 1 && GENERIC.has(trimmed.at(-1))) trimmed.pop();
+    add(trimmed);
+    if (words.includes('and')) add(words.filter((w) => w !== 'and'));
+  }
+  return [...out.values()];
+}
+
+/**
+ * Does this name pick out one business? It needs a word that is not filler,
+ * not a trade, not a stock word like "premier", not an initial, and not the
+ * town: "Wolverhampton Roofing Services" describes half of Wolverhampton.
+ */
+function distinctive(words, townWords) {
+  return words.some((w) => w.length >= 3 && !/^\d+$/.test(w)
+    && !GENERIC.has(w) && !TRADE.has(w) && !STOCK.has(w) && !townWords.has(w));
+}
+
 /* ------------------------------------------------------------------- pages */
 
 const ENTITIES = { amp: '&', nbsp: ' ', quot: '"', apos: "'", lt: '<', gt: '>', rsquo: "'", lsquo: "'", ndash: '-', mdash: '-', pound: '£' };
+/** A character reference as its character; anything out of range as a space. */
+const fromCode = (n) => (Number.isInteger(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : ' ');
 const decode = (s) => String(s ?? '')
-  .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-  .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+  .replace(/&#x([0-9a-f]{1,8});/gi, (_, h) => fromCode(parseInt(h, 16)))
+  .replace(/&#(\d{1,10});/g, (_, d) => fromCode(Number(d)))
   .replace(/&([a-z]+);/gi, (m, n) => ENTITIES[n.toLowerCase()] ?? m);
 
-/** Lower-case, punctuation to spaces: the form every comparison is made in. */
-const flat = (s) => ` ${String(s ?? '').toLowerCase().replace(/[^a-z0-9£]+/g, ' ').trim()} `;
+/**
+ * Lower-case words with single spaces, the form every comparison is made in.
+ * Apostrophes go (so "Dave's" is "daves", as in the name) and "&" becomes
+ * "and", both exactly as nameWords() does them.
+ */
+const flat = (s) => ` ${String(s ?? '').toLowerCase()
+  .replace(/['’`]/g, '')
+  .replace(/&/g, ' and ')
+  .replace(/[^a-z0-9]+/g, ' ').trim()} `;
+
+/** Web addresses and email domains: on a holding page, the only "name" there is. */
+const HOST_RE = /\b(?:[a-z0-9-]+\.)+(?:co\.uk|org\.uk|me\.uk|ltd\.uk|com|uk|net|org|biz|info|co)\b/gi;
 
 /** What a reader sees: the title, the description, and the body text. */
 export function pageText(html) {
@@ -189,9 +288,9 @@ export function pageText(html) {
     .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<[^>]+>/g, ' '));
+    .replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
   const text = [title, ...metas, body].join(' ').replace(/\s+/g, ' ').trim();
-  return { title, text, words: text ? text.split(' ').length : 0 };
+  return { title, text, body, words: text ? text.split(' ').length : 0 };
 }
 
 const PHONE_RE = /(?:\+44\s*\(?0?\)?|0044|\b0)[\s\-().]*(?:\d[\s\-().]*){9,10}/g;
@@ -220,78 +319,82 @@ export function postcodeIn(text) {
   return m ? `${m[1]} ${m[2]}`.toUpperCase() : null;
 }
 
-const outward = (postcode) => String(postcode ?? '').trim().toUpperCase().split(/\s+/)[0] || '';
+const compact = (postcode) => String(postcode ?? '').toUpperCase().replace(/\s+/g, '');
+/** "WV4 6DW" or "WV46DW" -> "WV4": the inward part is always digit, letter, letter. */
+const district = (postcode) => compact(postcode).replace(/\d[A-Z]{2}$/, '');
 
 /**
  * Is this page the business's own website?
  *
- * `biz` is { names, phones, postcode, towns }. `how` is how the domain was
- * found: a guessed name-domain may be judged 'likely' on the name alone, as
- * long as nothing contradicts it; a search result or an email domain must be
- * confirmed by phone or by name and place.
+ * `biz` is { names, phones, postcode, towns }. `how` is how the page was
+ * reached: 'name-domain' (their name as a domain), 'email-domain' (the domain
+ * their email is on), 'known-url' (a URL already tied to them), or 'search'.
+ * A search result is anyone's page, so it must carry their phone or their
+ * exact postcode; the other three are already tied to them by the domain.
  *
- * Returns { match: 'confirmed' | 'likely' | null, parked, evidence: [...] }.
+ * Returns { match: 'confirmed' | 'possible' | 'blocked' | null, parked, evidence }.
  */
 export function judgePage({ html, url }, biz, { how = 'name-domain' } = {}) {
   const host = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } })();
   if (host && hostIs(host, PARKING_HOSTS)) return { match: null, parked: true, evidence: ['parking-host'] };
-  if (host && hostIs(host, NOT_A_SITE_HOSTS)) return { match: null, parked: false, evidence: ['forwards-to-directory'] };
+  if (host && hostIs(host, NOT_A_SITE_HOSTS)) return { match: null, parked: false, evidence: ['forwards-elsewhere'] };
 
   const { title, text, words } = pageText(html);
-  const page = flat(text);
 
-  if (PARKED_RE.test(title) || (words < 300 && PARKED_RE.test(text))
+  // Their own number beats everything, a "How it works!" heading included.
+  const theirPhones = new Set((biz.phones ?? [])
+    .map((p) => normalisePhone(p)).filter((n) => n.ok).map((n) => n.e164));
+  if (theirPhones.size && [...pagePhones(html, text)].some((p) => theirPhones.has(p))) {
+    return { match: 'confirmed', parked: false, evidence: ['phone'] };
+  }
+
+  if (PLACEHOLDER_TITLE_RE.test(title) || PARKED_RE.test(title)
+      || (words < 300 && PARKED_RE.test(text))
       || SOON_RE.test(title) || (words < 80 && SOON_RE.test(text))) {
     return { match: null, parked: true, evidence: ['parked'] };
   }
+  if (words < 200 && CHALLENGE_RE.test(`${title} ${String(html ?? '').slice(0, 20_000)}`)) {
+    return { match: how === 'search' ? null : 'blocked', parked: false, evidence: ['challenge'] };
+  }
 
-  const evidence = [];
-  const has = (w) => page.includes(` ${w} `);
+  // Web addresses out first: a holding page that only shows
+  // "coseley-services.co.uk" does not name Coseley Services.
+  const page = flat(text.replace(HOST_RE, ' '));
+  const has = (phrase) => page.includes(` ${phrase} `);
 
-  const theirPhones = new Set((biz.phones ?? [])
-    .map((p) => normalisePhone(p)).filter((n) => n.ok).map((n) => n.e164));
-  const phoneHit = theirPhones.size > 0
-    && [...pagePhones(html, text)].some((p) => theirPhones.has(p));
-  if (phoneHit) evidence.push('phone');
+  const townWords = new Set([biz.towns ?? []].flat().flatMap((t) => flat(t).trim().split(' ')).filter(Boolean));
+  const phrases = namePhrases(biz.names ?? []);
+  const named = phrases.find((p) => has(p.join(' ')));
+  const identifying = Boolean(named) && phrases.some((p) => has(p.join(' ')) && distinctive(p, townWords));
 
-  // Name: every distinctive word of one of their names, as whole words. The
-  // strict form also needs the generic words ("services"), for 'likely'.
-  const nameSets = [biz.names ?? []].flat().map(nameWords).filter((w) => w.length);
-  const distinctive = (w) => w.filter((x) => !GENERIC.has(x));
-  const nameWeak = nameSets.some((w) => distinctive(w).length > 0 && distinctive(w).every(has));
-  const nameStrong = nameSets.some((w) => w.filter((x) => !['the', 'and', 'of', 'a'].includes(x)).every(has))
-    && nameWeak;
-  if (nameWeak) evidence.push('name');
-
-  const code = String(biz.postcode ?? '').toUpperCase();
-  const pageCodes = [...text.matchAll(POSTCODE_RE)].map((m) => `${m[1]} ${m[2]}`.toUpperCase());
-  const postcodeHit = Boolean(code)
-    && (pageCodes.some((p) => p.replace(/\s/g, '') === code.replace(/\s/g, ''))
-      || has(outward(code).toLowerCase()));
-  if (postcodeHit) evidence.push('postcode');
-
+  const code = compact(biz.postcode);
+  const pageCodes = [...text.matchAll(POSTCODE_RE)].map((m) => `${m[1]}${m[2]}`.toUpperCase());
+  const exactPostcode = Boolean(code) && pageCodes.includes(code);
+  const sameDistrict = Boolean(code) && pageCodes.some((p) => district(p) === district(code));
+  // Somewhere else: the page gives postcodes, and none is in their district.
+  const elsewhere = Boolean(code) && pageCodes.length > 0 && !sameDistrict;
   const townHit = [biz.towns ?? []].flat().some((t) => {
     const f = flat(t).trim();
-    return f && page.includes(` ${f} `);
+    return f && !WORD_TOWNS.has(f) && has(f);
   });
+
+  const evidence = [];
+  if (named) evidence.push('name');
+  if (exactPostcode) evidence.push('postcode');
+  else if (sameDistrict) evidence.push('district');
   if (townHit) evidence.push('town');
+  if (elsewhere) evidence.push('elsewhere');
 
-  // Somewhere else: the page gives postcodes, and none is in their district.
-  const elsewhere = Boolean(code) && pageCodes.length > 0
-    && !pageCodes.some((p) => outward(p) === outward(code));
+  if (named && exactPostcode) return { match: 'confirmed', parked: false, evidence };
 
-  if (phoneHit || (nameWeak && (postcodeHit || townHit))) {
+  const tied = how !== 'search';
+  if (tied && identifying && !elsewhere && (sameDistrict || townHit)) {
     return { match: 'confirmed', parked: false, evidence };
   }
-  // On the name alone: a guessed domain must carry their full name; one we
-  // already tie to them (their email's domain, a URL on file) just has to
-  // name them. Neither counts if the page puts them in another district.
-  const onName = how === 'name-domain' ? nameStrong
-    : (how === 'email-domain' || how === 'known-url') ? nameWeak : false;
-  if (onName && !elsewhere) {
-    return { match: 'likely', parked: false, evidence };
+  if (tied && identifying && !elsewhere) {
+    return { match: 'possible', parked: false, evidence };
   }
-  return { match: null, parked: false, evidence: elsewhere ? [...evidence, 'elsewhere'] : evidence };
+  return { match: null, parked: false, evidence };
 }
 
 /* ----------------------------------------------------------------- network */
@@ -351,26 +454,28 @@ async function getPage(url, { fetchImpl, timeoutMs, signal }) {
 }
 
 /**
- * Fetch a domain's home page the ways a browser would get there: https on the
- * bare domain, then the www host if the bare one has no address, then plain
- * http if the secure connection fails (small old sites still exist).
+ * Fetch a domain's home page the ways a browser would get there: the bare
+ * domain, then the www host (a site can live on either, and the other may
+ * answer 404 or not at all), each over https and, when the secure connection
+ * itself fails, plain http. A host that answers "not allowed" (403, a bot
+ * challenge) is reported, because that is a live site we could not read.
  */
 async function fetchDomain(domain, opts) {
-  const tries = [];
-  const secure = await getPage(`https://${domain}/`, opts);
-  tries.push(secure);
-  if (secure.ok) return { page: secure, tries };
-  if (secure.dns) {
-    const host = `www.${domain}`;
-    const www = await getPage(`https://${host}/`, opts);
-    tries.push(www);
-    if (www.ok || www.dns) return { page: www.ok ? www : null, tries };
-  } else if (!secure.status) {
-    const plain = await getPage(`http://${domain}/`, opts);
-    tries.push(plain);
-    if (plain.ok) return { page: plain, tries };
+  const bare = domain;
+  const www = `www.${domain}`;
+  let blocked = null;
+  for (const host of [bare, www]) {
+    const secure = await getPage(`https://${host}/`, opts);
+    if (secure.ok) return { page: secure, blocked };
+    if (BLOCK_STATUSES.has(secure.status)) blocked ??= { url: secure.url ?? `https://${host}/`, status: secure.status };
+    if (secure.error === 'aborted' || secure.error === 'AbortError') break;
+    if (!secure.status && !secure.dns) {
+      const plain = await getPage(`http://${host}/`, opts);
+      if (plain.ok) return { page: plain, blocked };
+      if (BLOCK_STATUSES.has(plain.status)) blocked ??= { url: plain.url ?? `http://${host}/`, status: plain.status };
+    }
   }
-  return { page: null, tries };
+  return { page: null, blocked };
 }
 
 /* ------------------------------------------------------------------ search */
@@ -418,9 +523,11 @@ export async function searchWeb(query, {
  *           knownUrls: [...] }  — any of them may be missing
  *   opts: { fetchImpl, search: false | { gapMs }, budgetMs, timeoutMs }
  *
- * Returns { found, url, domain, confidence, how, evidence, tried, searched,
- * searchBlocked }. `found` false with `searchBlocked` true means the answer
- * is "none that we could see", not a firm no.
+ * Returns { found, url, domain, confidence, how, evidence, possible, tried,
+ * searched, searchBlocked }. `found` is only ever set on hard evidence.
+ * `possible` ({ url, why }) is a site that may be theirs but was not proved:
+ * shown to a person, never used to drop a prospect. `searchBlocked` means
+ * "none that we could see", not a firm no.
  */
 export async function findWebsite(biz, {
   fetchImpl = (...a) => globalThis.fetch(...a),
@@ -431,30 +538,43 @@ export async function findWebsite(biz, {
   const budget = new AbortController();
   const timer = setTimeout(() => budget.abort(), budgetMs);
   const opts = { fetchImpl, timeoutMs, signal: budget.signal };
-  const result = { found: false, tried: 0, searched: false, searchBlocked: false };
+  const result = { found: false, possible: null, tried: 0, searched: false, searchBlocked: false };
 
   const verdictFor = async ({ domain, how, url }) => {
-    const { page } = url
-      ? { page: await getPage(url, opts) }
-      : await fetchDomain(domain, opts);
+    let page;
+    let blocked = null;
+    if (url) {
+      page = await getPage(url, opts);
+      if (!page.ok && BLOCK_STATUSES.has(page.status)) blocked = { url: page.url ?? url, status: page.status };
+    } else {
+      ({ page, blocked } = await fetchDomain(domain, opts));
+    }
     result.tried++;
-    if (!page?.ok) return null;
+    if (!page?.ok) {
+      return blocked && how !== 'search' ? { possible: { url: blocked.url, why: 'would not let us read it' } } : null;
+    }
     const j = judgePage(page, biz, { how });
-    return j.match ? { url: page.url, domain: domain ?? hostOf(page.url), confidence: j.match, how, evidence: j.evidence } : null;
+    if (j.match === 'confirmed') {
+      return { hit: { url: page.url, domain: domain ?? hostOf(page.url), confidence: 'confirmed', how, evidence: j.evidence } };
+    }
+    if (j.match === 'possible') return { possible: { url: page.url, why: 'carries their name' } };
+    if (j.match === 'blocked') return { possible: { url: page.url, why: 'would not let us read it' } };
+    return null;
   };
 
-  const settle = (hits) => {
-    const best = hits.filter(Boolean)
-      .sort((a, b) => (a.confidence === 'confirmed' ? 0 : 1) - (b.confidence === 'confirmed' ? 0 : 1))[0];
-    if (best) Object.assign(result, { found: true, ...best });
-    return Boolean(best);
+  const settle = (outcomes) => {
+    const got = outcomes.filter(Boolean);
+    const hit = got.find((o) => o.hit)?.hit;
+    if (hit) Object.assign(result, { found: true, ...hit });
+    result.possible ??= got.find((o) => o.possible)?.possible ?? null;
+    return Boolean(hit);
   };
 
   try {
     // URLs we already hold for them (say, one Google listed) come first.
     const known = [biz.knownUrls ?? []].flat().filter(Boolean)
       .map((url) => ({ url, domain: hostOf(url), how: 'known-url' }))
-      .filter((k) => k.domain && !hostIs(k.domain, NOT_A_SITE_HOSTS));
+      .filter((k) => k.domain && isOwnSiteUrl(k.url));
     const guesses = candidateDomains(biz);
     const queue = [...known, ...guesses];
 
@@ -472,15 +592,15 @@ export async function findWebsite(biz, {
           fetchImpl, gapMs: search.gapMs ?? 4_000, timeoutMs, signal: budget.signal,
         });
         result.searchBlocked = s.blocked;
-        // Only results whose address carries a distinctive word of the name:
+        // Only results whose address carries a word that identifies them:
         // a directory's host never does, the business's own site usually does.
+        const townWords = new Set([biz.towns ?? []].flat().flatMap((t) => flat(t).trim().split(' ')).filter(Boolean));
         const tokens = [...new Set([biz.names ?? []].flat().flatMap(nameWords)
-          .filter((w) => w.length >= 4 && !GENERIC.has(w)))];
+          .filter((w) => distinctive([w], townWords) && w.length >= 4))];
         const tried = new Set(queue.map((q) => q.domain));
         const picks = s.urls.filter((u) => {
           const host = hostOf(u);
-          return host && !tried.has(host) && !hostIs(host, NOT_A_SITE_HOSTS)
-            && !hostIs(host, PARKING_HOSTS) && tokens.some((t) => host.includes(t));
+          return host && !tried.has(host) && isOwnSiteUrl(u) && tokens.some((t) => host.includes(t));
         }).slice(0, SEARCH_RESULTS_TO_READ);
         if (settle(await Promise.all(picks.map((url) => verdictFor({ url, domain: hostOf(url), how: 'search' }))))) {
           return result;
@@ -498,9 +618,9 @@ function hostOf(url) {
 }
 
 /**
- * Is this a website of the business's own, rather than a listing or social
- * page? A Google profile's "website" is often just their Facebook page, and
- * that is a business still without a site.
+ * Is this a website of the business's own, rather than a listing, social or
+ * messaging page? A Google profile's "website" is often just their Facebook
+ * page, and that is a business still without a site.
  */
 export function isOwnSiteUrl(url) {
   const host = hostOf(url);

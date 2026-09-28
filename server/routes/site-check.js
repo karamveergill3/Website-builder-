@@ -18,7 +18,7 @@ import { Router } from 'express';
 import { db } from '../db.js';
 import { wrap, badRequest, nowIso } from '../lib/http.js';
 import { findWebsite, postcodeIn } from '../lib/site-check.js';
-import { recordSiteVerdict, searchGapMs } from '../lib/hunter.js';
+import { recordSiteVerdict, searchGapMs, notePossibleSite } from '../lib/hunter.js';
 
 const router = Router();
 
@@ -56,10 +56,10 @@ export function markHasWebsite(lead, found) {
   db.prepare(
     `INSERT INTO contact_signals
        (lead_id, kind, value, source, confidence, note, first_seen_at, last_seen_at)
-     VALUES (?, 'website', ?, 'site-check', ?, ?, ?, ?)
-     ON CONFLICT(lead_id, kind, value) DO UPDATE SET last_seen_at = excluded.last_seen_at`
-  ).run(lead.id, found.url, found.confidence === 'confirmed' ? 95 : 75,
-    (found.evidence ?? []).join(', ') || null, now, now);
+     VALUES (?, 'website', ?, 'site-check', 95, ?, ?, ?)
+     ON CONFLICT(lead_id, kind, value) DO UPDATE SET
+       last_seen_at = excluded.last_seen_at, confidence = MAX(confidence, 95), note = excluded.note`
+  ).run(lead.id, found.url, `their website (${(found.evidence ?? []).join(', ') || 'checked'})`, now, now);
   recordSiteVerdict(subjectsOf(lead), 'site', found);
 }
 
@@ -97,7 +97,7 @@ router.post('/leads/site-check', wrap(async (req, res) => {
   }
 
   run = {
-    running: true, total: leads.length, done: 0, with_site: 0, without: 0,
+    running: true, total: leads.length, done: 0, with_site: 0, without: 0, possible: 0,
     found: [], search_blocked: false,
     started_at: nowIso(), finished_at: null, error: null,
   };
@@ -116,7 +116,9 @@ router.post('/leads/site-check', wrap(async (req, res) => {
           mine.with_site += 1;
           mine.found.push({ id: lead.id, name: lead.business_name, url: r.url });
         } else {
-          markChecked(lead, { complete: r.searched && !r.searchBlocked });
+          // A site that may be theirs is shown to the rep, not acted on.
+          if (r.possible) { notePossibleSite(lead.id, r.possible); mine.possible += 1; }
+          markChecked(lead, { complete: r.searched && !r.searchBlocked && !r.possible });
           mine.without += 1;
         }
       } catch (err) {

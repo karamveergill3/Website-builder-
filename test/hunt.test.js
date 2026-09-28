@@ -1586,7 +1586,8 @@ test('the register path turns away a company with its own site, and files the on
     company('WHARFE SCAFFOLDING LIMITED', '76000012'),
   ] } }];
   places = [{ places: [] }];   // Google lists neither
-  sites['https://otleyscaffolding.co.uk/'] = ownSite('Otley Scaffolding', 'Otley');
+  // "Otley Scaffolding" is a town and a trade: only their postcode proves the page is theirs.
+  sites['https://otleyscaffolding.co.uk/'] = ownSite('Otley Scaffolding', 'Otley LS21 1AA');
 
   const run = await runAndWait();
   assert.equal(run.error, null, run.error ?? '');
@@ -1614,4 +1615,35 @@ test('with the web check off, the hunt fetches nothing but the registers', async
   const run = await runAndWait();
   assert.equal(run.found, 1, 'filed on Google’s word alone, as before');
   assert.deepEqual(siteLog, []);
+});
+
+test('a site that only might be theirs does not drop the prospect: it is filed, flagged to check', async () => {
+  stub();
+  await clearLeads();
+  await configure({ hunt_check_websites: '1', hunt_daily_target: '5' });
+  register = [{ body: { hits: 1, items: [company('HARROWBY SCAFFOLDING LIMITED', '76000031')] } }];
+  places = [{ places: [] }];
+  // Their name on their name-domain, and nothing tying it to Otley.
+  sites['https://harrowbyscaffolding.co.uk/'] = '<title>Harrowby Scaffolding</title><p>Scaffold hire.</p>';
+
+  const run = await runAndWait();
+  assert.equal(run.found, 1, 'filed, not turned away');
+  assert.equal(run.had_website, 0);
+  const lead = (await get('/api/leads')).body.leads[0];
+  assert.equal(lead.has_website, 0);
+  assert.equal(lead.website, 'https://harrowbyscaffolding.co.uk/', 'the possible site is on the lead');
+  const signals = (await get(`/api/leads/${lead.id}/signals`)).body.signals;
+  assert.ok(signals.some((x) => x.kind === 'website' && /possible/.test(x.note ?? '')));
+});
+
+test('a site check that blows up is "don\u2019t know": the run carries on and files the lead', async () => {
+  stub();
+  await clearLeads();
+  await configure({ hunt_check_websites: '1', hunt_daily_target: '5' });
+  register = [{ body: { hits: 1, items: [company('CRASHY SCAFFOLDING LIMITED', '76000041')] } }];
+  places = [{ places: [] }];
+  sites['https://crashyscaffolding.co.uk/'] = '<title>Crashy &#99999999; Scaffolding</title>';
+  const run = await runAndWait();
+  assert.equal(run.error, null, run.error ?? '');
+  assert.equal(run.found, 1);
 });

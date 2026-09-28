@@ -162,7 +162,7 @@ export default async function leadsView(root, params, { refresh }) {
     // "Ready" has to mean ready to APPROACH. It meant "lawful to email",
     // which is a different question, so every lead emailed yesterday counted
     // as ready again this morning — and the bulk queue took the lot.
-    ready:     (l) => l.can_email === true && l.can_contact === true,
+    ready:     (l) => l.can_email === true && l.can_contact === true && l.has_website !== 1,
     contacted: (l) => l.contacted_before === true,
   };
   const leads = view && VIEWS[view] ? allLeads.filter(VIEWS[view]) : allLeads;
@@ -347,7 +347,7 @@ export default async function leadsView(root, params, { refresh }) {
               ...rows.map((l) => html`
               <tr data-id="${l.id}">
                 <td class="c-pick"><input type="checkbox" class="pick" value="${l.id}"
-                       data-ok="${l.can_email && l.can_contact}"
+                       data-ok="${l.can_email && l.can_contact && l.has_website !== 1}"
                        data-contacted="${l.contacted_before === true}"
                        aria-label="Select ${l.business_name}"></td>
                 <td class="c-name">
@@ -365,12 +365,15 @@ export default async function leadsView(root, params, { refresh }) {
                 </td>
                 <td class="meta">${l.category ?? '—'}
                   ${l.has_website === 0 ? html`<span class="flag" data-ok
-                        title="${String(l.website_evidence ?? '').includes('web')
+                        title="${/(^|\+)web$/.test(String(l.website_evidence ?? ''))
                           ? 'No website on Google or on the web' : 'Google shows no website'}">no site</span>` : ''}
                   ${l.has_website === 1 ? (/^https?:\/\//i.test(l.website ?? '')
                     ? html`<a class="flag" href="${l.website}" target="_blank" rel="noopener"
                           title="Has a website: ${l.website}">has a site ↗</a>`
-                    : html`<span class="flag" title="Has a website">has a site</span>`) : ''}</td>
+                    : html`<span class="flag" title="Has a website">has a site</span>`) : ''}
+                  ${l.has_website !== 1 && /^https?:\/\//i.test(l.website ?? '') ? html`<a class="flag"
+                        href="${l.website}" target="_blank" rel="noopener"
+                        title="A website that may be theirs: check before messaging">possible site? ↗</a>` : ''}</td>
                 ${isTeam ? html`<td class="meta nw">${nameOf(l.assigned_to)
                   ? html`<span class="flag"${me && l.assigned_to === me.id ? ' data-ok' : ''}>${nameOf(l.assigned_to)}</span>`
                   : '—'}</td>` : ''}
@@ -386,7 +389,7 @@ export default async function leadsView(root, params, { refresh }) {
                       >done${l.contacted_via ? ` · ${l.contacted_via}` : ''}</span>` : ''}
                 </td>
                 <td class="c-act">
-                  ${l.can_email && l.can_contact
+                  ${l.can_email && l.can_contact && l.has_website !== 1
                     ? html`<button class="mini" data-act="write" data-id="${l.id}">Write</button>` : ''}
                   <button class="mini${l.can_contact ? '' : ' ghost'}" data-act="reach" data-id="${l.id}"
                           title="${l.can_contact
@@ -736,8 +739,9 @@ export default async function leadsView(root, params, { refresh }) {
       if (!run.running) {
         clearInterval(tick);
         toast(`${run.with_site} of ${run.done} have a website of their own`
+          + (run.possible ? `, and ${run.possible} might (marked "possible site?", worth a look)` : '')
           + (run.search_blocked ? '. Web search was busy, so a few may have been missed' : ''),
-        { ms: 8000 });
+        { ms: 9000 });
         refresh();
       }
     }, 1500));

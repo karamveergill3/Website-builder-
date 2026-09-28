@@ -379,11 +379,13 @@ router.post('/:id/call-outcome', wrap((req, res) => {
 router.post('/:id/whatsapp-unsend', wrap((req, res) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
   if (!lead) throw notFound('Lead not found');
-  const sends = db.prepare(
-    `SELECT id FROM outreach_events
-      WHERE lead_id = ? AND channel = 'whatsapp' AND confirmed_sent_at IS NOT NULL`
-  ).all(lead.id);
-  if (!sends.length) throw badRequest('No WhatsApp is recorded as sent to this lead.');
+  // Only the latest: an earlier WhatsApp that really went stays on record.
+  const latest = db.prepare(
+    `SELECT id, confirmed_sent_at FROM outreach_events
+      WHERE lead_id = ? AND channel = 'whatsapp' AND confirmed_sent_at IS NOT NULL
+      ORDER BY confirmed_sent_at DESC, id DESC LIMIT 1`
+  ).get(lead.id);
+  if (!latest) throw badRequest('No WhatsApp is recorded as sent to this lead.');
 
   const otherContact = Boolean(
     db.prepare(
@@ -394,20 +396,41 @@ router.post('/:id/whatsapp-unsend', wrap((req, res) => {
   );
 
   db.transaction(() => {
-    db.prepare(
-      `UPDATE outreach_events SET confirmed_sent_at = NULL
-        WHERE lead_id = ? AND channel = 'whatsapp'`
-    ).run(lead.id);
-    if (otherContact) return;
-    if (lead.status === 'sent') {
-      db.prepare("UPDATE leads SET status = 'new', last_contacted_at = NULL WHERE id = ?").run(lead.id);
+    db.prepare('UPDATE outreach_events SET confirmed_sent_at = NULL WHERE id = ?').run(latest.id);
+    const earlier = db.prepare(
+      `SELECT MAX(confirmed_sent_at) AS at FROM outreach_events
+        WHERE lead_id = ? AND channel = 'whatsapp' AND confirmed_sent_at IS NOT NULL`
+    ).get(lead.id)?.at ?? null;
+
+    // The lead: untouched if anything else reached them, otherwise back to
+    // how it stood before that WhatsApp.
+    if (earlier) {
+      if (lead.last_contacted_at === latest.confirmed_sent_at) {
+        db.prepare('UPDATE leads SET last_contacted_at = ? WHERE id = ?').run(earlier, lead.id);
+      }
+    } else if (!otherContact) {
+      db.prepare(
+        `UPDATE leads SET last_contacted_at = NULL,
+           status = CASE WHEN status = 'sent' THEN 'new' ELSE status END WHERE id = ?`
+      ).run(lead.id);
     }
+
+    // The company record: one contact fewer. Cleared only when this WhatsApp
+    // was the only contact it holds; any other (under this lead or an older
+    // one for the same company) keeps it, and keeps it blocked.
     const filed = ledgerFor(lead);
-    if (filed && filed.last_channel === 'whatsapp' && filed.times_contacted <= sends.length) {
+    if (!filed || filed.last_channel !== 'whatsapp') return;
+    const left = Math.max(0, (filed.times_contacted ?? 1) - 1);
+    if (left === 0 && !earlier && !otherContact) {
       db.prepare(
         `UPDATE company_ledger SET contacted_at = NULL, last_channel = NULL, times_contacted = 0
           WHERE company_key = ?`
       ).run(filed.company_key);
+    } else {
+      db.prepare(
+        `UPDATE company_ledger SET times_contacted = ?, contacted_at = COALESCE(?, contacted_at)
+          WHERE company_key = ?`
+      ).run(Math.max(1, left), earlier, filed.company_key);
     }
   })();
 

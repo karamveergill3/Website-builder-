@@ -189,6 +189,12 @@ function leadSummary(lead) {
               ? html`: <a href="${lead.website}" target="_blank" rel="noopener">${lead.website}</a>` : ''}.
             It isn't a no-website prospect, so a "you don't have a website" message would be wrong.
           </div></div>` : ''}
+        ${lead.has_website !== 1 && /^https?:\/\//i.test(lead.website ?? '') ? html`
+          <div class="msg msg-warn" style="margin-top:8px"><div class="grow">
+            <b>Possible website:</b> <a href="${lead.website}" target="_blank" rel="noopener">${lead.website}</a>.
+            It carries their name but couldn't be proved theirs. Have a look before sending a
+            "no website" message.
+          </div></div>` : ''}
         ${!lead.can_email && lead.block_reason ? html`
           <div class="msg msg-warn" style="margin-top:8px"><div class="grow">${lead.block_reason}</div></div>` : ''}
         ${lead.contacted_before ? html`
@@ -219,7 +225,7 @@ function signalsPanel(state) {
       <div class="panel-bd">
         ${noWeb ? html`
           <div class="msg msg-info" style="margin-bottom:10px"><div class="grow">
-            ${String(lead.website_evidence ?? '').includes('web')
+            ${/(^|\+)web$/.test(String(lead.website_evidence ?? ''))
               ? 'No website on Google or on the web: that is why it is in the tool.'
               : 'Google shows no website for this business: that is why it is in the tool.'}
             Email addresses rarely exist for these leads (a business with no site

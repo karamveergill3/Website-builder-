@@ -506,17 +506,21 @@ export function recordSiteVerdict(subjects, verdict, { url = null, how = null } 
  *
  * Google's listing is where the "no website" came from, and many firms never
  * link their site there. So look the way a person would (their name as a
- * domain, then a search) and turn away anyone whose own site turns up.
- * Returns { url, how } when there is a site, null when there is none to see.
+ * domain, then a search). Returns { has: true, url, how } only on hard proof
+ * the site is theirs, and the business is then turned away. Anything short
+ * of proof comes back as { has: false, possible: { url, why } }: the lead is
+ * still filed, with the site noted for the rep to look at, because dropping a
+ * real prospect over somebody else's same-named site is its own mistake.
  *
  * A "none" is only remembered when the whole check ran, search included: a
  * search that was blocked or over budget leaves the question open, so the
- * next run asks again rather than trusting a half-answer for a month.
+ * next run asks again rather than trusting a half-answer for a month. A check
+ * that fails outright is "don't know", and never stops the run.
  */
 async function ownWebsite(biz, subjects, cfg, counters) {
-  if (!cfg.checkWebsites) return null;
+  if (!cfg.checkWebsites) return { has: false };
   const prior = siteVerdict(subjects);
-  if (prior) return prior.verdict === 'site' ? { url: prior.url, how: prior.how } : null;
+  if (prior) return prior.verdict === 'site' ? { has: true, url: prior.url, how: prior.how } : { has: false };
 
   const canSearch = !counters.site_search_blocked
     && counters.site_searches < SITE_SEARCHES_PER_RUN;
@@ -525,6 +529,8 @@ async function ownWebsite(biz, subjects, cfg, counters) {
   let r;
   try {
     r = await findWebsite(biz, { search: canSearch ? { gapMs: searchGapMs() } : false });
+  } catch {
+    return { has: false };
   } finally {
     if (active) active.doing = null;
   }
@@ -534,10 +540,26 @@ async function ownWebsite(biz, subjects, cfg, counters) {
 
   if (r.found) {
     recordSiteVerdict(subjects, 'site', r);
-    return { url: r.url, how: r.how };
+    return { has: true, url: r.url, how: r.how };
   }
-  if (canSearch && r.searched && !r.searchBlocked) recordSiteVerdict(subjects, 'none');
-  return null;
+  if (canSearch && r.searched && !r.searchBlocked && !r.possible) recordSiteVerdict(subjects, 'none');
+  return { has: false, possible: r.possible ?? null };
+}
+
+/**
+ * A site that may be theirs but was not proved: kept on the lead, and filed
+ * as a website signal, so Leads and Reach can say "check this first".
+ */
+export function notePossibleSite(leadId, possible) {
+  if (!leadId || !possible?.url) return;
+  const now = nowIso();
+  db.prepare('UPDATE leads SET website = ? WHERE id = ? AND website IS NULL').run(possible.url, leadId);
+  db.prepare(
+    `INSERT INTO contact_signals
+       (lead_id, kind, value, source, confidence, note, first_seen_at, last_seen_at)
+     VALUES (?, 'website', ?, 'site-check', 40, ?, ?, ?)
+     ON CONFLICT(lead_id, kind, value) DO UPDATE SET last_seen_at = excluded.last_seen_at`
+  ).run(leadId, possible.url, `possible website (${possible.why}): check before messaging`, now, now);
 }
 
 /**
@@ -711,18 +733,20 @@ async function confirmAndImportPlaceLead(row, trade, area, seen, { checkSite = n
 
   // Last, because it is the slow one: Google shows no website, but does the
   // firm have one Google doesn't link? Asked only of a company about to be filed.
+  let site = null;
   if (checkSite) {
-    const site = await checkSite({
+    site = await checkSite({
       names: [row.display_name, auto.company_name],
       phones: [row.phone],
       postcode: auto.postal_code ?? postcodeIn(row.address),
       towns: [auto.locality, area],
     }, [`ch:${number}`, `pl:${row.place_id}`]);
-    if (site) return { filed: false, reason: 'has_website', site };
+    if (site.has) return { filed: false, reason: 'has_website', site };
   }
 
   try {
-    importConfirmedPlaceLead(row, auto, trade, area, { webChecked: Boolean(checkSite) });
+    const leadId = importConfirmedPlaceLead(row, auto, trade, area, { webChecked: Boolean(checkSite) });
+    notePossibleSite(leadId, site?.possible);
   } catch (err) {
     if (String(err.message).includes('leads.company_number')) return { filed: false, reason: 'known' };
     throw err;
@@ -1153,10 +1177,10 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
                 if (ledgerFor({ business_name: row.display_name, location: t.area })) {
                   counters.already_known++; continue;
                 }
-                if (checkSite && await checkSite(placeBiz(row, t.area), [`pl:${row.place_id}`])) {
-                  counters.had_website++; continue;
-                }
-                importPlaceLead(row, t.trade, t.area, { webChecked: Boolean(checkSite) });
+                const site = checkSite ? await checkSite(placeBiz(row, t.area), [`pl:${row.place_id}`]) : null;
+                if (site?.has) { counters.had_website++; continue; }
+                notePossibleSite(
+                  importPlaceLead(row, t.trade, t.area, { webChecked: Boolean(checkSite) }), site?.possible);
               } else {
                 // A confirmed company is what a messageable-only hunt is for,
                 // so it counts toward this trade's yield.
@@ -1168,10 +1192,10 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
               if (ledgerFor({ business_name: row.display_name, location: t.area })) {
                 counters.already_known++; continue;
               }
-              if (checkSite && await checkSite(placeBiz(row, t.area), [`pl:${row.place_id}`])) {
-                counters.had_website++; continue;
-              }
-              importPlaceLead(row, t.trade, t.area, { webChecked: Boolean(checkSite) });
+              const site = checkSite ? await checkSite(placeBiz(row, t.area), [`pl:${row.place_id}`]) : null;
+              if (site?.has) { counters.had_website++; continue; }
+              notePossibleSite(
+                importPlaceLead(row, t.trade, t.area, { webChecked: Boolean(checkSite) }), site?.possible);
             }
             counters.found++;
             takenPerTrade.set(t.trade, taken(t.trade) + 1);
@@ -1270,21 +1294,22 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
 
         // Last and slowest: Google shows no site (or no listing at all), so
         // look for one on the web before calling it a business without.
+        let site = null;
         if (checkSite) {
           const number = String(company.company_number ?? '').trim().toUpperCase();
-          const site = await checkSite({
+          site = await checkSite({
             names: [verdict.display_name, company.company_name],
             phones: [verdict.phone],
             postcode: company.postal_code ?? postcodeIn(verdict.address),
             towns: [company.locality, t.area],
           }, [number && `ch:${number}`, verdict.place_id && `pl:${verdict.place_id}`]);
-          if (site) { counters.had_website++; continue; }
+          if (site.has) { counters.had_website++; continue; }
         }
 
         try {
-          importLead(company, checkSite
+          notePossibleSite(importLead(company, checkSite
             ? { ...verdict, evidence: evidenceOf(verdict.evidence ?? 'no-website', true) }
-            : verdict, t.trade);
+            : verdict, t.trade), site?.possible);
         } catch (err) {
           // The partial UNIQUE index from migration 016. Two hunt processes
           // can pass the SELECT above before either INSERTs — `active` is a

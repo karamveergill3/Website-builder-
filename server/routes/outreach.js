@@ -281,6 +281,9 @@ router.post('/outreach/:id/sent', wrap((req, res) => {
   if (!Number.isInteger(id)) throw badRequest('Bad id');
   const row = db.prepare('SELECT * FROM outreach_events WHERE id = ?').get(id);
   if (!row) throw notFound('No such outreach event');
+  // Tapping "Open" and then "I sent it" (or Open twice) is one message, not
+  // two: the second confirmation changes nothing and files no second contact.
+  if (row.confirmed_sent_at) return res.json({ ok: true, confirmed_sent_at: row.confirmed_sent_at });
   const now = nowIso();
   db.prepare('UPDATE outreach_events SET confirmed_sent_at = ? WHERE id = ?').run(now, id);
   if (row.lead_id) {

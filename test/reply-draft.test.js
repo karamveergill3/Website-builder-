@@ -43,6 +43,13 @@ test('each kind of reply is recognised', () => {
     'Not right now, too busy. Maybe later': 'later',
     [BARLOWS]: 'answers',
     'Sounds interesting, what is this about?': 'other',
+    "Hi Cailan. Thanks for the offer but I'm already engaged with a developer.": 'elsewhere',
+    'My son is building us one at the moment': 'elsewhere',
+    "We've got a web designer already thanks": 'elsewhere',
+    "Thanks but we've gone with a local agency": 'elsewhere',
+    'Our website is being built as we speak': 'elsewhere',
+    'We are in the process of getting one done': 'elsewhere',
+    'Thanks for the offer, but no': 'no',
   };
   for (const [body, intent] of Object.entries(cases)) {
     assert.equal(classifyReply(body, extractByRules(body, LEAD), LEAD), intent, body);
@@ -186,4 +193,13 @@ test('"we have a website" can be recorded on the lead in one click', async () =>
   const after = (await get(`/api/leads/${l.id}`)).body.lead;
   assert.equal(after.has_website, 1);
   assert.equal(after.status, 'lost');
+});
+
+test('someone already making their site gets a gracious close, not a mock up offer', () => {
+  const d = draftOf("Hi Cailan. Thanks for the offer but I'm already engaged with a developer.");
+  assert.equal(d.intent, 'elsewhere');
+  assert.match(d.text, /good hands/);
+  assert.ok(!/mock up/i.test(d.text), 'no mock up offer to someone who has a developer');
+  assert.ok(!/[—–!]/.test(d.text), 'no dashes or exclamation marks');
+  assert.deepEqual(d.actions.map((a) => a.id), ['optout']);
 });

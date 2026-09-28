@@ -19,14 +19,14 @@
  *     company in front of you, and the free mock-up is the one thing this tool
  *     does that a cold email doesn't.
  *
- *   They name the sender and leave the door open.  A WhatsApp ends on "No
- *     pressure at all." and nothing more: Keylo's call, because the longer
- *     "just say and I won't message again" read as a form letter. The way out
- *     is still there, because a WhatsApp is answered on the number it came
- *     from, and a "no" or "stop" pasted into the tool opts them out on the
- *     spot (lib/reply-draft.js). An SMS keeps its explicit line: a text is
- *     easy to take as automated. An EMAIL carries none in the body at all:
- *     lib/compliance.js appends the identity block and opt-out to every one.
+ *   They name the sender and leave the door open.  A WhatsApp or a text ends
+ *     on "No pressure at all." and nothing more: Keylo's call, because "just
+ *     say and I won't message again" read as a form letter, and Keylo wants
+ *     it nowhere. The way out is still there, because both are answered on
+ *     the number they came from, and a "no" or "stop" pasted into the tool
+ *     opts them out on the spot (lib/reply-draft.js). An EMAIL carries none in
+ *     the body at all: lib/compliance.js appends the identity block and
+ *     opt-out to every one.
  *
  * No dashes: they read as machine-written. The sender tokens come from
  * Settings, so nothing personal lives in this file and one edit fixes every
@@ -162,6 +162,37 @@ export function withTradePitch(body) {
   }).join('\n\n');
 }
 
+/** The first text. */
+const SMS_BODY = `Hi, I'm {{my_name}} from {{my_business}}. I came across {{business}} and noticed you don't have a website yet, and I'd be happy to build you a free one page mock up to look at, with no obligation. Would you like me to put one together? No pressure at all.`;
+
+/** The first text as shipped until Keylo dropped "I won't message again" everywhere. */
+const OLD_SMS_BODY = `Hi, I'm {{my_name}} from {{my_business}}. I came across {{business}} and noticed you don't have a website yet, and I'd be happy to build you a free one page mock up to look at, with no obligation. Would you like me to put one together? If it's not for you, just say and I won't message again.`;
+
+/**
+ * A message with every "I won't message again" taken out: Keylo's call, for
+ * every channel. The shipped wordings go cleanly ("No pressure at all, and if
+ * it's not for you, just say and I won't message again." becomes "No
+ * pressure at all."); any other sentence saying it is dropped whole.
+ */
+export function withoutNoMessageAgain(body) {
+  const text = String(body ?? '');
+  if (text === OLD_SMS_BODY) return SMS_BODY;
+  const q = "['’]";
+  const out = text
+    .replace(new RegExp(String.raw`\s*\(If now isn${q}t the right time or it${q}s not for you, no worries at all, just let me know and I won${q}t message again\.\)`, 'g'), '')
+    .replace(new RegExp(String.raw`,? and if it${q}s not for you, just (say|let me know) and I won${q}t message again\.`, 'g'), '.')
+    .replace(new RegExp(String.raw`[ \t]*If it${q}s not for you, just (say|let me know) and I won${q}t message again\.`, 'g'), '')
+    .replace(new RegExp(String.raw`[ \t]*Reply STOP and I won${q}t text again\.`, 'g'), '')
+    // Anything else that says it, as a whole sentence.
+    .replace(new RegExp(String.raw`[ \t]*[^.!?\n]*\bwon${q}?t (message|text|contact|email|bother) (you )?again\b[^.!?\n]*[.!?]?\)?`, 'gi'), '')
+    .replace(/\(\s*\)/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+  return out === text.trim() ? text : out;
+}
+
 export const STARTERS = [
   {
     name: 'First message — email',
@@ -228,10 +259,9 @@ Would you like me to do that for you? No pressure at all.
     name: 'First message — SMS',
     channel: 'sms',
     subject: '',
-    // A text that doesn't say who sent it or how to stop it is not one that
-    // may lawfully be sent, so both live in the body. Warm, not robotic: no
-    // "reply STOP". Phones stitch multi-part texts back into one message.
-    body: `Hi, I'm {{my_name}} from {{my_business}}. I came across {{business}} and noticed you don't have a website yet, and I'd be happy to build you a free one page mock up to look at, with no obligation. Would you like me to put one together? If it's not for you, just say and I won't message again.`,
+    // Says who sent it, from a number they can simply reply to. Warm, not
+    // robotic: no "reply STOP". Phones stitch multi-part texts back into one.
+    body: SMS_BODY,
   },
 ];
 

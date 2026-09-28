@@ -49,15 +49,17 @@ test('a WhatsApp/SMS starter names its sender in the body, since nothing is appe
     assert.match(s.body, /\{\{my_name\}\}/, `${s.name} must identify the sender in the body`);
     assert.match(s.body, /\{\{my_business\}\}/, `${s.name} must name the business sending it`);
   }
-  // A WhatsApp is answered on the number it came from, and a "no" or "stop"
-  // pasted into the tool opts them out, so the opener ends on "No pressure at
-  // all." (Keylo's call). A text keeps its explicit line.
+  // A WhatsApp or a text is answered on the number it came from, and a "no"
+  // or "stop" pasted into the tool opts them out, so both end their ask on
+  // "No pressure at all." and nothing says "I won't message again" (Keylo's call).
   for (const s of STARTERS.filter((x) => x.channel === 'whatsapp')) {
     assert.match(s.body, /No pressure at all\.\n/, `${s.name} ends its ask on "No pressure at all."`);
-    assert.ok(!/won't message again/.test(s.body), `${s.name} drops the long close`);
   }
   for (const s of STARTERS.filter((x) => x.channel === 'sms')) {
-    assert.match(s.body.toLowerCase(), /won't message again/, `${s.name} keeps its opt-out line`);
+    assert.match(s.body, /No pressure at all\.$/, `${s.name} ends on "No pressure at all."`);
+  }
+  for (const s of STARTERS) {
+    assert.ok(!/won'?t (message|text) again/i.test(s.body), `${s.name} never says it won't message again`);
   }
 });
 
@@ -250,4 +252,27 @@ test('saved openers are brought up to date, but an edited paragraph is kept', as
   assert.ok(!now.includes('say hello'));
   assert.ok(now.includes('My own paragraph that I wrote myself.'), 'their edit stays');
   assert.ok(now.endsWith('Would you like me to do that for you? No pressure at all.'));
+});
+
+test('"I won\'t message again" comes out of every saved template, and nothing else does', async () => {
+  const { withoutNoMessageAgain } = await import('../server/lib/starters.js');
+  const cases = [
+    ["Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.",
+      'Would you like me to do that for you? No pressure at all.'],
+    ["Hi, I'm {{my_name}} from {{my_business}}. I came across {{business}} and noticed you don't have a website yet, and I'd be happy to build you a free one page mock up to look at, with no obligation. Would you like me to put one together? If it's not for you, just say and I won't message again.",
+      "Hi, I'm {{my_name}} from {{my_business}}. I came across {{business}} and noticed you don't have a website yet, and I'd be happy to build you a free one page mock up to look at, with no obligation. Would you like me to put one together? No pressure at all."],
+    ["Would you like one?\n\n(If now isn't the right time or it's not for you, no worries at all, just let me know and I won't message again.)\n\nCheers,\n{{my_name}}",
+      'Would you like one?\n\nCheers,\n{{my_name}}'],
+    ['Hi, is this {{business}}? I build sites. Reply STOP and I won’t text again.', 'Hi, is this {{business}}? I build sites.'],
+    ['Fancy a chat? Honestly, I won’t message you again after this. Cheers', 'Fancy a chat? Cheers'],
+  ];
+  for (const [before, after] of cases) assert.equal(withoutNoMessageAgain(before), after, before);
+  const untouched = 'Hi {{business}}, a free mock up? No pressure at all.\n\nThanks,\n{{my_name}}';
+  assert.equal(withoutNoMessageAgain(untouched), untouched);
+});
+
+test('the email footer asks them to reply, without "I won\'t write again"', async () => {
+  const { DEFAULT_OPTOUT_LINE } = await import('../server/lib/compliance.js');
+  assert.equal(DEFAULT_OPTOUT_LINE, "If this isn't something you'd find useful, just reply and let me know.");
+  assert.ok(!/again/i.test(DEFAULT_OPTOUT_LINE));
 });

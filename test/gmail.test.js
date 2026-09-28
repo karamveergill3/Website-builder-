@@ -121,7 +121,7 @@ test('every queued email carries the identity block and opt-out line', async () 
 
   assert.match(q.body, /Test Web Studio/);
   assert.match(q.body, /1 Test Street, Leeds LS1 1AA/);
-  assert.match(q.body, /reply and say so/);
+  assert.match(q.body, /just reply and let me know/);
   assert.equal(q.subject, 'A website for Footer Check?');
 
   await post('/api/gmail/queue/clear');
@@ -188,14 +188,14 @@ test('a confirmed send reaches Gmail, is logged, and advances the lead', async (
 
   const body = Buffer.from(msg.split('\r\n\r\n')[1].replace(/\r\n/g, ''), 'base64').toString('utf8');
   assert.match(body, /Test Web Studio/, 'identity block travels in the real message');
-  assert.match(body, /reply and say so/, 'opt-out line travels in the real message');
+  assert.match(body, /just reply and let me know/, 'opt-out line travels in the real message');
 
   // Logged as proof.
   const entry = (await get(`/api/emails/log?lead_id=${lead.id}`)).body.entries[0];
   assert.equal(entry.channel, 'gmail');
   assert.equal(entry.provider_message_id, 'msg-1');
   assert.equal(entry.to_email, 'sendme@example.co.uk');
-  assert.match(entry.body_snapshot, /reply and say so/);
+  assert.match(entry.body_snapshot, /just reply and let me know/);
 
   const after = (await get(`/api/leads/${lead.id}`)).body.lead;
   assert.equal(after.status, 'sent');

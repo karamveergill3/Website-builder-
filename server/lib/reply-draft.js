@@ -168,8 +168,7 @@ export function draftReply({
       return {
         intent,
         label: 'Not interested',
-        text: sign(`No problem at all, thanks for letting me know. I won't message again. `
-          + `All the best with ${business}.`),
+        text: sign(`No problem at all, thanks for letting me know. All the best with ${business}.`),
         note: null,
         actions: [{ id: 'optout', label: 'Mark not interested (never contact again)' }],
       };
@@ -179,8 +178,8 @@ export function draftReply({
         intent,
         label: 'Using someone else',
         text: sign(`That's great to hear, it sounds like you're in good hands. Thanks for letting `
-          + `me know, and I won't message again. If anything changes, or you'd ever like a second `
-          + `opinion, just give me a shout. All the best with ${business}.`),
+          + `me know, and if anything changes, or you'd ever like a second opinion, just give me `
+          + `a shout. All the best with ${business}.`),
         note: null,
         actions: [{ id: 'optout', label: 'Mark lost (they’re using someone else)' }],
       };

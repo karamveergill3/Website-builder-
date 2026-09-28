@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import {
   STARTERS, missingStarters, withSalesLine, withShortClose, withNewWording,
-  withTradePitch, RETIRED_OPENERS,
+  withTradePitch, RETIRED_OPENERS, withoutNoMessageAgain,
 } from './lib/starters.js';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -1730,6 +1730,27 @@ Thanks so much, and have a lovely day.
       CREATE INDEX idx_wa_paste_seen_text ON wa_paste_seen(text_key, seen_at);
       CREATE INDEX idx_wa_paste_seen_lead ON wa_paste_seen(lead_id, seen_at);
     `,
+  },
+  {
+    name: '061_no_wont_message_again',
+    run() {
+      // Keylo's call: no message says "I won't message again", on any channel.
+      // The shipped wordings come out cleanly; a saved template that says it
+      // in its own words loses that sentence, and nothing else changes.
+      const now = new Date().toISOString();
+      for (const row of db.prepare('SELECT id, body FROM templates').all()) {
+        const body = withoutNoMessageAgain(row.body);
+        if (body !== row.body) {
+          db.prepare('UPDATE templates SET body = ?, updated_at = ? WHERE id = ?').run(body, now, row.id);
+        }
+      }
+      // The email footer's opt-out, if it was saved as shipped ("…and I won't
+      // write again"); a line someone wrote themselves is theirs.
+      db.prepare("UPDATE settings SET value = ? WHERE key = 'optout_line' AND value = ?").run(
+        "If this isn't something you'd find useful, just reply and let me know.",
+        "If this isn't something you'd find useful, just reply and say so and I won't write again.",
+      );
+    },
   },
 ];
 

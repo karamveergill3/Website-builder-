@@ -101,7 +101,8 @@ test('"how much?" gets the free mock up and the starting prices', () => {
 
 test('no, later, has a site and stop each get the right close', () => {
   const no = draftOf('No thanks');
-  assert.match(no.text, /won't message again/);
+  assert.match(no.text, /No problem at all/);
+  assert.ok(!/won't message again/.test(no.text), 'never "I won\'t message again"');
   assert.deepEqual(no.actions.map((a) => a.id), ['optout']);
   assert.match(draftOf('Not right now').text, /No rush/);
   const site = draftOf('We already have a website');

@@ -165,27 +165,29 @@ test('every WhatsApp opener carries the sales line, just before the mock-up offe
   }
 });
 
-test('the trades opener reads exactly as Keylo sends it', async () => {
+test('the WhatsApp opener reads exactly as Keylo sends it, for a window cleaner', async () => {
   const { renderTemplate } = await import('../server/lib/template.js');
-  const trades = STARTERS.find((s) => s.name === 'First message — WhatsApp · Trades');
+  const { pitchFor } = await import('../server/lib/pitch-match.js');
+  const opener = STARTERS.find((s) => s.name === 'First message — WhatsApp');
+  const own = pitchFor('window cleaner');
   const r = renderTemplate(
-    trades,
-    { business_name: 'Barlows Window Services', location: 'Stoke-On-Trent' },
+    opener,
+    { business_name: 'Barlows Window Services', location: 'Stoke-On-Trent', category: 'window cleaner' },
     { biz_name: 'keylo studios' },
-    { name: 'javier' },
+    { name: 'javier aydogan' },
   );
   assert.equal(r.body, [
     "Hi, my name is Javier and I'm from Keylo Studios. I came across Barlows Window Services in Stoke-On-Trent and noticed you don't have a website yet, so I thought I'd get in touch.",
     '',
-    "For a trade, most people just want to see a few jobs you've done and be able to tap to call. That's exactly what we build: a clean one page site with photos of your work, the areas you cover, and a call button, so new customers can find you and get straight through.",
+    own.pitch,
     '',
     'Having a website is proven to boost sales by 40%.',
     '',
     "I'd be happy to put together a free mock up for Barlows Window Services so you can see how it could look, with no cost and no obligation.",
     '',
-    "Would you like me to do that for you? No pressure at all.",
+    'Would you like me to do that for you? No pressure at all.',
     '',
-    'Cheers, and all the best with the work.',
+    own.close,
     'Javier, Keylo Studios',
   ].join('\n'));
 });
@@ -201,45 +203,37 @@ test('the sales line is added to an existing opener without undoing edits', asyn
   assert.equal(withSalesLine(noOffer), noOffer, 'nothing to anchor on, so left alone');
 });
 
-test('the salon and trades WhatsApp openers are seeded and read naturally', async () => {
-  const names = (await get('/api/templates')).body.templates
-    .filter((t) => t.channel === 'whatsapp').map((t) => t.name);
-  assert.ok(names.includes('First message — WhatsApp · Salons & beauty'));
-  assert.ok(names.includes('First message — WhatsApp · Trades'));
-
-  // The generic opener no longer jams the raw trade word in — it reads for any
-  // trade, salons and cafés included.
-  const wa = (await get('/api/templates')).body.templates
+test('one WhatsApp opener, with a different middle for every kind of business', async () => {
+  const { renderTemplate } = await import('../server/lib/template.js');
+  const opener = (await get('/api/templates')).body.templates
     .find((t) => t.name === 'First message — WhatsApp');
-  assert.ok(!wa.body.includes('{{category}}'), 'the generic opener drops the fragile trade word');
-});
-
-
-/* ------------------------------------------------- wording of the openers */
-
-test('no opener says "we build simple": each reads like the Trades one', () => {
-  for (const s of STARTERS.filter((x) => x.channel === 'whatsapp')) {
-    assert.ok(!/we build simple|simple,/i.test(s.body), `${s.name} undersells the work`);
-    assert.match(s.body, /That's exactly what we build/, `${s.name} follows the Trades wording`);
+  assert.ok(opener, 'the opener is seeded');
+  const as = (category) => renderTemplate(opener,
+    { business_name: 'Test Business', location: 'Leeds', category }, { biz_name: 'Keylo Studios' },
+    { name: 'Cailan Jassal' }).body;
+  const bodies = ['roofers', 'dog groomers', 'barbers', 'cafe', 'garage', 'accountant'].map(as);
+  assert.equal(new Set(bodies).size, bodies.length, 'each business reads differently');
+  for (const b of bodies) {
+    assert.match(b, /That's exactly what we build/);
+    assert.ok(!/we build simple|\bsimple\b/i.test(b), 'never "simple"');
+    assert.ok(!b.includes('Jassal'), 'first name only');
+    assert.ok(!/\{\{/.test(b), 'nothing left unfilled');
   }
 });
 
-test('a pet business gets its own opener, signed with a first name only', async () => {
-  const { renderTemplate } = await import('../server/lib/template.js');
-  const { sectorFor, sectorLabel } = await import('../server/lib/sectors.js');
-  assert.equal(sectorLabel(sectorFor('dog groomer')), 'Pets & animals');
-  const pets = STARTERS.find((s) => s.name === 'First message — WhatsApp · Pets & animals');
-  const r = renderTemplate(
-    pets,
-    { business_name: 'Perfect Paws Burton Ltd', location: 'Burton Upon Trent' },
-    { biz_name: 'keylo studios' },
-    { name: 'javier aydogan' },
-  );
-  assert.match(r.body, /^Hi, my name is Javier and I'm from Keylo Studios\. I came across Perfect Paws Burton Ltd in Burton Upon Trent/);
-  assert.match(r.body, /That's exactly what we build/);
-  assert.match(r.body, /No pressure at all\.\n/);
-  assert.match(r.body, /\nJavier, Keylo Studios$/);
-  assert.ok(!r.body.includes('Aydogan'), 'never the surname');
+test('the sector copies of the opener are retired', async () => {
+  const names = (await get('/api/templates')).body.templates.map((t) => t.name);
+  assert.ok(!names.some((n) => /First message — WhatsApp ·/.test(n)));
+});
+
+test('a saved sector copy is removed only if nobody edited it', async () => {
+  const { RETIRED_OPENERS, withTradePitch } = await import('../server/lib/starters.js');
+  const trades = RETIRED_OPENERS['First message — WhatsApp · Trades'];
+  const converted = withTradePitch(trades);
+  assert.match(converted, /\{\{trade_pitch\}\}/);
+  assert.match(converted, /\{\{trade_close\}\}\n\{\{my_name\}\}, \{\{my_business\}\}$/);
+  const edited = trades.replace('Cheers, and all the best with the work.', 'Speak soon.');
+  assert.ok(withTradePitch(edited).includes('Speak soon.'), 'an edited sign-off is kept');
 });
 
 test('saved openers are brought up to date, but an edited paragraph is kept', async () => {

@@ -7,6 +7,7 @@ import {
 } from '../lib/template.js';
 import { STARTERS, missingStarters } from '../lib/starters.js';
 import { leadVoice } from '../lib/auth.js';
+import { pitchFor } from '../lib/pitch-match.js';
 
 const router = Router();
 
@@ -35,6 +36,9 @@ router.get('/', wrap((req, res) => {
     all_placeholders: ALL_PLACEHOLDERS,
     channels: CHANNELS,
     sms_soft_limit: SMS_SOFT_LIMIT,
+    // The preview's sample business is a roofer: its written pitch, so the
+    // preview shows {{trade_pitch}} as a roofer would actually read it.
+    sample_pitch: pitchFor('roofers'),
   });
 }));
 

@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import {
   STARTERS, missingStarters, withSalesLine, withShortClose, withNewWording,
+  withTradePitch, RETIRED_OPENERS,
 } from './lib/starters.js';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -1675,6 +1676,27 @@ Thanks so much, and have a lovely day.
       const now = new Date().toISOString();
       for (const row of db.prepare("SELECT id, body FROM templates WHERE channel = 'whatsapp'").all()) {
         const body = withNewWording(row.body);
+        if (body !== row.body) {
+          db.prepare('UPDATE templates SET body = ?, updated_at = ? WHERE id = ?').run(body, now, row.id);
+        }
+      }
+    },
+  },
+  {
+    name: '058_whatsapp_opener_per_business',
+    run() {
+      // One WhatsApp opener now, its middle and sign-off written for each kind
+      // of business ({{trade_pitch}}, {{trade_close}}). A sector copy still
+      // exactly as shipped was never edited, so it goes and the one opener
+      // takes over; one someone edited is kept, with its pitch paragraph made
+      // per-business if that paragraph was left as shipped.
+      const now = new Date().toISOString();
+      for (const row of db.prepare("SELECT id, name, body FROM templates WHERE channel = 'whatsapp'").all()) {
+        if (Object.hasOwn(RETIRED_OPENERS, row.name) && RETIRED_OPENERS[row.name] === row.body) {
+          db.prepare('DELETE FROM templates WHERE id = ?').run(row.id);
+          continue;
+        }
+        const body = withTradePitch(row.body);
         if (body !== row.body) {
           db.prepare('UPDATE templates SET body = ?, updated_at = ? WHERE id = ?').run(body, now, row.id);
         }

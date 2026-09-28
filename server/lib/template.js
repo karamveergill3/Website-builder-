@@ -7,6 +7,10 @@
  * Also supported, because they fall out of the same lead record for free:
  *   {{phone}}  {{email}}  {{first_name}}
  *
+ * Written for the lead's trade (lib/pitches.js): {{trade_pitch}}, what that
+ * kind of business's customers want and what we build for it, and
+ * {{trade_close}}, a sign-off line to suit.
+ *
  * About the sender: {{my_business}} {{my_email}} {{my_website}} are the shared
  * Keylo details from Settings; {{my_name}} and {{my_phone}} are the signed-in
  * rep's own, so a message says who actually sent it (see senderContext).
@@ -24,6 +28,7 @@
  * preview instead of silently vanishing.
  */
 import { getSettings } from '../db.js';
+import { pitchFor } from './pitch-match.js';
 
 export const CANONICAL_PLACEHOLDERS = ['business', 'category', 'location'];
 export const SENDER_PLACEHOLDERS = [
@@ -59,6 +64,8 @@ export const ALL_PLACEHOLDERS = [
   'editorial_summary',
   'about_line',
   'primary_type',
+  'trade_pitch',
+  'trade_close',
   ...STAT_PLACEHOLDER_NAMES,
   ...SENDER_PLACEHOLDERS,
 ];
@@ -70,9 +77,6 @@ export const ALL_PLACEHOLDERS = [
  * lowercase byline reads like an admin never finished setup, so the render
  * fixes it every time without touching the stored value.
  */
-/** "Cailan Jassal" -> "Cailan". */
-export const firstName = (value) => String(value ?? '').trim().split(/\s+/)[0] ?? '';
-
 export function titleCase(value) {
   if (typeof value !== 'string') return '';
   return value
@@ -83,12 +87,18 @@ export function titleCase(value) {
     .join('');
 }
 
+/** "Cailan Jassal" -> "Cailan". */
+export const firstName = (value) => String(value ?? '').trim().split(/\s+/)[0] ?? '';
+
 const TOKEN = /\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}/gi;
 
 /** Build the substitution map for a lead row. */
 export function leadContext(lead = {}) {
   const business = lead.business_name ?? '';
   const summary = String(lead.editorial_summary ?? '').trim();
+  // What this kind of business's customers want, and what we build for it:
+  // a roofer and a dog groomer hear different things (lib/pitches.js).
+  const pitch = pitchFor(lead.category);
   return {
     business,
     category: lead.category ?? '',
@@ -109,6 +119,8 @@ export function leadContext(lead = {}) {
     about_line: summary
       ? `I see ${business} is described as "${summary.replace(/\s+/g, ' ').replace(/\.+$/, '')}". That's exactly the kind of story a website is made for.`
       : '',
+    trade_pitch: pitch.pitch,
+    trade_close: pitch.close,
     ...STAT_PLACEHOLDERS,
   };
 }

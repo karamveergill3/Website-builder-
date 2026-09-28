@@ -421,7 +421,12 @@ router.post('/:id/whatsapp-unsend', wrap((req, res) => {
     const filed = ledgerFor(lead);
     if (!filed || filed.last_channel !== 'whatsapp') return;
     const left = Math.max(0, (filed.times_contacted ?? 1) - 1);
-    if (left === 0 && !earlier && !otherContact) {
+    // Before confirming became idempotent, one message tapped "Open" and "I
+    // sent it" counted twice. So when this lead has nothing else and the
+    // record's last contact IS this message, it was the only one.
+    const onlyThis = !earlier && !otherContact
+      && (left === 0 || String(filed.contacted_at ?? '') >= String(latest.confirmed_sent_at));
+    if (onlyThis) {
       db.prepare(
         `UPDATE company_ledger SET contacted_at = NULL, last_channel = NULL, times_contacted = 0
           WHERE company_key = ?`

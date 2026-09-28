@@ -16,19 +16,16 @@
  *
  * Getting this wrong the other way is just as bad: a genuine prospect dropped
  * because somebody ELSE's page looked like theirs is a lead lost for months.
- * "Premier Roofing" in Wolverhampton does not own premierroofing.co.uk; a
- * salon called Glamour does not own glamour.com. So a page only counts as
- * theirs on hard evidence:
+ * Names and towns are shared ("Premier Roofing", "Dudley Groundworks", a
+ * firm that lists the towns around it), so neither is ever proof. A page is
+ * only theirs on:
  *
- *   confirmed  their phone number is on it; or their full name, as a phrase,
- *              with their exact postcode; or, on a domain tied to them (their
- *              name or their email's), their full name with their postcode
- *              district or town, and nothing on the page placing them
- *              elsewhere. The name must have a word that identifies THEM:
- *              not a town, a trade ("roofing") or a stock word ("premier").
- *   possible   their distinctive name on their name-domain and nothing more,
- *              or their name-domain refused to let us read it. Not enough to
- *              drop a prospect; shown to the rep to check by eye.
+ *   confirmed  their phone number (as Google or the lead holds it), or their
+ *              full name together with one of their exact postcodes.
+ *   possible   their name on a domain tied to them (their name's or their
+ *              email's), or that domain refusing to let us read it. Never
+ *              used to drop a prospect: the lead is filed with the site
+ *              shown, for a person to look at.
  *
  * A parked page, a domain that forwards to a Facebook page, or a page about
  * someone else counts for nothing.
@@ -88,12 +85,6 @@ const STOCK = new Set([
   'northern', 'southern', 'eastern', 'western', 'new', 'little', 'big', 'great', 'global',
   'bespoke', 'expert', 'experts', 'master', 'masters', 'trusted', 'dependable', 'swift',
   'rapid', 'quick', 'fast', 'green', 'eco', 'blue', 'red', 'bright', 'clean', 'pure',
-]);
-
-/** Towns that are also everyday words: a page saying them places nobody. */
-const WORD_TOWNS = new Set([
-  'reading', 'sale', 'bath', 'march', 'street', 'deal', 'hope', 'wells', 'hyde', 'stone',
-  'ware', 'eye', 'holt', 'hull', 'bury', 'rye', 'wick', 'par', 'ely', 'neath', 'send',
 ]);
 
 /**
@@ -341,17 +332,19 @@ export function judgePage({ html, url }, biz, { how = 'name-domain' } = {}) {
 
   const { title, text, words } = pageText(html);
 
-  // Their own number beats everything, a "How it works!" heading included.
-  const theirPhones = new Set((biz.phones ?? [])
-    .map((p) => normalisePhone(p)).filter((n) => n.ok).map((n) => n.e164));
-  if (theirPhones.size && [...pagePhones(html, text)].some((p) => theirPhones.has(p))) {
-    return { match: 'confirmed', parked: false, evidence: ['phone'] };
-  }
-
+  // A parked, for-sale or "coming soon" page is no website, even their own
+  // holding page with their number on it: that is the warmest lead there is.
   if (PLACEHOLDER_TITLE_RE.test(title) || PARKED_RE.test(title)
       || (words < 300 && PARKED_RE.test(text))
       || SOON_RE.test(title) || (words < 80 && SOON_RE.test(text))) {
     return { match: null, parked: true, evidence: ['parked'] };
+  }
+
+  // Their own number, as Google or the lead holds it, is proof.
+  const theirPhones = new Set((biz.phones ?? [])
+    .map((p) => normalisePhone(p)).filter((n) => n.ok).map((n) => n.e164));
+  if (theirPhones.size && [...pagePhones(html, text)].some((p) => theirPhones.has(p))) {
+    return { match: 'confirmed', parked: false, evidence: ['phone'] };
   }
   if (words < 200 && CHALLENGE_RE.test(`${title} ${String(html ?? '').slice(0, 20_000)}`)) {
     return { match: how === 'search' ? null : 'blocked', parked: false, evidence: ['challenge'] };
@@ -367,32 +360,30 @@ export function judgePage({ html, url }, biz, { how = 'name-domain' } = {}) {
   const named = phrases.find((p) => has(p.join(' ')));
   const identifying = Boolean(named) && phrases.some((p) => has(p.join(' ')) && distinctive(p, townWords));
 
-  const code = compact(biz.postcode);
+  // Every postcode we hold for them: the registered office is often the
+  // accountant's, so the trading address counts just the same.
+  const codes = [biz.postcodes ?? [], biz.postcode ?? []].flat().map(compact).filter(Boolean);
   const pageCodes = [...text.matchAll(POSTCODE_RE)].map((m) => `${m[1]}${m[2]}`.toUpperCase());
-  const exactPostcode = Boolean(code) && pageCodes.includes(code);
-  const sameDistrict = Boolean(code) && pageCodes.some((p) => district(p) === district(code));
-  // Somewhere else: the page gives postcodes, and none is in their district.
-  const elsewhere = Boolean(code) && pageCodes.length > 0 && !sameDistrict;
-  const townHit = [biz.towns ?? []].flat().some((t) => {
-    const f = flat(t).trim();
-    return f && !WORD_TOWNS.has(f) && has(f);
-  });
+  const exactPostcode = codes.some((c) => pageCodes.includes(c));
+  const sameDistrict = codes.some((c) => pageCodes.some((p) => district(p) === district(c)));
+  // Somewhere else: the page gives postcodes, and none is in their districts.
+  const elsewhere = codes.length > 0 && pageCodes.length > 0 && !sameDistrict;
 
   const evidence = [];
   if (named) evidence.push('name');
   if (exactPostcode) evidence.push('postcode');
   else if (sameDistrict) evidence.push('district');
-  if (townHit) evidence.push('town');
   if (elsewhere) evidence.push('elsewhere');
 
+  // Their full name AND one of their exact postcodes: proof.
   if (named && exactPostcode) return { match: 'confirmed', parked: false, evidence };
 
-  const tied = how !== 'search';
-  if (tied && identifying && !elsewhere && (sameDistrict || townHit)) {
-    return { match: 'confirmed', parked: false, evidence };
-  }
-  if (tied && identifying && !elsewhere) {
-    return { match: 'possible', parked: false, evidence };
+  // Anything less is never proof. Names and towns are shared: firms hide
+  // their address, list the towns around them, and "Dudley Groundworks" is
+  // a place and a trade. On a domain tied to them, a page carrying their
+  // name is worth a person's look; that is all.
+  if (how !== 'search' && named) {
+    return { match: 'possible', parked: false, evidence: identifying ? evidence : [...evidence, 'common-name'] };
   }
   return { match: null, parked: false, evidence };
 }
@@ -454,26 +445,19 @@ async function getPage(url, { fetchImpl, timeoutMs, signal }) {
 }
 
 /**
- * Fetch a domain's home page the ways a browser would get there: the bare
- * domain, then the www host (a site can live on either, and the other may
- * answer 404 or not at all), each over https and, when the secure connection
- * itself fails, plain http. A host that answers "not allowed" (403, a bot
- * challenge) is reported, because that is a live site we could not read.
+ * One host's home page, the way a browser gets there: https, and plain http
+ * when the secure connection itself fails (small old sites still exist). A
+ * host that answers "not allowed" (403, a bot challenge) is reported as
+ * blocked, because that is a live site we could not read.
  */
-async function fetchDomain(domain, opts) {
-  const bare = domain;
-  const www = `www.${domain}`;
-  let blocked = null;
-  for (const host of [bare, www]) {
-    const secure = await getPage(`https://${host}/`, opts);
-    if (secure.ok) return { page: secure, blocked };
-    if (BLOCK_STATUSES.has(secure.status)) blocked ??= { url: secure.url ?? `https://${host}/`, status: secure.status };
-    if (secure.error === 'aborted' || secure.error === 'AbortError') break;
-    if (!secure.status && !secure.dns) {
-      const plain = await getPage(`http://${host}/`, opts);
-      if (plain.ok) return { page: plain, blocked };
-      if (BLOCK_STATUSES.has(plain.status)) blocked ??= { url: plain.url ?? `http://${host}/`, status: plain.status };
-    }
+async function fetchHost(host, opts) {
+  const secure = await getPage(`https://${host}/`, opts);
+  if (secure.ok) return { page: secure };
+  let blocked = BLOCK_STATUSES.has(secure.status) ? { url: secure.url ?? `https://${host}/` } : null;
+  if (!secure.status && !secure.dns && !opts.signal?.aborted) {
+    const plain = await getPage(`http://${host}/`, opts);
+    if (plain.ok) return { page: plain };
+    if (BLOCK_STATUSES.has(plain.status)) blocked ??= { url: plain.url ?? `http://${host}/` };
   }
   return { page: null, blocked };
 }
@@ -540,16 +524,9 @@ export async function findWebsite(biz, {
   const opts = { fetchImpl, timeoutMs, signal: budget.signal };
   const result = { found: false, possible: null, tried: 0, searched: false, searchBlocked: false };
 
-  const verdictFor = async ({ domain, how, url }) => {
-    let page;
-    let blocked = null;
-    if (url) {
-      page = await getPage(url, opts);
-      if (!page.ok && BLOCK_STATUSES.has(page.status)) blocked = { url: page.url ?? url, status: page.status };
-    } else {
-      ({ page, blocked } = await fetchDomain(domain, opts));
-    }
-    result.tried++;
+  /** Judge one fetched page (or a refusal) into an outcome for settle(). */
+  const outcome = (fetched, how, domain) => {
+    const { page, blocked } = fetched;
     if (!page?.ok) {
       return blocked && how !== 'search' ? { possible: { url: blocked.url, why: 'would not let us read it' } } : null;
     }
@@ -560,6 +537,24 @@ export async function findWebsite(biz, {
     if (j.match === 'possible') return { possible: { url: page.url, why: 'carries their name' } };
     if (j.match === 'blocked') return { possible: { url: page.url, why: 'would not let us read it' } };
     return null;
+  };
+
+  const verdictFor = async ({ domain, how, url }) => {
+    result.tried++;
+    if (url) {
+      const page = await getPage(url, opts);
+      return outcome({
+        page, blocked: !page.ok && BLOCK_STATUSES.has(page.status) ? { url: page.url ?? url } : null,
+      }, how, domain);
+    }
+    // The bare domain and the www host can be different things entirely: a
+    // registrar's parking page on one and the real site on the other, or one
+    // that hangs. Both are asked unless the first is already proof.
+    const www = `www.${domain}`;
+    const first = outcome(await fetchHost(domain, opts), how, domain);
+    if (first?.hit || opts.signal?.aborted) return first;
+    const second = outcome(await fetchHost(www, opts), how, domain);
+    return second?.hit ? second : (first ?? second);
   };
 
   const settle = (outcomes) => {

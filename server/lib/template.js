@@ -70,6 +70,9 @@ export const ALL_PLACEHOLDERS = [
  * lowercase byline reads like an admin never finished setup, so the render
  * fixes it every time without touching the stored value.
  */
+/** "Cailan Jassal" -> "Cailan". */
+export const firstName = (value) => String(value ?? '').trim().split(/\s+/)[0] ?? '';
+
 export function titleCase(value) {
   if (typeof value !== 'string') return '';
   return value
@@ -133,8 +136,10 @@ export function senderContext(settings = getSettings(), user = null) {
   return {
     // Names are always shown title-cased. Whatever a rep typed in on their
     // account or an admin entered in Settings, "karam" and "keylo studios"
-    // read as unfinished when they arrive on a prospect's screen.
-    my_name:     titleCase(own(user?.name)  ?? v('biz_contact_name')),
+    // read as unfinished when they arrive on a prospect's screen. And a
+    // message is signed with a first name only: "Cailan, Keylo Studios",
+    // never the surname.
+    my_name:     firstName(titleCase(own(user?.name)  ?? v('biz_contact_name'))),
     my_business: titleCase(v('biz_name')),
     my_phone:    own(user?.phone) ?? v('biz_phone'),
     my_email:    own(user?.work_email) ?? v('biz_email'),

@@ -19,15 +19,14 @@
  *     company in front of you, and the free mock-up is the one thing this tool
  *     does that a cold email doesn't.
  *
- *   They give a gentle way out, folded into the ask.  Not a bracketed
- *     disclaimer and not the robotic "reply STOP", but a natural half-sentence
- *     ("no pressure at all, and if it's not for you, just say and I won't
- *     message again"). An EMAIL doesn't carry one in the body at all:
- *     lib/compliance.js appends the identity block and opt-out to every email
- *     automatically. A WhatsApp or SMS is a deep link the user taps and
- *     nothing can be appended to it, so those bodies carry the sender and the
- *     soft opt-out themselves. Removing that from a cold WhatsApp/SMS is not a
- *     style choice: PECR needs it, and it is what keeps the number off a ban.
+ *   They name the sender and leave the door open.  A WhatsApp ends on "No
+ *     pressure at all." and nothing more: Keylo's call, because the longer
+ *     "just say and I won't message again" read as a form letter. The way out
+ *     is still there, because a WhatsApp is answered on the number it came
+ *     from, and a "no" or "stop" pasted into the tool opts them out on the
+ *     spot (lib/reply-draft.js). An SMS keeps its explicit line: a text is
+ *     easy to take as automated. An EMAIL carries none in the body at all:
+ *     lib/compliance.js appends the identity block and opt-out to every one.
  *
  * No dashes: they read as machine-written. The sender tokens come from
  * Settings, so nothing personal lives in this file and one edit fixes every
@@ -49,6 +48,71 @@ export function withSalesLine(body) {
   const at = text.search(/\n\n[^\n]*free mock ?-?up/i);
   if (at < 0) return text;
   return `${text.slice(0, at)}\n\n${SALES_LINE}${text.slice(at)}`;
+}
+
+/** The long close the WhatsApp openers used to end on. */
+const OLD_CLOSE = /No pressure at all, and if it(?:'|\u2019)s not for you, just say and I won(?:'|\u2019)t message again\./;
+
+/**
+ * End an opener on "No pressure at all." as the shipped ones now do. Only
+ * that sentence changes, so wording edited on the Templates screen stays.
+ */
+export function withShortClose(body) {
+  return String(body ?? '').replace(OLD_CLOSE, 'No pressure at all.');
+}
+
+
+/**
+ * The paragraphs the WhatsApp openers used to carry, and what replaces each.
+ * "We build simple…" undersold the work; every opener now reads like the
+ * Trades one: what customers want, then "That's exactly what we build".
+ */
+const OPENER_SWAPS = new Map([
+  [
+    "Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} while looking around {{location}} and noticed you don't have a website yet, so I thought I'd reach out and say hello.",
+    "Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} in {{location}} and noticed you don't have a website yet, so I thought I'd get in touch."
+  ],
+  [
+    "We build simple, great looking one page websites for local businesses. Just a clear page with what you do, a few photos, and a button so people can call or message you straight from their phone.",
+    "Most people look a business up online before they get in touch, and that's where a good website wins you the job. That's exactly what we build: a clean, professional site showing what you do, photos of your work, and a button so new customers can call or message you straight from their phone."
+  ],
+  [
+    "I'd be really happy to put together a free mock up for {{business}} so you can see exactly how it could look, with no cost and no obligation at all.",
+    "I'd be happy to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation."
+  ],
+  [
+    "Would that be something you'd like me to do for you? No pressure at all.",
+    "Would you like me to do that for you? No pressure at all."
+  ],
+  [
+    "We build simple, beautiful one page websites: your treatments, lovely photos of your work, and a button so someone can call or book you straight from their phone. They're really easy to keep updated too.",
+    "New clients want to see your work, your treatments and your prices, and book without having to ring. That's exactly what we build: a beautiful site with your treatments, lovely photos of your work, and a button so they can book or call you straight from their phone."
+  ],
+  [
+    "For a place like yours, a website is usually where people check the menu, your opening hours and how to order, so it can make a real difference. We build simple, tasty looking one page sites with your menu, a few photos and a tap to call button.",
+    "For a place like yours, people want to check the menu, your opening hours and how to order before they come in. That's exactly what we build: a site with your menu, great photos of your food, and a button to call or order straight from their phone."
+  ],
+  [
+    "For a garage, a website is where people check what you do and book their car in. We build simple, straightforward one page sites with your services, your opening hours and a tap to call button, so customers can find you and get booked in easily.",
+    "For a garage, people want to see what you do, check your hours and book their car in. That's exactly what we build: a clear site with your services, your opening hours and a call button, so new customers can find you and get booked in easily."
+  ],
+  [
+    "For somewhere like yours, a website is usually the first place people look before they commit to booking. We build simple, welcoming one page sites with what you offer, your prices or timetable, and a tap to book or call button.",
+    "For somewhere like yours, people want to see what you offer and your prices or timetable before they commit. That's exactly what we build: a welcoming site with your classes or treatments, your prices, and a button to book or call straight from their phone."
+  ],
+  [
+    "For a shop, a website is where people check what you stock, where you are and when you're open. We build simple, welcoming one page sites with photos, your location and a tap to call button, so new customers can find you easily.",
+    "For a shop, people want to see what you stock, where you are and when you're open. That's exactly what we build: a site with photos of what you sell, your opening hours and where to find you, so new customers come straight to your door."
+  ]
+]);
+
+/**
+ * Bring a saved opener up to date one paragraph at a time. A paragraph is
+ * only swapped if it is still exactly as shipped, so anything edited on the
+ * Templates screen is left alone.
+ */
+export function withNewWording(body) {
+  return String(body ?? '').split('\n\n').map((p) => OPENER_SWAPS.get(p) ?? p).join('\n\n');
 }
 
 export const STARTERS = [
@@ -96,15 +160,15 @@ Kind regards,
     name: 'First message — WhatsApp',
     channel: 'whatsapp',
     subject: '',
-    body: `Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} while looking around {{location}} and noticed you don't have a website yet, so I thought I'd reach out and say hello.
+    body: `Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} in {{location}} and noticed you don't have a website yet, so I thought I'd get in touch.
 
-We build simple, great looking one page websites for local businesses. Just a clear page with what you do, a few photos, and a button so people can call or message you straight from their phone.
+Most people look a business up online before they get in touch, and that's where a good website wins you the job. That's exactly what we build: a clean, professional site showing what you do, photos of your work, and a button so new customers can call or message you straight from their phone.
 
 ${SALES_LINE}
 
-I'd be really happy to put together a free mock up for {{business}} so you can see exactly how it could look, with no cost and no obligation at all.
+I'd be happy to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
-Would that be something you'd like me to do for you? No pressure at all, and if it's not for you, just say and I won't message again.
+Would you like me to do that for you? No pressure at all.
 
 Thanks so much, and have a great day.
 {{my_name}}, {{my_business}}`,
@@ -117,13 +181,13 @@ Thanks so much, and have a great day.
     subject: '',
     body: `Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} in {{location}} and noticed you don't have a website yet. For a salon that's so often the first place a new client looks before they book, so I wanted to reach out.
 
-We build simple, beautiful one page websites: your treatments, lovely photos of your work, and a button so someone can call or book you straight from their phone. They're really easy to keep updated too.
+New clients want to see your work, your treatments and your prices, and book without having to ring. That's exactly what we build: a beautiful site with your treatments, lovely photos of your work, and a button so they can book or call you straight from their phone.
 
 ${SALES_LINE}
 
 I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
-Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
+Would you like me to do that for you? No pressure at all.
 
 Thanks so much, and have a lovely day.
 {{my_name}}, {{my_business}}`,
@@ -142,7 +206,7 @@ ${SALES_LINE}
 
 I'd be happy to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
-Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
+Would you like me to do that for you? No pressure at all.
 
 Cheers, and all the best with the work.
 {{my_name}}, {{my_business}}`,
@@ -155,13 +219,13 @@ Cheers, and all the best with the work.
     subject: '',
     body: `Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} in {{location}} and noticed you don't have a website yet, so I wanted to say hello.
 
-For a place like yours, a website is usually where people check the menu, your opening hours and how to order, so it can make a real difference. We build simple, tasty looking one page sites with your menu, a few photos and a tap to call button.
+For a place like yours, people want to check the menu, your opening hours and how to order before they come in. That's exactly what we build: a site with your menu, great photos of your food, and a button to call or order straight from their phone.
 
 ${SALES_LINE}
 
 I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
-Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
+Would you like me to do that for you? No pressure at all.
 
 Thanks so much, and hope you're keeping busy.
 {{my_name}}, {{my_business}}`,
@@ -174,13 +238,13 @@ Thanks so much, and hope you're keeping busy.
     subject: '',
     body: `Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} in {{location}} and noticed you don't have a website yet, so I thought I'd reach out.
 
-For a garage, a website is where people check what you do and book their car in. We build simple, straightforward one page sites with your services, your opening hours and a tap to call button, so customers can find you and get booked in easily.
+For a garage, people want to see what you do, check your hours and book their car in. That's exactly what we build: a clear site with your services, your opening hours and a call button, so new customers can find you and get booked in easily.
 
 ${SALES_LINE}
 
 I'd be happy to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
-Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
+Would you like me to do that for you? No pressure at all.
 
 Cheers, and all the best.
 {{my_name}}, {{my_business}}`,
@@ -193,13 +257,13 @@ Cheers, and all the best.
     subject: '',
     body: `Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} in {{location}} and noticed you don't have a website yet, so I wanted to introduce myself.
 
-For somewhere like yours, a website is usually the first place people look before they commit to booking. We build simple, welcoming one page sites with what you offer, your prices or timetable, and a tap to book or call button.
+For somewhere like yours, people want to see what you offer and your prices or timetable before they commit. That's exactly what we build: a welcoming site with your classes or treatments, your prices, and a button to book or call straight from their phone.
 
 ${SALES_LINE}
 
 I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
-Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
+Would you like me to do that for you? No pressure at all.
 
 Thanks so much, and have a great day.
 {{my_name}}, {{my_business}}`,
@@ -212,15 +276,34 @@ Thanks so much, and have a great day.
     subject: '',
     body: `Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} in {{location}} and noticed you don't have a website yet, so I thought I'd say hello.
 
-For a shop, a website is where people check what you stock, where you are and when you're open. We build simple, welcoming one page sites with photos, your location and a tap to call button, so new customers can find you easily.
+For a shop, people want to see what you stock, where you are and when you're open. That's exactly what we build: a site with photos of what you sell, your opening hours and where to find you, so new customers come straight to your door.
 
 ${SALES_LINE}
 
 I'd love to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 
-Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.
+Would you like me to do that for you? No pressure at all.
 
 Thanks so much, and have a lovely day.
+{{my_name}}, {{my_business}}`,
+  },
+
+  // Pets: owners want to see who they're trusting with their pet, and book.
+  {
+    name: 'First message — WhatsApp · Pets & animals',
+    channel: 'whatsapp',
+    subject: '',
+    body: `Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} in {{location}} and noticed you don't have a website yet, so I thought I'd get in touch.
+
+Pet owners want to see the pets you've looked after, your prices and how to book before they trust you with theirs. That's exactly what we build: a friendly site with photos of your happy customers, your services and prices, and a button to book or call straight from their phone.
+
+${SALES_LINE}
+
+I'd be happy to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
+
+Would you like me to do that for you? No pressure at all.
+
+Thanks so much, and have a great day.
 {{my_name}}, {{my_business}}`,
   },
 

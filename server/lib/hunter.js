@@ -579,7 +579,7 @@ const evidenceOf = (base, webChecked) => (webChecked ? `${base}+web` : base);
 const placeBiz = (row, area) => ({
   names: [row.display_name],
   phones: [row.phone],
-  postcode: postcodeIn(row.address),
+  postcodes: [postcodeIn(row.address)].filter(Boolean),
   towns: [area],
 });
 
@@ -738,7 +738,8 @@ async function confirmAndImportPlaceLead(row, trade, area, seen, { checkSite = n
     site = await checkSite({
       names: [row.display_name, auto.company_name],
       phones: [row.phone],
-      postcode: auto.postal_code ?? postcodeIn(row.address),
+      // The registered office is often the accountant's: both count.
+      postcodes: [auto.postal_code, postcodeIn(row.address)].filter(Boolean),
       towns: [auto.locality, area],
     }, [`ch:${number}`, `pl:${row.place_id}`]);
     if (site.has) return { filed: false, reason: 'has_website', site };
@@ -1300,7 +1301,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
           site = await checkSite({
             names: [verdict.display_name, company.company_name],
             phones: [verdict.phone],
-            postcode: company.postal_code ?? postcodeIn(verdict.address),
+            postcodes: [company.postal_code, postcodeIn(verdict.address)].filter(Boolean),
             towns: [company.locality, t.area],
           }, [number && `ch:${number}`, verdict.place_id && `pl:${verdict.place_id}`]);
           if (site.has) { counters.had_website++; continue; }

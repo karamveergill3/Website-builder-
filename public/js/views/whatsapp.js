@@ -218,8 +218,8 @@ export default async function whatsappView(root, params, { refresh }) {
           <textarea id="wr-body" name="body" rows="9" required
             placeholder="1. Barlows Window Cleaning&#10;2. Ring us&#10;3. Stoke and Newcastle&#10;4. No logo, got photos&#10;5. Blue"></textarea>
           <p class="tip">Copy it from WhatsApp (press and hold the message, then Copy; or
-            select it on WhatsApp Desktop). Several messages can go in together. Answers
-            to the five questions on <a href="#/phase2" data-close>Ask</a> are read best.</p>
+            select it on WhatsApp Desktop). Several messages can go in together. Your
+            reply back is written for you next, ready to send.</p>
         </div>`,
       footer: html`
         <button type="button" data-close>Cancel</button>
@@ -227,20 +227,16 @@ export default async function whatsappView(root, params, { refresh }) {
       onSubmit: async (form) => {
         if (!form.body?.trim()) throw new Error('Paste what they sent');
         return api.post('/api/replies/manual', {
-          lead_id: Number(el.dataset.id), channel: 'whatsapp', body: form.body,
+          lead_id: Number(el.dataset.id), channel: 'whatsapp', body: form.body, origin: location.origin,
         });
       },
     });
     if (!saved) return;
-    const b = saved.brief ?? {};
-    const got = [
-      b.trading_name && 'their name',
-      b.services?.length && `${b.services.length} service${b.services.length === 1 ? '' : 's'}`,
-      b.primary_cta && 'what visitors should do',
-      b.areas?.length && 'areas',
-    ].filter(Boolean);
-    toast(got.length ? `Read it: ${got.join(', ')}. The brief is on Replies.` : 'Saved. Check the brief on Replies.',
-      { ms: 7000 });
+    // Straight on to the answer: read, drafted, one tap from sent.
+    if (saved.draft) {
+      const { showReplyDraft } = await import('./reply-draft.js');
+      await showReplyDraft(saved.draft);
+    }
     refresh();
   });
 

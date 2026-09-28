@@ -207,7 +207,8 @@ test('a message renders under the signed-in rep, not the admin', async () => {
   const rendered = await call(
     'GET', `/api/templates/${wa.id}/render?lead_id=${lead.body.lead.id}`, { cookie: rep.cookie }
   );
-  assert.match(rendered.body.body, /Sam Sender/, 'the sender is the rep, from their session');
+  assert.match(rendered.body.body, /my name is Sam\b/, 'the sender is the rep, from their session');
+  assert.ok(!rendered.body.body.includes('Sender'), 'first name only: never the surname');
   assert.ok(!rendered.body.body.includes(TEST_ADMIN.name),
     'not the admin whose details are in Settings');
 });

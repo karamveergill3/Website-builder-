@@ -134,14 +134,22 @@ export function extractByRules(replyBody, lead = {}) {
   const missing = [];
 
   // --- which question is which ----------------------------------------
-  // The template asks four questions: name, services, assets, action. An
-  // older three-question reply (no name) still has to parse, so the slot
-  // map is worked out from the answers rather than assumed: if answer 1
-  // reads as a business name, everything after it shifts by one.
+  // The Ask screen sends five: name, what visitors should do, areas, logo
+  // and photos, colours. Replies to the older templates still have to parse
+  // (name, services, assets, action; or the same without the name), so the
+  // slot map is worked out from the answers rather than assumed: a name
+  // followed by an answer that reads as an action is the Ask order, and
+  // otherwise, if answer 1 reads as a name, everything after it shifts by one.
   const named = answers.has(1) && looksLikeAName(answers.get(1));
-  const slot = named
-    ? { name: 1, services: 2, assets: 3, cta: 4 }
-    : { name: 0, services: 1, assets: 2, cta: 3 };
+  const readsAsAction = (a) => Boolean(a) && CTA_PATTERNS.some(([re]) => re.test(a))
+    && !/\b(logo|photos?|pictures|pics)\b/i.test(a);
+  const askOrder = named && readsAsAction(answers.get(2))
+    && !/\b(logo|photos?|pictures|pics)\b/i.test(answers.get(3) ?? '');
+  const slot = askOrder
+    ? { name: 1, services: 0, cta: 2, areas: 3, assets: 4, colours: 5 }
+    : named
+      ? { name: 1, services: 2, assets: 3, cta: 4 }
+      : { name: 0, services: 1, assets: 2, cta: 3 };
 
   // --- trading name ---------------------------------------------------
   // An explicit "we trade as X" anywhere in the reply beats the slot, since
@@ -176,9 +184,10 @@ export function extractByRules(replyBody, lead = {}) {
   if (hasLogo === null || hasPhotos === null) missing.push('assets');
 
   // --- colours --------------------------------------------------------
+  const colourText = (slot.colours && answers.get(slot.colours)) || assetText;
   const colours = [
-    ...(assetText.match(HEX) ?? []),
-    ...(assetText.match(COLOUR_WORDS) ?? []).map((c) => c.toLowerCase()),
+    ...(colourText.match(HEX) ?? []),
+    ...(colourText.match(COLOUR_WORDS) ?? []).map((c) => c.toLowerCase()),
   ];
   const brandColours = [...new Set(colours)].slice(0, 4);
 
@@ -197,10 +206,12 @@ export function extractByRules(replyBody, lead = {}) {
 
   // --- areas covered --------------------------------------------------
   let areas = [];
+  const areasAnswer = slot.areas ? answers.get(slot.areas) : null;
   const areaMatch = text.match(
     /\b(?:cover(?:ing|s)?|serv(?:e|ing|es)|work(?:ing)?\s+(?:in|around|round)|based\s+(?:in|around|round)|round|around|within)\s+([^\n.]{3,120})/i
   );
-  if (areaMatch) areas = splitServices(areaMatch[1]).slice(0, 8);
+  if (areasAnswer) areas = splitAreas(areasAnswer);
+  else if (areaMatch) areas = splitServices(areaMatch[1]).slice(0, 8);
   // Merge the lead's own town in — a reply naming other towns rarely repeats
   // the one we already knew about.
   if (lead.location && !areas.some((a) => a.toLowerCase() === String(lead.location).toLowerCase())) {
@@ -280,6 +291,23 @@ export function splitServices(s) {
 }
 
 /**
+ * "All over Stoke, Newcastle and Stafford" -> ['Stoke', 'Newcastle', 'Stafford'].
+ * The answer to "what areas do you cover?", which is a list of places.
+ */
+export function splitAreas(s) {
+  const text = String(s ?? '')
+    .replace(/^\s*(?:we\s+|i\s+)?(?:mainly\s+|mostly\s+)?(?:cover|work(?:\s+in)?|go|travel(?:\s+to)?)\s+/i, '')
+    .replace(/^\s*(?:all\s+(?:over|around|round)|around|round|across|anywhere\s+in|in|the)\s+/i, '');
+  return [...new Set(
+    text.split(/\n|,|;|\/|\band\b|&|\+/i)
+      .map((x) => x.replace(/\b(?:area|areas|and surrounding|surrounding|etc)\b\.?/gi, '')
+        .replace(/[.\s]+$/, '').trim())
+      .filter((x) => x.length > 1 && x.length <= 40 && !/^(the|all|any)$/i.test(x))
+      .map((x) => x.replace(/\b\w/g, (c) => c.toUpperCase()))
+  )].slice(0, 8);
+}
+
+/**
  * A business name is short, has few words, and is not a sentence. This is
  * what stops "we do roofing, guttering and flat roofs" being taken as the
  * name when someone answers the questions out of order.
@@ -316,8 +344,9 @@ const titleCase = (s) =>
  * actually appears in.
  */
 function ternary(text, topic) {
+  // A comma splits too: in "No logo, got photos" the "no" is about the logo.
   const clauses = String(text ?? '')
-    .split(/(?<=[.!?\n])|\b(?:but|however|though|although|whereas)\b/i)
+    .split(/(?<=[.!?\n,;])|\b(?:but|however|though|although|whereas)\b/i)
     .map((s) => (s ?? '').trim())
     .filter(Boolean);
 

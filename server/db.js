@@ -1,5 +1,7 @@
 import Database from 'better-sqlite3';
-import { STARTERS, missingStarters, withSalesLine } from './lib/starters.js';
+import {
+  STARTERS, missingStarters, withSalesLine, withShortClose, withNewWording,
+} from './lib/starters.js';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1648,6 +1650,36 @@ Thanks so much, and have a lovely day.
       -- The site itself, when a lead turns out to have one.
       ALTER TABLE leads ADD COLUMN website TEXT;
     `,
+  },
+  {
+    name: '056_whatsapp_openers_short_close',
+    run() {
+      // The WhatsApp openers now end on "No pressure at all." Only that
+      // sentence is changed, so anything else edited on the Templates
+      // screen is kept.
+      const now = new Date().toISOString();
+      for (const row of db.prepare("SELECT id, body FROM templates WHERE channel = 'whatsapp'").all()) {
+        const body = withShortClose(row.body);
+        if (body !== row.body) {
+          db.prepare('UPDATE templates SET body = ?, updated_at = ? WHERE id = ?').run(body, now, row.id);
+        }
+      }
+    },
+  },
+  {
+    name: '057_whatsapp_openers_new_wording',
+    run() {
+      // "We build simple…" is gone: every opener now reads like the Trades
+      // one. Paragraph by paragraph, and only where a paragraph is still
+      // exactly as shipped, so edits made on the Templates screen are kept.
+      const now = new Date().toISOString();
+      for (const row of db.prepare("SELECT id, body FROM templates WHERE channel = 'whatsapp'").all()) {
+        const body = withNewWording(row.body);
+        if (body !== row.body) {
+          db.prepare('UPDATE templates SET body = ?, updated_at = ? WHERE id = ?').run(body, now, row.id);
+        }
+      }
+    },
   },
 ];
 

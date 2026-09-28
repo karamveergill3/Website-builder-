@@ -18,6 +18,16 @@
  */
 
 export const SECTORS = [
+  // First, so a "dog grooming salon" is a pets business, not a hair salon.
+  // "pet " and "pets" rather than "pet", which would catch "petrol".
+  {
+    key: 'pets',
+    label: 'Pets & animals',
+    keywords: [
+      'dog', 'pet ', 'pets', 'groom', 'kennel', 'cattery', 'cat ', 'puppy', 'paws', 'canine',
+      'vet', 'veterinar', 'equine', 'stable', 'animal',
+    ],
+  },
   {
     key: 'salon',
     label: 'Salons & beauty',

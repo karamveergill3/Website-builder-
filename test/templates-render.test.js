@@ -46,10 +46,18 @@ test('the starters are seeded, one first message per channel', async () => {
 
 test('a WhatsApp/SMS starter names its sender in the body, since nothing is appended', () => {
   for (const s of STARTERS.filter((x) => x.channel !== 'email')) {
-    assert.match(s.body, /\{\{my_/,
-      `${s.name} must identify the sender in the body`);
-    assert.match(s.body.toLowerCase(), /stop|say|won't (write|text|message)|opt/,
-      `${s.name} must offer a way to opt out`);
+    assert.match(s.body, /\{\{my_name\}\}/, `${s.name} must identify the sender in the body`);
+    assert.match(s.body, /\{\{my_business\}\}/, `${s.name} must name the business sending it`);
+  }
+  // A WhatsApp is answered on the number it came from, and a "no" or "stop"
+  // pasted into the tool opts them out, so the opener ends on "No pressure at
+  // all." (Keylo's call). A text keeps its explicit line.
+  for (const s of STARTERS.filter((x) => x.channel === 'whatsapp')) {
+    assert.match(s.body, /No pressure at all\.\n/, `${s.name} ends its ask on "No pressure at all."`);
+    assert.ok(!/won't message again/.test(s.body), `${s.name} drops the long close`);
+  }
+  for (const s of STARTERS.filter((x) => x.channel === 'sms')) {
+    assert.match(s.body.toLowerCase(), /won't message again/, `${s.name} keeps its opt-out line`);
   }
 });
 
@@ -175,7 +183,7 @@ test('the trades opener reads exactly as Keylo sends it', async () => {
     '',
     "I'd be happy to put together a free mock up for Barlows Window Services so you can see how it could look, with no cost and no obligation.",
     '',
-    "Would you like me to do that for you? No pressure at all, and if it's not for you, just say and I won't message again.",
+    "Would you like me to do that for you? No pressure at all.",
     '',
     'Cheers, and all the best with the work.',
     'Javier, Keylo Studios',
@@ -206,3 +214,45 @@ test('the salon and trades WhatsApp openers are seeded and read naturally', asyn
   assert.ok(!wa.body.includes('{{category}}'), 'the generic opener drops the fragile trade word');
 });
 
+
+/* ------------------------------------------------- wording of the openers */
+
+test('no opener says "we build simple": each reads like the Trades one', () => {
+  for (const s of STARTERS.filter((x) => x.channel === 'whatsapp')) {
+    assert.ok(!/we build simple|simple,/i.test(s.body), `${s.name} undersells the work`);
+    assert.match(s.body, /That's exactly what we build/, `${s.name} follows the Trades wording`);
+  }
+});
+
+test('a pet business gets its own opener, signed with a first name only', async () => {
+  const { renderTemplate } = await import('../server/lib/template.js');
+  const { sectorFor, sectorLabel } = await import('../server/lib/sectors.js');
+  assert.equal(sectorLabel(sectorFor('dog groomer')), 'Pets & animals');
+  const pets = STARTERS.find((s) => s.name === 'First message — WhatsApp · Pets & animals');
+  const r = renderTemplate(
+    pets,
+    { business_name: 'Perfect Paws Burton Ltd', location: 'Burton Upon Trent' },
+    { biz_name: 'keylo studios' },
+    { name: 'javier aydogan' },
+  );
+  assert.match(r.body, /^Hi, my name is Javier and I'm from Keylo Studios\. I came across Perfect Paws Burton Ltd in Burton Upon Trent/);
+  assert.match(r.body, /That's exactly what we build/);
+  assert.match(r.body, /No pressure at all\.\n/);
+  assert.match(r.body, /\nJavier, Keylo Studios$/);
+  assert.ok(!r.body.includes('Aydogan'), 'never the surname');
+});
+
+test('saved openers are brought up to date, but an edited paragraph is kept', async () => {
+  const { withNewWording, withShortClose } = await import('../server/lib/starters.js');
+  const old = [
+    "Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} while looking around {{location}} and noticed you don't have a website yet, so I thought I'd reach out and say hello.",
+    'We build simple, great looking one page websites for local businesses. Just a clear page with what you do, a few photos, and a button so people can call or message you straight from their phone.',
+    'My own paragraph that I wrote myself.',
+    "Would that be something you'd like me to do for you? No pressure at all, and if it's not for you, just say and I won't message again.",
+  ].join('\n\n');
+  const now = withNewWording(withShortClose(old));
+  assert.ok(!now.includes('We build simple'));
+  assert.ok(!now.includes('say hello'));
+  assert.ok(now.includes('My own paragraph that I wrote myself.'), 'their edit stays');
+  assert.ok(now.endsWith('Would you like me to do that for you? No pressure at all.'));
+});

@@ -25,15 +25,26 @@ const router = Router();
 let run = null;
 export const activeSiteCheck = () => run;
 
-/** Everything on file that helps tell their site from someone else's. */
+/**
+ * Everything on file that helps tell their site from someone else's.
+ *
+ * Only numbers we trust are THEIR number: the one on the lead, Google's, and
+ * ones a person entered or put to use. A directory page lists a dozen firms'
+ * numbers and Find contacts files them all, so a match against one of those
+ * proves nothing.
+ */
 export function bizFromLead(lead) {
   const signals = db.prepare(
-    "SELECT kind, value FROM contact_signals WHERE lead_id = ? AND kind IN ('phone', 'website')"
+    `SELECT kind, value, source, promoted_at FROM contact_signals
+      WHERE lead_id = ? AND kind IN ('phone', 'website')`
   ).all(lead.id);
+  const trusted = (s) => s.promoted_at
+    || ['places', 'lead:existing', 'user:manual', 'website'].includes(s.source);
   return {
     names: [lead.business_name, lead.registered_name].filter(Boolean),
-    phones: [lead.phone, ...signals.filter((s) => s.kind === 'phone').map((s) => s.value)].filter(Boolean),
-    postcode: postcodeIn(lead.registered_address) ?? postcodeIn(lead.notes),
+    phones: [lead.phone, ...signals.filter((s) => s.kind === 'phone' && trusted(s)).map((s) => s.value)]
+      .filter(Boolean),
+    postcodes: [postcodeIn(lead.registered_address), postcodeIn(lead.notes)].filter(Boolean),
     towns: [lead.location].filter(Boolean),
     email: lead.email ?? null,
     knownUrls: [lead.website, ...signals.filter((s) => s.kind === 'website').map((s) => s.value)]

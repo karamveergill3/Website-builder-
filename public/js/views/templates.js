@@ -41,7 +41,7 @@ function fill(str, lead, me = {}) {
     // The sender half, from Settings — so the preview shows the message as it
     // will actually go out rather than a page of {{my_name}}. Names capitalised
     // so the preview matches what the server renders.
-    my_name: titleCase(me.biz_contact_name ?? ''),
+    my_name: titleCase(me.biz_contact_name ?? '').split(' ')[0],
     my_business: titleCase(me.biz_name ?? ''),
     my_phone: me.biz_phone ?? '', my_email: me.biz_email ?? '',
     my_website: me.biz_website ?? '',

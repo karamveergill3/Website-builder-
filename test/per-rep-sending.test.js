@@ -300,7 +300,7 @@ test('the message box is signed by the lead’s owner', async () => {
 
   // Rendered for the admin, who is signed in, but the lead is Cailan's.
   const r = (await get(`/api/templates/${wa.id}/render?lead_id=${lead.id}`)).body;
-  assert.equal(r.body, 'Hi, my name is Cailan Test. Thanks, Cailan Test');
+  assert.equal(r.body, 'Hi, my name is Cailan. Thanks, Cailan', 'first name only');
   assert.equal(r.sender.name, 'Cailan Test');
   assert.equal(r.sender.owns_lead, true);
 
@@ -308,7 +308,7 @@ test('the message box is signed by the lead’s owner', async () => {
   const loose = await seed('Signed By Viewer Ltd', null);
   const r2 = (await call('GET', `/api/templates/${wa.id}/render?lead_id=${loose.id}`,
     { cookie: repCookie })).body;
-  assert.equal(r2.body, 'Hi, my name is Cailan Test. Thanks, Cailan Test');
+  assert.equal(r2.body, 'Hi, my name is Cailan. Thanks, Cailan');
   assert.equal(r2.sender.owns_lead, false);
 });
 
@@ -321,7 +321,7 @@ test('a suspended owner hands the message back to whoever is sending', async () 
   await call('PATCH', `/api/auth/users/${repId}`, { cookie: adminCookie, body: { active: false } });
   try {
     const r = (await get(`/api/templates/${wa.id}/render?lead_id=${lead.id}`)).body;
-    assert.equal(r.body, 'Hi, my name is Test Admin. Thanks, Test Admin');
+    assert.equal(r.body, 'Hi, my name is Test. Thanks, Test');
     assert.equal(r.sender.owns_lead, false);
   } finally {
     await call('PATCH', `/api/auth/users/${repId}`, { cookie: adminCookie, body: { active: true } });

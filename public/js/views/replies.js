@@ -100,15 +100,34 @@ export default async function repliesView(root, _p, { refresh }) {
       onSubmit: async (form) => {
         if (!form.lead_id) throw new Error('Pick which business replied');
         if (!form.body?.trim()) throw new Error('Paste what they wrote');
-        await api.post('/api/replies/manual', {
+        return api.post('/api/replies/manual', {
           lead_id: Number(form.lead_id),
           channel: form.channel,
           body: form.body,
+          origin: location.origin,
         });
-        return true;
       },
     });
-    if (ok) { toast('Reply saved and read'); refresh(); }
+    if (!ok) return;
+    toast('Reply saved and read');
+    // Straight on to the answer back.
+    if (ok.draft) {
+      const { showReplyDraft } = await import('./reply-draft.js');
+      await showReplyDraft(ok.draft);
+    }
+    refresh();
+  });
+
+  on(root, 'click', '[data-act="draft"]', async (_e, el) => {
+    el.disabled = true;
+    try {
+      const { showReplyDraft, fetchDraft } = await import('./reply-draft.js');
+      if (await showReplyDraft(await fetchDraft(el.dataset.id))) refresh();
+    } catch (err) {
+      toast(err.message ?? 'Could not draft a reply', { error: true });
+    } finally {
+      el.disabled = false;
+    }
   });
 
   /* ---- per-reply actions ---- */
@@ -356,8 +375,9 @@ function briefPanel(r, b) {
     <div class="bar">
       <button class="mini" data-act="edit-brief" data-id="${r.id}">Edit brief</button>
       <button class="mini ghost" data-act="reextract" data-id="${r.id}">Read again</button>
-      <button class="mini" data-act="send-reply" data-id="${r.id}"
-        style="margin-left:6px">Reply</button>
+      <button class="mini primary" data-act="draft" data-id="${r.id}" style="margin-left:6px"
+        title="Your answer to this reply, written and ready to copy or open in WhatsApp">Draft reply</button>
+      <button class="mini" data-act="send-reply" data-id="${r.id}">Reply by email</button>
       <div class="grow"></div>
       ${r.mockup ? html`
         <a class="btn mini" href="${r.mockup.token ? `/m/${r.mockup.token}/` : '#'}"

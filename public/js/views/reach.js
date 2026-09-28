@@ -510,10 +510,19 @@ function wire(dlg, state) {
     if (!state.template_id) return;
     btn.disabled = true;
     try {
-      await api.post('/api/gmail/queue', {
+      const res = await api.post('/api/gmail/queue', {
         lead_ids: [state.lead.id],
         template_id: state.template_id,
       });
+      // The queue can turn a lead away (it has a website, say): say why
+      // rather than claiming it queued and opening an empty Outbox.
+      if (!res?.queued) {
+        const why = res?.skipped?.[0];
+        toast(why ? `Not queued: ${why.reason}${why.detail ? `. ${why.detail}` : ''}` : 'Not queued',
+          { error: true, ms: 7000 });
+        btn.disabled = false;
+        return;
+      }
       toast('Queued for review');
       dlg.querySelector('[data-close]')?.click();
       location.hash = '/outbox';

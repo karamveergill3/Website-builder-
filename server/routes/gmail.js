@@ -358,6 +358,13 @@ async function runSend(queueIds, delayMin, delayMax) {
     const again = recontactCheck(lead, { allowRepeat: item.allow_repeat === 1 });
     if (!again.allowed) { fail(again.reason); continue; }
 
+    // Found to have a website since it was queued (a website check, or Find
+    // contacts): the email tells them they have none.
+    if (lead.has_website === 1) {
+      fail(`has a website${lead.website ? `: ${lead.website}` : ''}`);
+      continue;
+    }
+
     // The hold the queue wrote is now enforced rather than decorative. It
     // was being set on a row that stayed 'pending', and nothing on this path
     // ever read it, so "Held: recent contact" sent anyway. Recorded as a

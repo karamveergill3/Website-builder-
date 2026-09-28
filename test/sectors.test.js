@@ -45,8 +45,14 @@ test('food, motor, fitness and shops each get their own opener', () => {
   assert.equal(sectorLabel('motor'), 'Motor');
 });
 
+test('pet businesses get their own opener', () => {
+  for (const c of ['dog groomer', 'dog grooming salon', 'pet sitter', 'cattery', 'dog walker']) {
+    assert.equal(sectorFor(c), 'pets', c);
+  }
+});
+
 test('a genuinely unrecognised trade falls back to the generic opener', () => {
-  for (const c of ['accountant', 'photographer', 'translator', 'dog groomer',
+  for (const c of ['accountant', 'photographer', 'translator', 'petrol station', 'pawnbroker',
                    'cleaner', 'driving instructor', 'estate agent', '']) {
     assert.equal(sectorFor(c), null, `"${c}" has no dedicated opener`);
   }

@@ -33,6 +33,72 @@ import { renderSite, writeSite, newToken, PAGES, SINGLE_PAGE } from '../lib/site
 import { briefForBuild, CTAS } from '../lib/brief.js';
 import { available as ollamaAvailable, model as ollamaModel } from '../lib/ollama.js';
 import { getSetting } from '../db.js';
+import { draftReply } from '../lib/reply-draft.js';
+import { askQuestions } from '../lib/ask.js';
+import { leadVoice } from '../lib/auth.js';
+import { senderContext } from '../lib/template.js';
+import { normalisePhone } from '../lib/handoff.js';
+import { suppress } from '../lib/suppression.js';
+import { recordContact } from '../lib/recontact.js';
+
+/** The starting prices the "how much?" answer quotes, from the Prices screen. */
+function startingPrices() {
+  let list = null;
+  try { list = JSON.parse(getSetting('price_list_json', 'null')); } catch { /* defaults */ }
+  const n = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
+  // The Prices screen's own defaults: a one-page site, and the cheapest plan.
+  return { from: n(list?.pages?.one_page, 300), monthly: n(list?.monthly?.keep_it_live, 12) };
+}
+
+/**
+ * The drafted answer to one reply, with what the screen needs to send it:
+ * the WhatsApp number it came from, and a built mock up's link.
+ */
+function draftFor(replyId, { user = null, origin = null, kind = null } = {}) {
+  const reply = db.prepare('SELECT * FROM replies WHERE id = ?').get(replyId);
+  if (!reply) throw notFound('Reply not found');
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(reply.lead_id);
+  if (!lead) throw notFound('Lead not found');
+  const brief = briefToApi(db.prepare('SELECT * FROM briefs WHERE reply_id = ?').get(replyId)) ?? {};
+  const mockup = db.prepare(
+    'SELECT token FROM mockups WHERE lead_id = ? AND error IS NULL ORDER BY generated_at DESC LIMIT 1'
+  ).get(lead.id);
+  const base = /^https?:\/\/[^/\s]+$/i.test(String(origin ?? '')) ? origin : '';
+  const sentTo = db.prepare(
+    `SELECT recipient FROM outreach_events WHERE lead_id = ? AND channel = 'whatsapp'
+      ORDER BY COALESCE(confirmed_sent_at, prepared_at) DESC LIMIT 1`
+  ).get(lead.id)?.recipient;
+  const phone = normalisePhone(sentTo ?? lead.phone ?? '');
+
+  const draft = draftReply({
+    body: reply.body,
+    brief,
+    lead,
+    sender: senderContext(undefined, leadVoice(lead, user)).my_name,
+    ask: askQuestions(),
+    prices: startingPrices(),
+    mockupUrl: mockup ? `${base}/m/${mockup.token}/` : null,
+    kind,
+  });
+  return {
+    ...draft,
+    reply_id: reply.id,
+    lead_id: lead.id,
+    business_name: lead.business_name,
+    wa_number: phone.ok ? phone.e164.replace(/^\+/, '') : null,
+    has_mockup: Boolean(mockup),
+  };
+}
+
+/**
+ * They asked not to be contacted: honoured at once, the same way marking a
+ * lead opted out does it, so no rep and no hunt offers them again.
+ */
+function optOut(lead) {
+  db.prepare("UPDATE leads SET opted_out = 1, status = 'lost' WHERE id = ?").run(lead.id);
+  if (lead.email) suppress(lead.email, { businessName: lead.business_name, reason: 'asked to stop' });
+  recordContact(lead, 'opted out');
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const MOCKUP_ROOT = resolve(__dirname, '..', '..', 'data', 'mockups');
@@ -74,11 +140,36 @@ router.post('/replies/manual', wrap(async (req, res) => {
   const out = await recordManualReply({
     leadId, body, channel, subject: str(req.body?.subject),
   });
+  // The answer back, drafted from what they said. A "stop" is acted on here
+  // and now, before anyone can reply to it.
+  const draft = draftFor(out.replyId, { user: req.user, origin: str(req.body?.origin) });
+  if (draft.intent === 'stop') optOut(db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId));
   res.status(201).json({
     reply_id: out.replyId,
     brief: out.brief,
+    draft,
     replies: listReplies({ leadId }),
   });
+}));
+
+/** GET /api/replies/:id/draft?origin=&kind=mockup — the answer, drafted again. */
+router.get('/replies/:id/draft', wrap((req, res) => {
+  const id = int(req.params.id);
+  if (!id) throw badRequest('Bad reply id');
+  const kind = str(req.query.kind) === 'mockup' ? 'mockup' : null;
+  res.json({ draft: draftFor(id, { user: req.user, origin: str(req.query.origin), kind }) });
+}));
+
+/** POST /api/leads/:id/has-website — they told us they have one. */
+router.post('/leads/:id/has-website', wrap((req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(int(req.params.id));
+  if (!lead) throw notFound('Lead not found');
+  db.prepare(
+    `UPDATE leads SET has_website = 1, website_evidence = 'they said so', website_checked_at = ?,
+       status = CASE WHEN status IN ('new', 'sent', 'replied') THEN 'lost' ELSE status END
+     WHERE id = ?`
+  ).run(nowIso(), lead.id);
+  res.json({ ok: true });
 }));
 
 router.post('/replies/:id/extract', wrap(async (req, res) => {

@@ -105,7 +105,7 @@ test('a blank sender setting renders empty, and emptyPlaceholders flags it', asy
 test('a signed-in rep overrides the name and phone, but not the business', () => {
   const rep = { name: 'Sam Rep', phone: '07700 900321' };
   const ctx = senderContext(ME, rep);
-  assert.equal(ctx.my_name, 'Sam Rep', 'the message is from whoever is sending it');
+  assert.equal(ctx.my_name, 'Sam', 'the message is from whoever is sending it, by first name');
   assert.equal(ctx.my_phone, '07700 900321', 'their own number, not the shared one');
   assert.equal(ctx.my_business, 'Keylo Studios', 'the business stays the shared brand');
   assert.equal(ctx.my_email, 'hello@keylo.example', 'the business email is unchanged');
@@ -113,7 +113,7 @@ test('a signed-in rep overrides the name and phone, but not the business', () =>
 
 test('a rep with no phone set falls back to the business number', () => {
   const ctx = senderContext(ME, { name: 'Sam Rep', phone: '' });
-  assert.equal(ctx.my_name, 'Sam Rep');
+  assert.equal(ctx.my_name, 'Sam');
   assert.equal(ctx.my_phone, ME.biz_phone, 'blank rep number falls back to Keylo');
 });
 
@@ -128,6 +128,6 @@ test('renderTemplate signs a WhatsApp opener with the sending rep', () => {
     { subject: '', body: "Hi {{business}}, it's {{my_name}} from {{my_business}}" },
     LEAD, ME, { name: 'Sam Rep', phone: '07700 900321' }
   );
-  assert.equal(r.body, "Hi Hillside Roofing, it's Sam Rep from Keylo Studios");
+  assert.equal(r.body, "Hi Hillside Roofing, it's Sam from Keylo Studios");
 });
 

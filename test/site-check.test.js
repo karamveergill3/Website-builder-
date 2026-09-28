@@ -90,9 +90,12 @@ test('the Coseley page is theirs: their number is on it', () => {
   assert.deepEqual(j.evidence, ['phone']);
 });
 
-test('name and town together confirm it, with no phone on the page', () => {
-  const html = '<title>Coseley Services</title><p>Haulage from our Wolverhampton yard.</p>';
-  assert.equal(judgePage({ html, url: 'https://coseleyservices.co.uk/' }, COSELEY).match, 'confirmed');
+test('name and exact postcode confirm it; name and town are only "possible"', () => {
+  const withPostcode = '<title>Coseley Services</title><p>Our yard: Lanesfield, Wolverhampton WV4 6DW.</p>';
+  assert.equal(judgePage({ html: withPostcode, url: 'https://coseleyservices.co.uk/' }, COSELEY).match, 'confirmed');
+  const townOnly = '<title>Coseley Services</title><p>Haulage from our Wolverhampton yard.</p>';
+  assert.equal(judgePage({ html: townOnly, url: 'https://coseleyservices.co.uk/' }, COSELEY).match, 'possible',
+    'a town is shared by every firm in it');
 });
 
 test('their name alone on their name-domain is only "possible", and not if it places them elsewhere', () => {
@@ -101,8 +104,8 @@ test('their name alone on their name-domain is only "possible", and not if it pl
 
   const bristol = '<title>Coseley Services Ltd</title><p>Haulage. 4 Quay St, Bristol BS1 4XX.</p>';
   const j = judgePage({ html: bristol, url: 'https://coseleyservices.co.uk/' }, COSELEY);
-  assert.equal(j.match, null, 'a same-named firm in another district is not them');
-  assert.ok(j.evidence.includes('elsewhere'));
+  assert.equal(j.match, 'possible', 'shown for a look, never proof');
+  assert.ok(j.evidence.includes('elsewhere'), 'and marked as probably someone else');
 });
 
 test('a search result needs proof, not just the name', () => {
@@ -125,7 +128,7 @@ test('a parked, for-sale or holding page is not a website', () => {
 
 test('a real short site that mentions "coming soon" in passing still counts', () => {
   const html = `<title>Coseley Services</title><p>${'Reliable haulage across the region. '.repeat(20)}
-    Online booking coming soon. Based in Wolverhampton.</p>`;
+    Online booking coming soon. Call 07732 170498.</p>`;
   assert.equal(judgePage({ html, url: 'https://coseleyservices.co.uk/' }, COSELEY).match, 'confirmed');
 });
 
@@ -242,9 +245,10 @@ test('a search result for a place-named firm is not taken for them', async () =>
 test('a competitor’s page is not the site of a name made of a town and a trade', () => {
   const biz = WOLVES(['Wolverhampton Roofing Services']);
   const html = '<title>JB Roofing Contractors</title><p>Wolverhampton Roofing Services you can trust, across Wolverhampton.</p>';
-  for (const how of ['search', 'name-domain']) {
-    assert.equal(judgePage({ html, url: 'https://roofing-wolverhampton.co.uk/' }, biz, { how }).match, null, how);
-  }
+  assert.equal(judgePage({ html, url: 'https://roofing-wolverhampton.co.uk/' }, biz, { how: 'search' }).match, null);
+  const onDomain = judgePage({ html, url: 'https://wolverhamptonroofingservices.co.uk/' }, biz);
+  assert.equal(onDomain.match, 'possible', 'at most a look');
+  assert.ok(onDomain.evidence.includes('common-name'));
 });
 
 test('initials do not match the letters left by "we’d" and "it’s"', () => {
@@ -264,8 +268,10 @@ test('a one-word or stock name on its .com is at most "possible", never proof', 
   assert.equal(r.possible.url, 'https://glamour.com/');
 
   const premier = WOLVES(['Premier Roofing']);
-  assert.equal(judgePage({ html: '<title>Premier Roofing</title><p>Quality roofing across Kent. Call 01622 000000.</p>',
-    url: 'https://premierroofing.co.uk/' }, premier).match, null, 'no word in the name that picks them out');
+  const kent = judgePage({ html: '<title>Premier Roofing</title><p>Quality roofing across Kent. Call 01622 000000.</p>',
+    url: 'https://premierroofing.co.uk/' }, premier);
+  assert.equal(kent.match, 'possible', 'a look, never proof');
+  assert.ok(kent.evidence.includes('common-name'));
 });
 
 test('a same-named firm elsewhere that "covers" their town is not them', () => {
@@ -273,7 +279,7 @@ test('a same-named firm elsewhere that "covers" their town is not them', () => {
   const html = `<title>Harrowby Roofing</title><p>12 High St, Erdington, Birmingham B23 6RH. Call 0121 555 0000.
     Areas covered: Birmingham, Solihull, Walsall, Wolverhampton, Dudley.</p>`;
   const j = judgePage({ html, url: 'https://harrowbyroofing.co.uk/' }, biz);
-  assert.equal(j.match, null);
+  assert.notEqual(j.match, 'confirmed');
   assert.ok(j.evidence.includes('elsewhere'));
 });
 
@@ -330,4 +336,40 @@ test('a site that will not let us read it is "possible", on either host', async 
 test('a page with a nonsense character reference cannot crash the check', () => {
   const html = '<title>Coseley Services &#99999999; &#x110000;</title><p>Wolverhampton</p>';
   assert.doesNotThrow(() => judgePage({ html, url: 'https://coseleyservices.co.uk/' }, COSELEY));
+});
+
+test('their own "coming soon" page is no website, even with their number on it', () => {
+  const html = '<title>Coseley Services - Coming Soon</title><p>New website coming soon. Call 07732 170498.</p>';
+  const j = judgePage({ html, url: 'https://coseleyservices.co.uk/' }, COSELEY);
+  assert.equal(j.match, null);
+  assert.equal(j.parked, true);
+});
+
+test('a registered office at the accountant\u2019s does not hide their own site', () => {
+  // Companies House has the accountant's WV1 postcode; the site shows the yard's.
+  const biz = { ...COSELEY, phones: [], postcodes: ['WV1 1HB', 'WV4 6DW'], postcode: undefined };
+  assert.equal(judgePage({ html: COSELEY_HOME.replace(/tel:[^"]+|07732 170498/g, ''),
+    url: 'https://coseleyservices.co.uk/' }, biz).match, 'confirmed');
+});
+
+test('a parked bare domain does not hide the real site on www', async () => {
+  const web = fakeWeb({
+    'https://coseleyservices.co.uk/': { html: '<p>This Web page is parked for FREE, courtesy of GoDaddy.com.</p>' },
+    'https://www.coseleyservices.co.uk/': { html: COSELEY_HOME },
+  });
+  const r = await findWebsite(COSELEY, { fetchImpl: web.fetchImpl });
+  assert.equal(r.found, true);
+  assert.equal(r.url, 'https://www.coseleyservices.co.uk/');
+});
+
+test('a bare domain that hangs does not stop www being asked', async () => {
+  const hanging = async (url, { signal }) => {
+    if (String(url) === 'https://coseleyservices.co.uk/' || String(url) === 'http://coseleyservices.co.uk/') {
+      return new Promise((_r, reject) => signal.addEventListener('abort',
+        () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+    }
+    return fakeWeb({ 'https://www.coseleyservices.co.uk/': { html: COSELEY_HOME } }).fetchImpl(url);
+  };
+  const r = await findWebsite(COSELEY, { fetchImpl: hanging, timeoutMs: 100, budgetMs: 5_000 });
+  assert.equal(r.found, true);
 });

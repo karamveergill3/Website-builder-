@@ -416,8 +416,8 @@ select.fit { width: auto; max-width: 150px; }
   display: flex; flex-direction: column; gap: 2px; padding: 5px;
   background: var(--raised); border: 1px solid var(--rule); border-radius: var(--r-sm); box-shadow: var(--shadow-pop);
 }
-.more-menu button { text-align: left; border-color: transparent; background: transparent; }
-.more-menu button:hover { background: var(--green-lift); }
+.more-menu button, .more-menu a { text-align: left; border-color: transparent; background: transparent; }
+.more-menu button:hover, .more-menu a:hover { background: var(--green-lift); }
 .more-menu button.danger { color: var(--clay); }
 
 /* ---------- Small screens ---------- */

@@ -102,6 +102,9 @@ test('every outbound host is one of the services this tool uses', () => {
     // build wa.me/{E164} links against. wa.me links open on the user's
     // phone, they are not called by the server.
     'wa.me',
+    // WhatsApp Web, the fallback link on a Sent via WhatsApp card for a
+    // computer without WhatsApp Desktop. A link the rep clicks, never fetched.
+    'web.whatsapp.com',
     'facebook.com',
     'faq.whatsapp.com',
     // Appears only in the install instructions inside a comment. The tool

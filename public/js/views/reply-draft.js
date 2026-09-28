@@ -2,12 +2,13 @@
  *
  * Shown straight after a reply is pasted in (Sent via WhatsApp, Replies), and
  * from any reply card. The text is editable; Copy puts it on the clipboard,
- * and Open in WhatsApp opens the chat with it already typed, so sending is
- * one tap. Anything the reply calls for (they said stop, they have a site,
+ * and Open in WhatsApp opens their chat in the WhatsApp app (WhatsApp Desktop
+ * on a computer) with it already typed, so sending is one tap. Anything the reply calls for (they said stop, they have a site,
  * build their mock up) is a button here too.
  */
 import { api } from '../api.js';
 import { html, modal, toast } from '../dom.js';
+import { inApp } from '../wa-link.js';
 
 export async function copy(text) {
   try {
@@ -24,7 +25,8 @@ export async function copy(text) {
   return ok;
 }
 
-export const waLink = (number, text) => `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
+/** The chat in the WhatsApp app (WhatsApp Desktop on a computer), message typed in. */
+export const waLink = (number, text) => inApp(number, text);
 
 /** Fetch the draft for a reply again (optionally the "here's your mock up" one). */
 export const fetchDraft = async (replyId, kind = null) =>
@@ -88,7 +90,7 @@ export async function showReplyDraft(draft) {
       ${draft.text ? html`
         <button type="button" data-act="copy">Copy</button>
         ${draft.wa_number ? html`
-          <a class="btn primary" data-act="wa" target="_blank" rel="noopener"
+          <a class="btn primary" data-act="wa"
              href="${waLink(draft.wa_number, draft.text)}">Open in WhatsApp</a>` : ''}` : ''}`,
     onMount: (dlg, close) => {
       const box = dlg.querySelector('#rd-text');

@@ -19,6 +19,7 @@ import {
 } from '../dom.js';
 import { openLeadForm } from './leads.js';
 import { copy, waLink, runDraftAction, fetchDraft, showReplyDraft } from './reply-draft.js';
+import { inApp, onWeb } from '../wa-link.js';
 
 /** What can happen after a WhatsApp goes out. */
 const AFTER = ['sent', 'replied', 'won', 'lost'];
@@ -32,10 +33,10 @@ const ukNumber = (v) => {
   return /^44\d{10}$/.test(d) ? `0${d.slice(2, 6)} ${d.slice(6)}` : v;
 };
 
-/** The chat to open: the number the WhatsApp actually went to. */
-const chatLink = (l) => {
+/** The number to chat on: the one the WhatsApp actually went to. */
+const chatNumber = (l) => {
   const d = String(l.whatsapp_to ?? '').replace(/\D/g, '');
-  return d.length >= 10 ? `https://wa.me/${d}` : null;
+  return d.length >= 10 ? d : null;
 };
 
 const firstName = (name) => String(name ?? '').trim().split(/\s+/)[0] || null;
@@ -90,7 +91,7 @@ export default async function whatsappView(root, params, { refresh }) {
   };
 
   const card = (l) => {
-    const chat = chatLink(l);
+    const chat = chatNumber(l);
     const statuses = AFTER.includes(l.status) ? AFTER : [l.status, ...AFTER];
     const others = team.filter((u) => u.id !== l.assigned_to);
     return html`
@@ -109,7 +110,7 @@ export default async function whatsappView(root, params, { refresh }) {
             ? `${l.last_reply.slice(0, 110)}…` : l.last_reply}” <span class="meta">${relative(l.last_reply_at)}</span></div>` : ''}
         <div class="wa-card-foot">
           <span class="meta mono">${ukNumber(l.whatsapp_to ?? l.phone) ?? '—'}</span>
-          ${chat ? html`<a href="${chat}" target="_blank" rel="noopener" title="Open your chat with them in WhatsApp">Open chat ↗</a>` : ''}
+          ${chat ? html`<a href="${inApp(chat)}" title="Open your chat with them in WhatsApp Desktop">Open chat ↗</a>` : ''}
           <span class="meta">· messaged ${l.whatsapp_sent_at ? relative(l.whatsapp_sent_at) : '—'}</span>
           ${l.next_call_at ? html`<span class="flag" title="Call-back arranged">call back ${relative(l.next_call_at)}</span>` : ''}
         </div>
@@ -129,6 +130,8 @@ export default async function whatsappView(root, params, { refresh }) {
                 <button type="button" class="mini" data-act="paste" data-id="${l.id}" data-name="${l.business_name}">Paste another reply</button>` : ''}
               ${tab !== 'archive' ? html`
                 <button type="button" class="mini" data-act="reach" data-id="${l.id}">Follow up or call</button>` : ''}
+              ${chat ? html`
+                <a class="btn mini" href="${onWeb(chat)}" target="_blank" rel="noopener">Open chat in WhatsApp Web</a>` : ''}
               ${others.map((u) => html`
                 <button type="button" class="mini" data-act="move" data-id="${l.id}" data-to="${u.id}">Move to ${firstName(u.name)}</button>`)}
               ${l.assigned_to != null && team.length ? html`
@@ -323,8 +326,8 @@ export default async function whatsappView(root, params, { refresh }) {
           </div>
           <div class="bar" style="margin:0">
             <button type="button" class="primary" data-act="copy-answer">Copy answer</button>
-            ${d?.wa_number ? html`<a class="btn" data-act="open-wa" target="_blank" rel="noopener"
-              href="${waLink(d.wa_number, d.text ?? '')}">Open in WhatsApp</a>` : ''}
+            ${d?.wa_number ? html`<a class="btn" data-act="open-wa"
+              href="${waLink(d.wa_number, d.text ?? '')}" title="Opens their chat in WhatsApp Desktop with the answer typed in">Open in WhatsApp</a>` : ''}
             ${(d?.actions ?? []).map((a) => html`
               <button type="button" class="mini" data-action="${a.id}">${a.label}</button>`)}
             <div class="grow"></div>
@@ -602,7 +605,7 @@ export default async function whatsappView(root, params, { refresh }) {
     menu.style.top = below + menu.offsetHeight > window.innerHeight - 8
       ? `${Math.max(8, at.top - 4 - menu.offsetHeight)}px` : `${below}px`;
   };
-  on(root, 'click', '.more-menu button', (_e, el) => el.closest('details')?.removeAttribute('open'));
+  on(root, 'click', '.more-menu button, .more-menu a', (_e, el) => el.closest('details')?.removeAttribute('open'));
   root.addEventListener('toggle', (ev) => {
     const open = ev.target;
     if (!open.matches?.('details.more') || !open.open) return;

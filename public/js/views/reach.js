@@ -7,6 +7,7 @@
 /* eslint-disable require-atomic-updates */
 import { api } from '../api.js';
 import { html, modal, toast, on, fmtDateTime } from '../dom.js';
+import { appFromWaMe } from '../wa-link.js';
 
 const CHANNEL_LABEL = {
   email: 'Email',
@@ -468,8 +469,12 @@ function preparedPanel(prep) {
           ${prep.mobile ? '' : html`<span class="flag" style="margin-left:4px">landline — WhatsApp may not answer</span>`}</p>
         ${prep.advice ? html`<div class="msg msg-info"><div class="grow">${prep.advice}</div></div>` : ''}
         <div class="bar" style="margin-top:8px">
+          ${prep.channel === 'whatsapp' ? html`
+          <a class="btn primary" href="${appFromWaMe(prep.url)}"
+             data-act="hop" data-event="${prep.event_id}"
+             title="Opens their chat in WhatsApp Desktop with the message typed in">Open WhatsApp</a>` : html`
           <a class="btn primary" href="${prep.url}" target="_blank" rel="noopener"
-             data-act="hop" data-event="${prep.event_id}">Open ${CHANNEL_LABEL[prep.channel]}</a>
+             data-act="hop" data-event="${prep.event_id}">Open ${CHANNEL_LABEL[prep.channel]}</a>`}
           <button data-act="mark-sent" data-event="${prep.event_id}">I sent it</button>
         </div>
         <p class="tip">"Open" launches ${CHANNEL_LABEL[prep.channel]} with the message,

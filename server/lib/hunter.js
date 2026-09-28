@@ -25,11 +25,12 @@ import { db, getSetting } from '../db.js';
 import { nowIso } from './http.js';
 import {
   advancedSearch, findCompany, isBodyCorporate, normaliseName, CompaniesHouseError,
+  matchScore, AUTO_MATCH,
 } from './companies-house.js';
-import { resolveTrade } from './sic.js';
+import { resolveTrade, TRADES } from './sic.js';
 import {
   textSearch, normalise as normalisePlace, PlacesError,
-  configured as placesConfigured,
+  configured as placesConfigured, LOOKUP_MASK,
 } from './places.js';
 import { normalisePhone } from './handoff.js';
 import { recordFound, knownCompanyNumbers, ledgerFor } from './recontact.js';
@@ -39,6 +40,10 @@ import { expandAreas } from './towns.js';
 const PAGE = 100;
 /** Re-open an exhausted trade/town after this long; new companies incorporate. */
 const REOPEN_AFTER_DAYS = 30;
+/** Re-ask the register about a Google listing it said was not a company. */
+const RECHECK_AFTER_DAYS = 30;
+/** Per-company Google lookups one trade/town may spend before the next gets a turn. */
+const LOOKUPS_PER_TARGET = 8;
 
 const lines = (v) => String(v ?? '').split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
 
@@ -65,7 +70,12 @@ export function huntConfig() {
     areas: expandAreas(lines(getSetting('hunt_areas', getSetting('default_areas', '')))),
     target: num('hunt_daily_target', 15),
     hour: num('hunt_hour', 8),
-    maxPlacesRequests: num('hunt_max_places_requests', 120),
+    // Google trade searches ("roofers in Otley"), a page each.
+    maxPlacesRequests: num('hunt_max_places_requests', 30),
+    // Google lookups of one register company by name — a separate budget
+    // because they bill on a separate SKU with its own free allowance. Only
+    // spent when a phone number is required.
+    maxCompanyLookups: num('hunt_max_company_lookups', 30),
     maxRegisterPages: num('hunt_max_register_pages', 200),
     maxPerTrade: num('hunt_max_per_trade', 3),
     requireNoWebsite: getSetting('hunt_require_no_website', '1') === '1',
@@ -154,13 +164,59 @@ export function syncTargets({ trades, areas }) {
 }
 
 /** Targets with ground left to cover, least recently used first. */
-function nextTargets() {
+function nextTargets({ byYield = false } = {}) {
   const reopen = new Date(Date.now() - REOPEN_AFTER_DAYS * 86_400_000).toISOString();
   return spreadByTrade(db.prepare(
     `SELECT * FROM hunt_targets
       WHERE exhausted_at IS NULL OR exhausted_at < ?
       ORDER BY COALESCE(last_run_at, '') ASC, id ASC`
-  ).all(reopen));
+  ).all(reopen), { byYield });
+}
+
+const SIC_ONLY = /^[\d\s,]+$/;
+
+/**
+ * The phrasings to ask Google with for one trade, in the order they are used.
+ *
+ * Google answers the same query with the same listings, so a second visit to
+ * "roofers in Otley" pays again for businesses already seen and finds no one
+ * new. Each visit to a trade and town takes the next phrasing instead —
+ * "roofing", "roof repairs", "flat roofing" — and each ranks businesses the
+ * plain trade name does not. Singular and plural are one search, not two.
+ */
+export function queryVariants(trade) {
+  const typed = String(trade ?? '').trim();
+  const resolved = resolveTrade(typed);
+  const row = TRADES.find((r) => resolved.label && r.label === resolved.label)
+    ?? (resolved.exact ? TRADES.find((r) => r.codes.some((c) => resolved.codes.includes(c))) : null);
+  const out = [];
+  const seen = new Set();
+  // A bare SIC code is a register filter, not something to type into Google.
+  for (const phrase of [SIC_ONLY.test(typed) ? '' : typed, ...(row?.terms ?? [])]) {
+    const p = String(phrase ?? '').trim();
+    const key = p.toLowerCase().replace(/s$/, '');
+    if (!p || seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+  }
+  return out.length ? out : [typed];
+}
+
+/**
+ * How reliably a trade has turned into leads, smoothed so an untried trade
+ * starts in the middle (1/2) rather than at zero. A trade that is mostly sole
+ * traders — hairdressers, window cleaners — keeps coming back with nothing a
+ * messageable-only hunt can file, and sinks; one that is mostly limited
+ * companies rises. found_total counts confirmed companies only.
+ */
+function tradeYield(rows) {
+  let found = 0;
+  let visits = 0;
+  for (const r of rows) {
+    found += Number(r.found_total ?? 0);
+    visits += Number(r.visits ?? 0);
+  }
+  return (found + 1) / (visits + 2);
 }
 
 /**
@@ -177,7 +233,7 @@ function nextTargets() {
  * least-recently-run ordering the query established still holds inside each
  * group.
  */
-export function spreadByTrade(targets) {
+export function spreadByTrade(targets, { byYield = false } = {}) {
   const byTrade = new Map();
   for (const t of targets) {
     if (!byTrade.has(t.trade)) byTrade.set(t.trade, []);
@@ -196,8 +252,12 @@ export function spreadByTrade(targets) {
     (latest, r) => (r.last_run_at && r.last_run_at > latest ? r.last_run_at : latest),
     ''
   );
+  // In messageable-only mode the budget is better spent where messageable
+  // leads actually turn up, so the trades that have produced them go first.
+  // Ties — and every other mode — fall back to longest-waiting first.
   const queues = [...byTrade.values()]
-    .sort((a, b) => lastUsed(a).localeCompare(lastUsed(b)));
+    .sort((a, b) => (byYield ? tradeYield(b) - tradeYield(a) : 0)
+      || lastUsed(a).localeCompare(lastUsed(b)));
 
   // Each trade starts at a different town.
   //
@@ -227,8 +287,8 @@ export function spreadByTrade(targets) {
  * file no-website businesses straight as leads). Only the derived website flag
  * is stored in place_cache — never the listing content, per Google's terms.
  */
-async function websiteMap(trade, area, counters) {
-  const query = area ? `${trade} in ${area}` : trade;
+async function websiteMap(phrase, area, counters) {
+  const query = area ? `${phrase} in ${area}` : phrase;
   const byName = new Map();
   const rows = [];
   let pageToken;
@@ -240,29 +300,142 @@ async function websiteMap(trade, area, counters) {
        has_website = excluded.has_website, refreshed_at = excluded.refreshed_at`
   );
 
+  let searched = 0;
   for (let page = 0; page < 2; page++) {
-    if (counters.places_requests >= counters.maxPlacesRequests) break;
+    if (tradeSearches(counters) >= counters.maxPlacesRequests) break;
 
     const { places, nextPageToken } = await textSearch(query, {
       regionCode: getSetting('default_region_code', 'GB'), pageToken,
     });
     counters.places_requests++;
+    searched++;
 
     for (const place of places) {
       const row = normalisePlace(place);
       if (!row.place_id || !row.display_name) continue;
+      // Held in memory for this run only, to match register companies against.
       byName.set(normaliseName(row.display_name), {
+        place_id: row.place_id,
         has_website: row.has_website === 1,
         phone: row.phone,
+        editorial_summary: row.editorial_summary,
+        primary_type: row.primary_type,
       });
       rows.push(row);
-      remember.run(row.place_id, row.has_website, nowIso(), nowIso(), area ?? trade);
+      remember.run(row.place_id, row.has_website, nowIso(), nowIso(), area ?? phrase);
     }
 
     if (!nextPageToken) break;
     pageToken = nextPageToken;
   }
-  return { byName, rows };
+  return { byName, rows, searched };
+}
+
+/** Google trade searches spent so far — every Places request that was not a by-name lookup. */
+const tradeSearches = (counters) => counters.places_requests - counters.company_lookups;
+
+/* ------------------------------------------------- the register's verdict */
+
+/**
+ * What the register said about a Google listing last time: 'not_ltd' when it
+ * could not confirm a limited company. Most no-website businesses on Google
+ * are sole traders, and without this every run asked the register about the
+ * same ones again. Answers go stale — a sole trader can incorporate — so an
+ * old one is ignored and the question asked afresh.
+ */
+function registerVerdict(placeId) {
+  const r = db.prepare(
+    'SELECT register_verdict, register_checked_at FROM place_cache WHERE place_id = ?'
+  ).get(placeId);
+  if (!r?.register_verdict || !r.register_checked_at) return null;
+  const cutoff = new Date(Date.now() - RECHECK_AFTER_DAYS * 86_400_000).toISOString();
+  return r.register_checked_at >= cutoff ? r.register_verdict : null;
+}
+
+function recordRegisterVerdict(placeId, verdict) {
+  db.prepare(
+    'UPDATE place_cache SET register_verdict = ?, register_checked_at = ? WHERE place_id = ?'
+  ).run(verdict, nowIso(), placeId);
+}
+
+/* --------------------------------------------- one company, by its name */
+
+const LEGAL_SUFFIX = /\b(limited|ltd|plc|llp|l\.l\.p|cic|c\.i\.c|cyfyngedig|cyf)\b\.?/gi;
+
+/** "HILLSIDE ROOFING LIMITED" -> "HILLSIDE ROOFING": what a person would type. */
+const searchableName = (name) => String(name ?? '').replace(LEGAL_SUFFIX, ' ')
+  .replace(/\s+/g, ' ').trim();
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const outwardCode = (postcode) => String(postcode ?? '').trim().split(/\s+/)[0] || '';
+
+/**
+ * Is this Google listing the same firm as this register entry?
+ *
+ * Same name is not enough: two firms can share a trading name a county apart,
+ * and taking the wrong one's number means messaging a business the register
+ * never vouched for. So the name must match to the auto-accept standard AND
+ * the listing's address must name the company's town, the town being hunted,
+ * or the company's postcode district, as a whole word. A listing with no
+ * address cannot be placed and is refused.
+ *
+ * A one-word name only matches exactly: "Roofing" is not "Hillside Roofing".
+ */
+export function sameFirm(company, row, area) {
+  const addr = String(row.address ?? '').toLowerCase();
+  if (!addr || !row.display_name) return false;
+
+  const a = normaliseName(company.company_name);
+  const b = normaliseName(row.display_name);
+  if (!a || !b) return false;
+  if (a.split(' ').length === 1 || b.split(' ').length === 1) {
+    if (a !== b) return false;
+  } else if (matchScore(company.company_name, { company_name: row.display_name }) < AUTO_MATCH) {
+    return false;
+  }
+
+  const places = [company.locality, area, outwardCode(company.postal_code)]
+    .map((s) => String(s ?? '').trim().toLowerCase()).filter(Boolean);
+  return places.some((p) => new RegExp(`(^|[^a-z0-9])${escapeRe(p)}([^a-z0-9]|$)`).test(addr));
+}
+
+/**
+ * Look one register company up on Google by its name.
+ *
+ * The trade search returns the forty-odd listings Google ranks highest for
+ * "roofers in Otley". A limited company that ranks below them came back with
+ * no phone and was dropped — though it is exactly the business the register
+ * says may lawfully be messaged. Asking for it by name finds it.
+ *
+ * Returns a judge()-shaped verdict, or null when Google has no listing that is
+ * unmistakably this firm.
+ */
+async function lookupCompany(company, area, counters) {
+  const name = searchableName(company.company_name);
+  const town = company.locality ?? area ?? '';
+  const { places } = await textSearch(town ? `${name} ${town}` : name, {
+    regionCode: getSetting('default_region_code', 'GB'), pageSize: 5, mask: LOOKUP_MASK,
+  });
+  counters.places_requests++;
+  counters.company_lookups++;
+
+  const match = places.map(normalisePlace)
+    .find((row) => row.place_id && sameFirm(company, row, area));
+  if (!match) return null;
+
+  db.prepare(
+    `INSERT INTO place_cache (place_id, has_website, imported, first_seen_at, refreshed_at, query_text)
+     VALUES (?, ?, 0, ?, ?, ?)
+     ON CONFLICT(place_id) DO UPDATE SET
+       has_website = excluded.has_website, refreshed_at = excluded.refreshed_at`
+  ).run(match.place_id, match.has_website, nowIso(), nowIso(), area ?? town ?? null);
+
+  return match.has_website === 1
+    ? { prospect: false, reason: 'has a website', phone: match.phone }
+    : {
+        prospect: true, has_website: 0, evidence: 'places-name-lookup', phone: match.phone,
+        place_id: match.place_id,
+      };
 }
 
 /**
@@ -451,7 +624,12 @@ export function judge(company, byName, { includeUnlisted = true } = {}) {
   // was dropped for having no way to reach it.
   const found = (info) => (info.has_website
     ? { prospect: false, reason: 'has a website', phone: info.phone }
-    : { prospect: true, has_website: 0, evidence: 'places-no-website', phone: info.phone });
+    : {
+        prospect: true, has_website: 0, evidence: 'places-no-website', phone: info.phone,
+        place_id: info.place_id ?? null,
+        editorial_summary: info.editorial_summary ?? null,
+        primary_type: info.primary_type ?? null,
+      });
 
   const exact = byName.get(key);
   if (exact) return found(exact);
@@ -462,26 +640,45 @@ export function judge(company, byName, { includeUnlisted = true } = {}) {
     if (name && (name.startsWith(key) || key.startsWith(name))) return found(info);
   }
 
-  if (!includeUnlisted) return { prospect: false, reason: 'not on Google' };
-  return { prospect: true, has_website: 0, evidence: 'places-absent' };
+  // `unlisted` says the trade search simply did not return it — not that
+  // Google has never heard of it. The hunt may still look it up by name.
+  if (!includeUnlisted) return { prospect: false, reason: 'not on Google', unlisted: true };
+  return { prospect: true, has_website: 0, evidence: 'places-absent', unlisted: true };
 }
 
 function importLead(company, verdict, trade) {
+  // Carry the Google listing's id when we matched one, so the Google-first
+  // source recognises this business next time instead of filing it twice. A
+  // listing already on another lead is left off rather than tripping the
+  // UNIQUE index — that lead has the number already.
+  const placeId = verdict.place_id
+    && !db.prepare('SELECT 1 FROM leads WHERE google_place_id = ?').get(verdict.place_id)
+    ? verdict.place_id : null;
+  const fromGoogle = Boolean(verdict.phone || verdict.editorial_summary || placeId);
   const info = db.prepare(
     `INSERT INTO leads
-       (business_name, category, location, phone, status, source, opted_out, entity_type,
-        company_number, registered_name, registered_address, company_status, company_type,
-        incorporated_on, sic_codes, entity_note, checked_at,
-        has_website, website_checked_at, website_evidence, assigned_to, created_at)
-     VALUES (@name, @trade, @town, @phone, 'new', 'Daily hunt', 0, 'corporate',
-             @number, @name, @address, @status, @type,
-             @inc, @sic, @note, @now,
-             @has_website, @checked, @evidence, @assigned, @now)`
+       (business_name, category, location, phone, google_place_id, status, source, opted_out,
+        entity_type, company_number, registered_name, registered_address, company_status,
+        company_type, incorporated_on, sic_codes, entity_note, checked_at,
+        has_website, website_checked_at, website_evidence,
+        editorial_summary, primary_type, details_source, details_imported_at,
+        assigned_to, created_at)
+     VALUES (@name, @trade, @town, @phone, @place_id, 'new', 'Daily hunt', 0,
+             'corporate', @number, @name, @address, @status,
+             @type, @inc, @sic, @note, @now,
+             @has_website, @checked, @evidence,
+             @summary, @primary_type, @details_source, @details_at,
+             @assigned, @now)`
   ).run({
     name: company.company_name,
     trade,
     town: company.locality ?? null,
     phone: verdict.phone ?? null,
+    place_id: placeId,
+    summary: verdict.editorial_summary ?? null,
+    primary_type: verdict.primary_type ?? null,
+    details_source: fromGoogle ? 'google_places' : null,
+    details_at: fromGoogle ? nowIso() : null,
     // Share the day's finds out across the active team (5 each of 15, say).
     assigned: nextAssignee(),
     number: company.company_number,
@@ -572,6 +769,8 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
     not_confirmed: 0,
     wrong_town: 0,
     places_requests: 0, register_requests: 0,
+    // Of places_requests, how many looked one company up by name.
+    company_lookups: 0,
     maxPlacesRequests: cfg.maxPlacesRequests,
   };
   const covered = new Set();
@@ -585,9 +784,11 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
          no_contact=@no_contact, not_mobile=@not_mobile, not_confirmed=@not_confirmed,
          wrong_town=@wrong_town,
          places_requests=@places_requests, register_requests=@register_requests,
+         company_lookups=@company_lookups,
          areas_covered=@areas, finished_at=@finished, error=@error
        WHERE id=@id`
     ).run({
+      company_lookups: counters.company_lookups,
       found: counters.found,
       companies_seen: counters.companies_seen,
       already_known: counters.already_known,
@@ -610,7 +811,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
     // trade and town, so this cannot be a query per company.
     const seen = knownCompanyNumbers();
 
-    const targets = nextTargets();
+    const targets = nextTargets({ byYield: cfg.messageableOnly });
 
     /**
      * The most leads any one trade may contribute to this run.
@@ -645,7 +846,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
       // must not cost a request to discover that.
       if (taken(t.trade) >= maxPerTrade) continue;
       if ((cfg.requireNoWebsite || cfg.includePlaces)
-          && counters.places_requests >= cfg.maxPlacesRequests) break;
+          && tradeSearches(counters) >= cfg.maxPlacesRequests) break;
 
       let page;
       try {
@@ -666,14 +867,29 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
         throw err;
       }
 
-      db.prepare('UPDATE hunt_targets SET last_run_at = ?, cursor = ? WHERE id = ?')
-        .run(nowIso(), t.cursor + page.items.length, t.id);
+      db.prepare(
+        'UPDATE hunt_targets SET last_run_at = ?, cursor = ?, visits = visits + 1 WHERE id = ?'
+      ).run(nowIso(), t.cursor + page.items.length, t.id);
 
       if (!page.items.length) {
         db.prepare('UPDATE hunt_targets SET exhausted_at = ? WHERE id = ?').run(nowIso(), t.id);
         continue;
       }
       covered.add(t.area ? `${t.trade} · ${t.area}` : t.trade);
+
+      // Each visit to this trade and town asks Google a different way, so a
+      // return visit finds businesses the last phrasing did not rank.
+      const variants = queryVariants(t.trade);
+      const phrase = variants[Number(t.query_variant ?? 0) % variants.length];
+      const askGoogle = async () => {
+        const pl = await websiteMap(phrase, t.area, counters);
+        // Only a phrasing actually searched is used up.
+        if (pl.searched) {
+          db.prepare('UPDATE hunt_targets SET query_variant = query_variant + 1 WHERE id = ?')
+            .run(t.id);
+        }
+        return pl;
+      };
 
       // Google source. Fetch Google's own listings for this trade/town once.
       // The no-website ones come WITH a phone — the businesses you can actually
@@ -687,8 +903,8 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
       // Google is only called once per town.
       let placesByName = null;
       if ((cfg.includePlaces || cfg.messageableOnly) && placesConfigured()
-          && counters.places_requests < cfg.maxPlacesRequests) {
-        const pl = await websiteMap(t.trade, t.area, counters);
+          && tradeSearches(counters) < cfg.maxPlacesRequests) {
+        const pl = await askGoogle();
         placesByName = pl.byName;
         if (cfg.fileGoogleDirect || cfg.messageableOnly) {
           for (const row of pl.rows) {
@@ -703,29 +919,46 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
             }
 
             if (cfg.messageableOnly) {
-              // One register search per business. Count it against the register
-              // budget so a town of no-hopers cannot run the API dry, and stop
-              // if that budget is spent.
-              if (counters.register_requests >= cfg.maxRegisterPages) break;
-              counters.register_requests++;
               let outcome;
-              try {
-                outcome = await confirmAndImportPlaceLead(row, t.trade, t.area, seen);
-              } catch (err) {
-                if (err instanceof CompaniesHouseError && err.retryable) throw err;
-                counters.not_confirmed++;
-                continue;
+              if (registerVerdict(row.place_id) === 'not_ltd') {
+                // The register already said no about this listing recently.
+                outcome = { filed: false, reason: 'unconfirmed', remembered: true };
+              } else {
+                // One register search per business. Count it against the register
+                // budget so a town of no-hopers cannot run the API dry, and stop
+                // if that budget is spent.
+                if (counters.register_requests >= cfg.maxRegisterPages) break;
+                counters.register_requests++;
+                try {
+                  outcome = await confirmAndImportPlaceLead(row, t.trade, t.area, seen);
+                } catch (err) {
+                  if (err instanceof CompaniesHouseError && err.retryable) throw err;
+                  counters.not_confirmed++;
+                  continue;
+                }
+                if (!outcome.filed && outcome.reason === 'unconfirmed') {
+                  recordRegisterVerdict(row.place_id, 'not_ltd');
+                }
               }
               if (!outcome.filed) {
                 if (outcome.reason === 'known') { counters.already_known++; continue; }
                 // The register can't confirm it's a limited company — a sole
                 // trader, most likely. File it call-only when that's switched
                 // on; otherwise leave it off the list.
-                if (!cfg.includeSoleTraders) { counters.not_confirmed++; continue; }
+                if (!cfg.includeSoleTraders) {
+                  if (outcome.remembered) counters.already_known++;
+                  else counters.not_confirmed++;
+                  continue;
+                }
                 if (ledgerFor({ business_name: row.display_name, location: t.area })) {
                   counters.already_known++; continue;
                 }
                 importPlaceLead(row, t.trade, t.area);
+              } else {
+                // A confirmed company is what a messageable-only hunt is for,
+                // so it counts toward this trade's yield.
+                db.prepare('UPDATE hunt_targets SET found_total = found_total + 1 WHERE id = ?')
+                  .run(t.id);
               }
             } else {
               if (ledgerFor({ business_name: row.display_name, location: t.area })) {
@@ -789,17 +1022,30 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
       // Reuse the Google fetch from the direct source above when there was one,
       // so a town is only looked up on Google once.
       const byName = placesByName
-        ?? (needPlaces ? (await websiteMap(t.trade, t.area, counters)).byName : new Map());
+        ?? (needPlaces ? (await askGoogle()).byName : new Map());
 
+      let lookupsHere = 0;
       for (const company of fresh) {
         if (counters.found >= want) break;
         if (taken(t.trade) >= maxPerTrade) break;
         // judge() answers both questions from the one page: whether Google
         // shows a website, and what phone number it holds. When only the
         // phone is wanted, its website verdict is ignored.
-        const verdict = needPlaces
+        let verdict = needPlaces
           ? judge(company, byName, cfg)
           : { prospect: true };
+
+        // The trade search did not return it, but a number is required: ask
+        // Google for this company by name. The register has already confirmed
+        // it is a limited company, so a mobile found here is one you may
+        // lawfully message. Capped per town and per run, inside the budget.
+        if (verdict.unlisted && cfg.requirePhone && placesConfigured()
+            && lookupsHere < LOOKUPS_PER_TARGET
+            && counters.company_lookups < cfg.maxCompanyLookups) {
+          lookupsHere++;
+          const hit = await lookupCompany(company, t.area, counters);
+          if (hit) verdict = hit;
+        }
         if (cfg.requireNoWebsite && !verdict.prospect) { counters.had_website++; continue; }
 
         // A lead with no way to reach it is not a lead. Counted separately
@@ -824,7 +1070,8 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
           // entry point is a second one. Losing that race means the company
           // is already filed, which is the outcome we wanted; it must not
           // abort the whole run.
-          if (String(err.message).includes('leads.company_number')) {
+          if (String(err.message).includes('leads.company_number')
+              || String(err.message).includes('leads.google_place_id')) {
             counters.already_known++;
             continue;
           }

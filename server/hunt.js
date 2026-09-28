@@ -67,7 +67,7 @@ if (run.found < run.target && !run.error) {
       + 'Raise hunt_max_register_pages — the register is free.'
     : hitLookups
     ? `Used its budget of ${cfg.maxPlacesRequests} Google lookups and stopped. `
-      + 'Raise hunt_max_places_requests (5,000 free a month).'
+      + 'Raise hunt_max_places_requests (1,000 free a month, then about 3p each).'
     : 'Most high-street trades are sole traders the register does not hold. '
       + 'Add more towns, or mix in limited-company trades.';
   console.log(`\nShort of target. ${why}`);

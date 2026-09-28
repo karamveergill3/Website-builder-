@@ -34,8 +34,8 @@ export const WANTED_FIELDS = [
   // in Otley, specialising in flat roofs and skylights") when it has one. Not
   // filled for every place — small businesses often don't have one — but when
   // present it beats guessing at services from the trade category alone.
-  // editorialSummary moves the request to the Atmosphere billing tier, ~10%
-  // more per request than Pro.
+  // editorialSummary moves the request from the Enterprise SKU ($35/1,000)
+  // to Enterprise + Atmosphere ($40/1,000).
   'editorialSummary',
   'primaryTypeDisplayName',
 ];
@@ -43,6 +43,17 @@ export const WANTED_FIELDS = [
 export const TEXT_SEARCH_MASK = [
   ...WANTED_FIELDS.map((f) => `places.${f}`),
   'nextPageToken',
+].join(',');
+
+/**
+ * For looking one named company up. Everything needed to judge it — phone,
+ * website, and an address to check it is the right firm — and nothing more:
+ * without editorialSummary this bills on the plain Enterprise SKU, which has
+ * its own monthly free allowance separate from the trade/town searches.
+ */
+export const LOOKUP_MASK = [
+  'places.id', 'places.displayName', 'places.formattedAddress',
+  'places.nationalPhoneNumber', 'places.websiteUri',
 ].join(',');
 
 export const DETAILS_MASK = WANTED_FIELDS.join(',');
@@ -58,14 +69,16 @@ export const PRICING_SOURCE =
  * therefore reports itself as unverified until you open PRICING_SOURCE, check
  * the current numbers, and confirm them under Settings -> Places pricing.
  *
- * Requesting websiteUri and a phone number is what lifts a request out of the
- * cheapest tier, so these are the Pro-tier rates.
+ * Requesting websiteUri and a phone number puts a Text Search on the
+ * Enterprise SKU: $35 per 1,000 with 1,000 free a month (checked September
+ * 2026). The hunt's editorialSummary field lifts it to Enterprise +
+ * Atmosphere at $40 per 1,000, same free allowance.
  */
 export const PRICING_DEFAULTS = {
   currency: 'USD',
   text_search_per_1000: 35.0,
   place_details_per_1000: 20.0,
-  free_calls_per_sku_per_month: 5000,
+  free_calls_per_sku_per_month: 1000,
 };
 
 /** Whether a key is present. Mirrors companies-house.js's `configured`. */
@@ -214,10 +227,10 @@ async function call(url, { method = 'POST', mask, body, signal }) {
  * decide "has a website?" without a per-place Details call.
  */
 export async function textSearch(textQuery, {
-  regionCode = 'GB', pageToken, pageSize = 20, signal,
+  regionCode = 'GB', pageToken, pageSize = 20, signal, mask = TEXT_SEARCH_MASK,
 } = {}) {
   const data = await call(TEXT_SEARCH_URL, {
-    mask: TEXT_SEARCH_MASK,
+    mask,
     signal,
     body: {
       textQuery,

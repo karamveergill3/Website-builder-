@@ -1587,6 +1587,28 @@ Thanks so much, and have a lovely day.
       }
     },
   },
+  {
+    name: '053_hunt_variants_and_register_verdicts',
+    up: `
+      -- Google returns the same results for the same query, so a second visit
+      -- to "roofers in Otley" re-buys listings already seen. query_variant
+      -- rotates the phrasing on each visit; visits feeds the per-trade yield
+      -- that steers a messageable-only hunt toward trades that produce leads.
+      ALTER TABLE hunt_targets ADD COLUMN query_variant INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE hunt_targets ADD COLUMN visits        INTEGER NOT NULL DEFAULT 0;
+
+      -- The Companies House answer for a Google listing, so a sole trader is
+      -- not re-checked against the register every run. This is our own
+      -- register verdict (Open Government Licence data), not Places content.
+      ALTER TABLE place_cache ADD COLUMN register_verdict    TEXT;
+      ALTER TABLE place_cache ADD COLUMN register_checked_at TEXT;
+
+      -- Of a run's Google requests, how many looked one company up by name.
+      -- They bill on a different SKU from the trade searches, with their own
+      -- free allowance and their own budget.
+      ALTER TABLE hunt_runs ADD COLUMN company_lookups INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 function migrate() {

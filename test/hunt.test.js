@@ -6,7 +6,9 @@ process.env.GOOGLE_MAPS_API_KEY = 'test-places-key';
 
 const { get, post, patch, put, del, teardown } = await import('./helpers.js');
 const { db } = await import('../server/db.js');
-const { judge, spreadByTrade, sameTown, huntConfig, isMobileNumber } = await import('../server/lib/hunter.js');
+const {
+  judge, spreadByTrade, sameTown, huntConfig, isMobileNumber, queryVariants, sameFirm,
+} = await import('../server/lib/hunter.js');
 const { normaliseName } = await import('../server/lib/companies-house.js');
 
 test.after(teardown);
@@ -18,12 +20,14 @@ let register = [];      // queued Companies House advanced-search replies
 let search = [];        // queued Companies House name-search replies (findCompany)
 let places = [];        // queued Places replies
 let calls = { register: 0, search: 0, places: 0 };
+let placesLog = [];     // what each Places request asked for, and with which field mask
 
 function stub() {
   register = [];
   search = [];
   places = [];
   calls = { register: 0, search: 0, places: 0 };
+  placesLog = [];
   globalThis.fetch = async (url, opts = {}) => {
     const u = String(url);
     const reply = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -57,6 +61,9 @@ function stub() {
     }
     if (u.includes('places.googleapis.com')) {
       calls.places++;
+      let asked = null;
+      try { asked = JSON.parse(opts.body ?? 'null')?.textQuery ?? null; } catch { /* GET */ }
+      placesLog.push({ query: asked, mask: opts.headers?.['X-Goog-FieldMask'] ?? '' });
       const next = places.shift() ?? { places: [] };
       return reply(next.body ?? next, next.status ?? 200);
     }
@@ -109,6 +116,10 @@ const configure = (over = {}) => put('/api/settings', {
   // only" (default on in production) would override the three require_* flags
   // and disable the Google-direct source; it has its own tests below.
   hunt_messageable_only: '0',
+  // Off here too, so a test that counts Google requests counts trade searches
+  // only. The by-name lookup has its own tests below.
+  hunt_max_company_lookups: '0',
+  hunt_include_sole_traders: '0',
   ...over,
 });
 
@@ -1148,4 +1159,233 @@ test('the hunt files only companies actually in the town, and counts the rest', 
   assert.ok(!names.includes('RAULNICOLAS LTD'));
   assert.ok(!names.includes('FAR AWAY ROOFING LIMITED'));
   assert.ok(names.includes('REAL STONE ROOFING LIMITED'));
+});
+
+/* ------------------------------------------ finding more you can message */
+
+test('a trade has several ways to ask Google, with no singular/plural repeats', () => {
+  const v = queryVariants('roofers');
+  assert.equal(v[0], 'roofers', 'the trade as typed comes first');
+  for (const p of ['roofing', 'roof repairs', 'flat roofing']) {
+    assert.ok(v.includes(p), `missing "${p}" from ${JSON.stringify(v)}`);
+  }
+  assert.ok(!v.includes('roofer'), '"roofer" and "roofers" are one search, not two');
+  assert.equal(new Set(v).size, v.length);
+});
+
+test('a SIC code is not typed into Google, and an unknown trade is left alone', () => {
+  const coded = queryVariants('43910');
+  assert.ok(!coded.includes('43910'), 'a register code is not a search term');
+  assert.ok(coded.includes('roofer'), 'the trade it stands for is searched instead');
+  assert.deepEqual(queryVariants('xyzzy widgets'), ['xyzzy widgets']);
+});
+
+test('each visit to a trade and town asks Google a different way', async () => {
+  // Google answers the same query with the same listings, so asking
+  // "roofers in Otley" every visit paid again for businesses already seen.
+  stub();
+  await clearLeads();
+  await configure({ hunt_daily_target: '1' });
+
+  register = [{ body: { hits: 1, items: [company('FIRST VISIT LIMITED', '73000001')] } }];
+  places = [{ places: [] }];
+  await runAndWait();
+
+  db.prepare('UPDATE hunt_targets SET cursor = 0, last_run_at = NULL').run();
+  const firstAsked = placesLog[0]?.query;
+  stub();
+  register = [{ body: { hits: 1, items: [company('SECOND VISIT LIMITED', '73000002')] } }];
+  places = [{ places: [] }];
+  await runAndWait();
+
+  assert.equal(firstAsked, 'roofers in Otley');
+  assert.equal(placesLog[0]?.query, 'roofing in Otley', 'the second visit uses the next phrasing');
+});
+
+test('a limited company the trade search missed is looked up by name and filed', async () => {
+  // The register confirms it is a limited company, so the mobile found by
+  // asking Google for it by name is one you may lawfully message.
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_messageable_only: '1', hunt_include_places: '1', hunt_daily_target: '5',
+    hunt_max_company_lookups: '10',
+  });
+
+  register = [{ body: { hits: 1, items: [company('HIDDEN ROOFING LIMITED', '73000101')] } }];
+  places = [
+    { places: [] },                                                     // "roofers in Otley": not there
+    { places: [place('Hidden Roofing', { phone: '07700 900555' })] },   // asked for by name
+  ];
+
+  const run = await runAndWait();
+  assert.equal(run.error ?? null, null, run.error ?? '');
+  assert.equal(run.company_lookups, 1);
+
+  const lead = (await get('/api/leads')).body.leads
+    .find((l) => l.business_name === 'HIDDEN ROOFING LIMITED');
+  assert.ok(lead, 'filed from the by-name lookup');
+  assert.equal(lead.entity_type, 'corporate');
+  assert.ok(isMobileNumber(lead.phone), 'with the mobile Google holds for it');
+  assert.ok(lead.google_place_id, 'and the listing id, so the Google-first source dedupes it');
+  assert.equal(lead.website_evidence, 'places-name-lookup');
+
+  const lookup = placesLog[1];
+  assert.match(lookup.query, /HIDDEN ROOFING/);
+  assert.match(lookup.query, /Otley/);
+  assert.doesNotMatch(lookup.query, /LIMITED/, 'searched the way a person would type it');
+  assert.doesNotMatch(lookup.mask, /editorialSummary/,
+    'the lookup stays on the cheaper SKU with its own free allowance');
+});
+
+test('a same-name listing in another town is not taken for the company', async () => {
+  // Two firms can share a trading name a county apart. Taking the wrong one's
+  // number means messaging a business the register never vouched for.
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_messageable_only: '1', hunt_include_places: '1', hunt_daily_target: '5',
+    hunt_max_company_lookups: '10',
+  });
+
+  register = [{ body: { hits: 1, items: [company('TWIN ROOFING LIMITED', '73000201')] } }];
+  places = [
+    { places: [] },
+    { places: [{
+      ...place('Twin Roofing', { phone: '07700 900666' }),
+      formattedAddress: '5 Market St, Kendal LA9 4AA, UK',
+    }] },
+  ];
+
+  const run = await runAndWait();
+  assert.equal(run.company_lookups, 1, 'it did ask');
+  assert.equal(run.found, 0, 'but a Kendal listing is not an Otley company');
+  assert.ok(run.no_contact >= 1, 'so it is dropped for having no number, and counted');
+});
+
+test('the lookup budget is a hard cap', async () => {
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_messageable_only: '1', hunt_include_places: '1', hunt_daily_target: '10',
+    hunt_max_company_lookups: '1',
+  });
+
+  register = [{ body: { hits: 3, items: [
+    company('UNLISTED ONE LIMITED', '73000301'),
+    company('UNLISTED TWO LIMITED', '73000302'),
+    company('UNLISTED THREE LIMITED', '73000303'),
+  ] } }];
+  places = [{ places: [] }];
+
+  const run = await runAndWait();
+  assert.equal(run.company_lookups, 1, 'one lookup, as budgeted');
+  assert.equal(calls.places, 2, 'one trade search and one lookup, no more');
+});
+
+test('no lookups are spent when a phone number is not required', async () => {
+  // With only the website filter on, a company missing from the trade search
+  // is already a prospect. Asking for its number would be money for nothing.
+  stub();
+  await clearLeads();
+  await configure({ hunt_daily_target: '5', hunt_max_company_lookups: '10' });
+
+  register = [{ body: { hits: 2, items: [
+    company('NO NUMBER NEEDED LIMITED', '73000401'),
+    company('ALSO FINE LIMITED', '73000402'),
+  ] } }];
+  places = [{ places: [] }];
+
+  const run = await runAndWait();
+  assert.equal(run.found, 2);
+  assert.equal(run.company_lookups, 0);
+  assert.equal(calls.places, 1);
+});
+
+test('a listing the register said is not a company is not asked about again', async () => {
+  // Most no-website businesses on Google are sole traders. Without a memory,
+  // every run asked the register about the same ones again.
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_messageable_only: '1', hunt_include_places: '1', hunt_daily_target: '5',
+  });
+
+  const solo = place('Solo Roofer Otley', { phone: '07700 900777' });
+  register = [{ body: { hits: 1, items: [company('REGISTER FILLER LIMITED', '73000501')] } }];
+  places = [{ places: [solo] }];
+  search = [{ body: { items: [] } }];            // the register has no such company
+  const first = await runAndWait();
+  assert.equal(first.not_confirmed, 1);
+
+  db.prepare('UPDATE hunt_targets SET cursor = 0, last_run_at = NULL').run();
+  stub();
+  register = [{ body: { hits: 1, items: [company('REGISTER FILLER TWO LIMITED', '73000502')] } }];
+  places = [{ places: [solo] }];
+  const second = await runAndWait();
+
+  assert.equal(calls.search, 0, 'the register was not asked a second time');
+  assert.equal(second.not_confirmed, 0);
+  assert.ok(second.already_known >= 1, 'it is counted as already seen');
+});
+
+test('a confirmed Google find counts toward its trade\'s yield', async () => {
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_messageable_only: '1', hunt_include_places: '1', hunt_daily_target: '5',
+  });
+
+  register = [{ body: { hits: 1, items: [company('YIELD FILLER LIMITED', '73000601')] } }];
+  places = [{ places: [place('Yield Roofing', { phone: '07700 900888' })] }];
+  search = [{ body: { items: [{
+    company_number: '73000602', title: 'YIELD ROOFING LIMITED', company_status: 'active',
+    company_type: 'ltd', date_of_creation: '2016-01-01',
+    address_snippet: '1 High St, Otley', address: { locality: 'Otley' },
+  }] } }];
+
+  const run = await runAndWait();
+  assert.equal(run.found, 1);
+  const t = db.prepare('SELECT found_total, visits FROM hunt_targets').get();
+  assert.equal(t.found_total, 1, 'found_total counts the Google-first filing too');
+  assert.equal(t.visits, 1);
+});
+
+test('a messageable-only hunt deals productive trades first', () => {
+  const rows = [
+    { trade: 'barber', area: 'A', found_total: 0, visits: 10, last_run_at: '2026-01-01' },
+    { trade: 'roofer', area: 'A', found_total: 6, visits: 10, last_run_at: '2026-06-01' },
+  ];
+  assert.equal(spreadByTrade(rows)[0].trade, 'barber', 'plain mode: longest waiting first');
+  assert.equal(spreadByTrade(rows, { byYield: true })[0].trade, 'roofer',
+    'messageable mode: the trade that produces messageable leads first');
+});
+
+test('an untried trade is tried before one that keeps coming back empty', () => {
+  const rows = [
+    { trade: 'window cleaner', area: 'A', found_total: 0, visits: 8, last_run_at: '2026-01-01' },
+    { trade: 'scaffolder', area: 'A', found_total: 0, visits: 0, last_run_at: '2026-06-01' },
+  ];
+  assert.equal(spreadByTrade(rows, { byYield: true })[0].trade, 'scaffolder');
+});
+
+test('sameFirm needs the name AND the town', () => {
+  const co = company('HILLSIDE ROOFING LIMITED', '01', {
+    registered_office_address: { address_line_1: '1 High St', locality: 'Otley', postal_code: 'LS21 1AA' },
+  });
+  const flat = { ...co, locality: 'Otley', postal_code: 'LS21 1AA' };
+  const row = (name, address) => ({ display_name: name, address });
+
+  assert.equal(sameFirm(flat, row('Hillside Roofing', '1 High St, Otley LS21 1AA, UK'), 'Otley'), true);
+  assert.equal(sameFirm(flat, row('Hillside Roofing', '2 Main St, Kendal LA9 4AA'), 'Otley'), false,
+    'right name, wrong town');
+  assert.equal(sameFirm(flat, row('Roofing', '1 High St, Otley'), 'Otley'), false,
+    'a one-word name must match exactly');
+  assert.equal(sameFirm(flat, row('Hillside Roofing', ''), 'Otley'), false,
+    'a listing with no address cannot be placed');
+
+  // "LS2" is a different district from "LS21": whole-word matching only.
+  const leeds = { company_name: 'CITY ROOFING LIMITED', locality: null, postal_code: 'LS2 7XX' };
+  assert.equal(sameFirm(leeds, row('City Roofing', '9 Road, LS21 3BB'), null), false);
+  assert.equal(sameFirm(leeds, row('City Roofing', '9 Road, Leeds LS2 3BB'), null), true);
 });

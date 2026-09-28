@@ -82,6 +82,7 @@ test('the hunt form covers the options the hunt actually reads', () => {
     'hunt_max_per_trade', 'hunt_require_no_website', 'hunt_require_phone',
     'hunt_require_mobile', 'hunt_include_unlisted', 'hunt_enabled',
     'hunt_messageable_only', 'hunt_include_sole_traders',
+    'hunt_max_places_requests', 'hunt_max_company_lookups',
   ]) {
     assert.ok(names.has(key), `the Hunt screen has no control for ${key}`);
   }
@@ -95,10 +96,20 @@ test('the hunt budget ships high enough to actually reach a target', () => {
   // finding single figures and no test would have said why.
   assert.ok(Number(DEFAULTS.hunt_max_register_pages) >= 150,
     'register pages default is too low to plough past the sole traders');
-  assert.ok(Number(DEFAULTS.hunt_max_places_requests) >= 100,
-    'Google-lookup default is too low to reach a 20 target');
-  // ...but the lookups must stay inside the free 5,000/SKU/month even run
-  // daily: value x 30 days must not exceed 5,000.
-  assert.ok(Number(DEFAULTS.hunt_max_places_requests) * 30 <= 5000,
-    'a daily run at this budget would blow the free Google allowance');
+  // The Google searches no longer re-buy the same listings on every visit
+  // (each visit asks a different way), so a smaller number goes as far.
+  assert.ok(Number(DEFAULTS.hunt_max_places_requests) >= 25,
+    'trade-search default is too low to cover a day of towns');
+  assert.ok(Number(DEFAULTS.hunt_max_company_lookups) >= 20,
+    'lookup default is too low to reach companies the trade search misses');
+});
+
+test('the Google budgets stay inside the free allowance even run daily', () => {
+  // A phone and a website put a search on an Enterprise SKU: 1,000 free a
+  // month, not 5,000. Trade searches and by-name lookups bill on separate
+  // SKUs, each with its own 1,000, so each budget x 30 days must fit its own.
+  assert.ok(Number(DEFAULTS.hunt_max_places_requests) * 30 <= 1000,
+    'a daily run of trade searches at this budget would be billed');
+  assert.ok(Number(DEFAULTS.hunt_max_company_lookups) * 30 <= 1000,
+    'a daily run of lookups at this budget would be billed');
 });

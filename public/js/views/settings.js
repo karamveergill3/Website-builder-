@@ -127,7 +127,7 @@ export default async function settingsView(root, _p, { refresh }) {
             <div class="f">
               <label for="s-places_free_calls_per_month">Free calls/month</label>
               <input id="s-places_free_calls_per_month" name="places_free_calls_per_month"
-                     type="text" value="${s.places_free_calls_per_month ?? '5000'}">
+                     type="text" value="${s.places_free_calls_per_month ?? '1000'}">
             </div>
             <div class="f">
               <label for="s-places_pricing_verified_on">Checked on</label>

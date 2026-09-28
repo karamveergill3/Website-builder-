@@ -59,7 +59,8 @@ export default async function huntView(root, _p, { refresh }) {
   if (short) {
     const areasLeft = s.coverage.total - s.coverage.exhausted;
     const hitPages = (last.register_requests ?? 0) >= c.maxRegisterPages;
-    const hitLookups = (last.places_requests ?? 0) >= c.maxPlacesRequests;
+    const hitLookups = ((last.places_requests ?? 0) - (last.company_lookups ?? 0))
+      >= c.maxPlacesRequests;
     const phoneDrop = (last.no_contact ?? 0) + (last.not_mobile ?? 0);
     const biggest = lastDrops[0];
     if (hitPages) {
@@ -68,9 +69,10 @@ export default async function huntView(root, _p, { refresh }) {
         + 'still to try. Raise “Register pages, max” below — the register is free, '
         + 'so this costs nothing — and run again.';
     } else if (hitLookups) {
-      shortReason = `It used its budget of ${c.maxPlacesRequests} Google lookups `
+      shortReason = `It used its budget of ${c.maxPlacesRequests} Google searches `
         + `and stopped, with ${areasLeft.toLocaleString()} combinations still to try. `
-        + 'Raise “Google lookups, max” below and run again (5,000 free a month).';
+        + 'Raise “Google searches, max” below and run again (1,000 free a month, '
+        + 'then about 3p each).';
     } else if (c.messageableOnly && phoneDrop >= last.found && phoneDrop > 0) {
       shortReason = `That's this mode doing its job: ${phoneDrop.toLocaleString()} were `
         + `dropped for having no mobile you could message today. Only confirmed limited `
@@ -277,10 +279,17 @@ export default async function huntView(root, _p, { refresh }) {
                      value="${c.maxRegisterPages}">
             </div>
             <div class="f">
-              <label for="h-places">Google lookups, max</label>
+              <label for="h-places">Google searches, max</label>
               <input id="h-places" name="hunt_max_places_requests" type="number" min="1" max="500"
                      value="${c.maxPlacesRequests}">
-              <p class="tip">The only part that costs money — about one per town.</p>
+              <p class="tip">One per page of a trade and town. 1,000 free a month, then about 3p each.</p>
+            </div>
+            <div class="f">
+              <label for="h-lookups">Company lookups, max</label>
+              <input id="h-lookups" name="hunt_max_company_lookups" type="number" min="0" max="500"
+                     value="${c.maxCompanyLookups}">
+              <p class="tip">Looks a limited company up by name when the trade search missed its number.
+                A separate 1,000 free a month. 0 turns it off.</p>
             </div>
           </div>
 

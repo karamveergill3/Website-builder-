@@ -202,7 +202,10 @@ function leadSummary(lead) {
           <div class="msg ${lead.can_contact ? 'msg-info' : 'msg-warn'}" style="margin-top:8px">
             <div class="grow">
               <b>Already approached</b>${lead.contacted_via ? ` by ${lead.contacted_via}` : ''}
-              ${lead.contacted_at ? ` on ${String(lead.contacted_at).slice(0, 10)}` : ''}.
+              ${lead.contacted_at ? ` on ${String(lead.contacted_at).slice(0, 10)}` : ''}${
+                lead.contacted_elsewhere ? html`, through another lead for the same business:
+                  <b>${lead.contacted_elsewhere.business_name}</b>${lead.contacted_elsewhere.owner
+                    ? `, ${String(lead.contacted_elsewhere.owner).split(/\s+/)[0]}’s` : ''}` : ''}.
               ${lead.can_contact
                 ? 'They replied, so this is a conversation rather than a cold approach.'
                 : 'A second cold approach is what gets a complaint made.'}
@@ -457,7 +460,8 @@ function messagePanel(state) {
           ${lead.can_contact ? html`
             <span class="meta">Nothing is sent yet. This opens ${CHANNEL_LABEL[channel]} with the text ready.</span>` : html`
             <span class="meta">Already approached${lead.contacted_via ? ` by ${lead.contacted_via}` : ''}${
-              lead.contacted_at ? ` on ${String(lead.contacted_at).slice(0, 10)}` : ''}, so it can't go again.</span>
+              lead.contacted_at ? ` on ${String(lead.contacted_at).slice(0, 10)}` : ''}${
+              lead.contacted_elsewhere?.owner ? ` by ${String(lead.contacted_elsewhere.owner).split(/\s+/)[0]}` : ''}, so it can't go again.</span>
             ${lead.whatsapp_sent_at && !state.sentHere ? html`
               <button type="button" data-act="undo-sent" title="Takes that WhatsApp off the record, so you can send it properly">That WhatsApp never went</button>` : ''}`}
         </div>

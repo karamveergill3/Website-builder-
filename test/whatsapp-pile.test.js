@@ -216,3 +216,25 @@ test('"Delete all" on the Leads screen leaves the WhatsApp screen alone', async 
   assert.deepEqual(await ids('leads'), [], 'Leads is empty');
   assert.deepEqual(await ids('whatsapp'), [whatsapped.id], 'the WhatsApp lead survived');
 });
+
+test('a business approached through a colleague’s lead says whose, and offers no undo', async () => {
+  // The same business filed twice: once from the register (with its number),
+  // once from Google (name and town only), as the hunt can.
+  const theirs = (await post('/api/leads', {
+    business_name: 'Twin Row Roofing Ltd', location: 'Leeds', phone: '07123 459901',
+    entity_type: 'corporate', company_number: nextCompanyNumber(), category: 'roofers',
+  })).body.lead;
+  const mineId = Number(db.prepare(
+    `INSERT INTO leads (business_name, category, location, phone, status, source, opted_out,
+       entity_type, created_at)
+     VALUES ('Twin Row Roofing Ltd', 'roofers', 'Leeds', '07123 459901', 'new', 'test', 0,
+       'corporate', ?)`
+  ).run(new Date().toISOString()).lastInsertRowid);
+  await send(theirs, 'whatsapp');
+  const r = await get(`/api/leads/${mineId}`);
+  assert.equal(r.body.lead.can_contact, false);
+  assert.equal(r.body.lead.contacted_elsewhere?.id, theirs.id);
+  assert.equal(r.body.lead.whatsapp_sent_at, null, 'nothing of its own to undo');
+  const own = await get(`/api/leads/${theirs.id}`);
+  assert.equal(own.body.lead.contacted_elsewhere, null, 'the lead it went through is not "elsewhere"');
+});

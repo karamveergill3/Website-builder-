@@ -5,7 +5,9 @@ import {
 } from '../lib/http.js';
 import { ENTITY_TYPES, sendability, looksCorporate } from '../lib/pecr.js';
 import { isSuppressed, suppress } from '../lib/suppression.js';
-import { recordContact, recordFound, recontactCheck, ledgerFor } from '../lib/recontact.js';
+import {
+  recordContact, recordFound, recontactCheck, ledgerFor, companyKey, nameKey,
+} from '../lib/recontact.js';
 import { sectorFor, sectorLabel } from '../lib/sectors.js';
 
 export const STATUSES = ['new', 'sent', 'replied', 'won', 'lost'];
@@ -301,13 +303,33 @@ router.get('/stats', wrap((req, res) => {
   });
 }));
 
+/**
+ * When this company was approached through another lead row (the same
+ * business filed twice, say one for each of the team), which one and whose:
+ * "already approached" on a lead nobody here touched reads as a mistake
+ * unless it says who did it.
+ */
+function contactedElsewhere(lead, at) {
+  if (!at || lead.last_contacted_at === at) return null;
+  const mine = [companyKey(lead), nameKey(lead)].filter(Boolean);
+  const other = db.prepare(
+    `SELECT l.*, u.name AS owner_name FROM leads l LEFT JOIN users u ON u.id = l.assigned_to
+      WHERE l.id <> ? AND l.last_contacted_at = ?`
+  ).all(lead.id, at).find((l) => [companyKey(l), nameKey(l)].some((k) => k && mine.includes(k)));
+  return other
+    ? { id: other.id, business_name: other.business_name, owner: other.owner_name ?? null }
+    : null;
+}
+
 router.get('/:id', wrap((req, res) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
   if (!lead) throw notFound('Lead not found');
   const history = db
     .prepare('SELECT * FROM email_log WHERE lead_id = ? ORDER BY sent_at DESC')
     .all(lead.id);
-  res.json({ lead: toApi(lead), history });
+  const out = toApi(lead);
+  out.contacted_elsewhere = out.contacted_before ? contactedElsewhere(lead, out.contacted_at) : null;
+  res.json({ lead: out, history });
 }));
 
 /**

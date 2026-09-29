@@ -29,6 +29,29 @@ export async function copy(text) {
 export const waLink = (number, text) => inApp(number, text);
 
 /** Fetch the draft for a reply again (optionally the "here's your mock up" one). */
+/**
+ * What a reply can be said to mean when it was read wrong (the same list as
+ * KINDS in server/lib/reply-draft.js). Picking one writes that answer.
+ */
+export const KINDS = [
+  ['no', 'Not interested'],
+  ['elsewhere', 'Someone else is doing it'],
+  ['has_site', 'Already have a site'],
+  ['later', 'Maybe later'],
+  ['yes', 'Yes please'],
+  ['price', 'Asked the price'],
+  ['answers', 'Answered the questions'],
+  ['other', 'Something else'],
+];
+
+/** "They said: [Not interested] [Maybe later] …", the one it was answered as pressed. */
+export const kindPicker = (draft) => (draft?.intent && !['stop', 'mockup'].includes(draft.intent) ? html`
+  <div class="kinds" role="group" aria-label="What they said">
+    <span class="meta">${draft.picked ? 'You said they meant:' : 'Read as:'}</span>
+    ${KINDS.map(([id, label]) => html`<button type="button" class="mini" data-kind="${id}"
+      aria-pressed="${draft.intent === id ? 'true' : 'false'}">${label}</button>`)}
+  </div>` : '');
+
 export const fetchDraft = async (replyId, kind = null) =>
   (await api.get(`/api/replies/${replyId}/draft`, { origin: location.origin, kind: kind ?? undefined })).draft;
 
@@ -70,6 +93,7 @@ export async function showReplyDraft(draft) {
     wide: true,
     body: html`
       <p style="margin:0 0 8px"><span class="flag" data-ok>${draft.label}</span></p>
+      ${draft.reply_id ? kindPicker(draft) : ''}
       ${draft.note ? html`
         <div class="msg msg-warn" style="margin-bottom:10px"><div class="grow">${draft.note}</div></div>` : ''}
       ${draft.text ? html`
@@ -102,6 +126,19 @@ export async function showReplyDraft(draft) {
         const ok = await copy(box?.value ?? draft.text);
         toast(ok ? 'Copied. Paste it into WhatsApp' : 'Could not copy: select the text instead', { error: !ok });
       });
+
+      // Read wrong: say what they meant, and the answer is written again for it.
+      for (const btn of dlg.querySelectorAll('[data-kind]')) {
+        btn.addEventListener('click', async () => {
+          if (btn.getAttribute('aria-pressed') === 'true') return;
+          try {
+            next = await fetchDraft(draft.reply_id, btn.dataset.kind);
+            close(true);
+          } catch (err) {
+            toast(err.message ?? 'That did not work', { error: true });
+          }
+        });
+      }
 
       for (const btn of dlg.querySelectorAll('[data-action]')) {
         btn.addEventListener('click', async () => {

@@ -466,3 +466,8 @@ select.fit { width: auto; max-width: 150px; }
 .gate-hd h1 { font-size: 1.3rem; font-variation-settings: "SOFT" 30, "WONK" 1; }
 .gate-hd p { margin-top: 2px; }
 .gate .f { margin-top: 12px; }
+
+/* "Read as: [Not interested] [Maybe later] …": say what a reply meant when it was read wrong. */
+.kinds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+.kinds .meta { margin-right: 2px; }
+.kinds button[aria-pressed="true"] { background: var(--green-lift); color: var(--green-deep); border-color: var(--green-deep); font-weight: 600; }

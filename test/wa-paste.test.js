@@ -423,3 +423,21 @@ test('a reply can be deleted; with none left they are back to awaiting a reply',
   // Its messages are no longer "already filed": pasted again, it files.
   assert.equal((await paste(`[10:00, 18/06/2025] ${phone.shown}: Wrong person, sorry`)).status, 201);
 });
+
+test('reading a paste again as what the rep says it meant', async () => {
+  const lead = (await post('/api/leads', {
+    business_name: 'Beauticat Ltd', location: 'Cannock', phone: '07700 940111', entity_type: 'corporate',
+    company_number: nextCompanyNumber(), category: 'beautician',
+  })).body.lead;
+  const prep = await post('/api/outreach/prepare', { lead_id: lead.id, channel: 'whatsapp', text: 'Hi there' });
+  await post(`/api/outreach/${prep.body.event_id}/sent`, {});
+  const text = "[09:00, 29/09/2026] +44 7700 940111: Thankyou, but we've purposely taken our website down as we're slowing down";
+  const read = await post('/api/replies/whatsapp-read', { text });
+  assert.equal(read.status, 200, JSON.stringify(read.body));
+  assert.equal(read.body.draft.intent, 'no');
+  assert.doesNotMatch(read.body.draft.text, /mock ?up/i);
+  const later = await post('/api/replies/whatsapp-read', { text, kind: 'later' });
+  assert.equal(later.body.draft.intent, 'later');
+  assert.equal(later.body.draft.read, 'no');
+  assert.equal(later.body.draft.picked, true);
+});

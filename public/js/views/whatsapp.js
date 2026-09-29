@@ -18,7 +18,7 @@ import {
   html, mount, on, $, confirmDialog, toast, relative, viewKeys, modal,
 } from '../dom.js';
 import { openLeadForm } from './leads.js';
-import { copy, waLink, runDraftAction, fetchDraft, showReplyDraft } from './reply-draft.js';
+import { copy, waLink, runDraftAction, fetchDraft, showReplyDraft, kindPicker } from './reply-draft.js';
 import { inApp, onWeb } from '../wa-link.js';
 
 /** What can happen after a WhatsApp goes out. */
@@ -247,7 +247,7 @@ export default async function whatsappView(root, params, { refresh }) {
       <button type="button" class="mini ghost" data-act="unpreset">Not them</button></div>` : '');
   showPreset();
 
-  async function read(text, { leadId = null, sender = null } = {}) {
+  async function read(text, { leadId = null, sender = null, kind = null } = {}) {
     if (!text?.trim()) return;
     seq += 1;
     const mine = seq;
@@ -257,6 +257,7 @@ export default async function whatsappView(root, params, { refresh }) {
     try {
       res = await api.post('/api/replies/whatsapp-read', {
         text, lead_id: chosen ?? undefined, sender: sender ?? undefined, origin: location.origin,
+        kind: kind ?? undefined,
       });
     } catch (err) {
       if (mine !== seq) return;
@@ -319,6 +320,7 @@ export default async function whatsappView(root, params, { refresh }) {
             nothing to send; mark them so nobody contacts them again.</div>
             <button type="button" class="mini primary" data-act="file-stop">Mark them do not contact</button></div>`
         : html`
+          ${kindPicker(d)}
           ${d?.note ? html`<div class="msg msg-warn"><div class="grow">${d.note}</div></div>` : ''}
           <div class="f" style="margin:8px 0 6px">
             <label for="wa-answer">Your answer <span class="opt">edit it however you like</span></label>
@@ -389,6 +391,14 @@ export default async function whatsappView(root, params, { refresh }) {
   on(result, 'click', '[data-act="file-stop"]', async () => {
     const saved = await file();
     if (saved) { toast(`${saved.name} won’t be contacted again`); renderResult(); }
+  });
+  // Read wrong: say what they meant, and the answer is written again for it.
+  on(result, 'click', '[data-kind]', (_e, el) => {
+    const r = current?.read;
+    if (!r?.lead || el.getAttribute('aria-pressed') === 'true') return;
+    read(current.text, {
+      leadId: r.how === 'number' ? null : r.lead.id, sender: current.sender, kind: el.dataset.kind,
+    });
   });
   on(result, 'click', '[data-act="use-clash"]', (_e, el) =>
     read(current.text, { leadId: Number(el.dataset.id), sender: current.sender }));

@@ -23,7 +23,7 @@ import { stripQuoted, numberedAnswers } from './brief.js';
 import { fieldOf } from './ask.js';
 
 import {
-  tidy, isStop, isElsewhere, hasSite, isNo, leansNo, isLater, isPrice, isYes, accepts, asksWho,
+  tidy, isStop, isElsewhere, hasSite, isNo, leansNo, declines, isLater, isPrice, isYes, accepts, asksWho,
 } from './reply-intent.js';
 
 // The drafts below still ask these two questions of a reply's wording.
@@ -46,6 +46,23 @@ const signOff = (name) => String(name ?? '').trim();
  * What kind of reply is it? The order matters: "stop" beats everything; a
  * reply that answers the questions ("2. No logo") is not a "no".
  */
+/**
+ * What the rep can say a reply meant when the reading is wrong, in the order
+ * the screen offers them. "stop" is not among them: it opts them out, so it
+ * is only ever read, never picked.
+ */
+export const KINDS = [
+  ['no', 'Not interested'],
+  ['elsewhere', 'Someone else is doing it'],
+  ['has_site', 'Already have a site'],
+  ['later', 'Maybe later'],
+  ['yes', 'Yes please'],
+  ['price', 'Asked the price'],
+  ['answers', 'Answered the questions'],
+  ['other', 'Something else'],
+];
+const KIND_IDS = new Set(KINDS.map(([id]) => id));
+
 export function classifyReply(body, brief = {}, lead = {}) {
   const text = tidy(stripQuoted(body));
   if (isStop(text)) return 'stop';
@@ -59,6 +76,8 @@ export function classifyReply(body, brief = {}, lead = {}) {
   // "Who is this?", "wrong number": they need an answer, not a pitch.
   if (asksWho(text) && !accepts(text)) return 'other';
   if (isPrice(text)) return 'price';
+  // "Thankyou, but we're slowing down": a polite no we have no pattern for.
+  if (declines(text)) return 'no';
   if (isYes(text)) return 'yes';
   // "All our work comes through word of mouth" with nothing else said.
   if (leansNo(text)) return 'no';
@@ -99,8 +118,11 @@ function answered(text, brief, lead, questions = null) {
  *   prices      { from, monthly } in pounds, from the Prices screen
  *   mockupUrl   a built mock up's full link, if there is one
  *
- * Returns { intent, label, text, note, actions }. `text` is empty only when
- * nothing should be sent at all (they asked to stop).
+ *   kind        'mockup', or one of KINDS when the rep says what it meant
+ *
+ * Returns { intent, label, text, note, actions, read, picked }: `read` is what
+ * the reply was read as, and `picked` says `kind` overrode it. `text` is empty
+ * only when nothing should be sent at all (they asked to stop).
  */
 export function draftReply({
   body, brief = {}, lead = {}, sender = '', ask, prices = {}, mockupUrl = null, kind = null,
@@ -108,143 +130,156 @@ export function draftReply({
   const business = lead.business_name ?? 'your business';
   const name = signOff(sender);
   const sign = (t) => (name ? `${t}\n\n${name}` : t);
-  const intent = kind === 'mockup' ? 'mockup' : classifyReply(body, brief, lead);
-  const questions = ask?.questions ?? [];
-  const questionBlock = () => [
-    ask?.intro ?? '',
-    '',
-    ...questions.map((row, i) => `${i + 1}. ${row.q}`),
-    ...(ask?.outro ? ['', ask.outro] : []),
-  ].join('\n').trim();
+  const read = classifyReply(body, brief, lead);
+  const intent = kind === 'mockup' || KIND_IDS.has(kind) ? kind : read;
+  // What it read, beside what it drafted, so the screen can offer the others.
+  const tag = (d) => ({ ...d, read, picked: intent !== read && intent !== 'mockup' });
+  return tag(draftFor(intent));
 
-  switch (intent) {
-    case 'mockup':
-      return {
-        intent,
-        label: 'Send them the mock up',
-        text: sign(`Here's the mock up for ${business}: ${mockupUrl ?? '(build it first)'}\n\n`
-          + 'Have a look and let me know what you think. Happy to change anything you\'d like.'),
-        note: mockupUrl ? null : 'Build the mock up first, then draft this again for the link.',
-        actions: [],
-      };
+  function draftFor(intent) {
+    const questions = ask?.questions ?? [];
+    const questionBlock = () => [
+      ask?.intro ?? '',
+      '',
+      ...questions.map((row, i) => `${i + 1}. ${row.q}`),
+      ...(ask?.outro ? ['', ask.outro] : []),
+    ].join('\n').trim();
 
-    case 'stop':
-      return {
-        intent,
-        label: 'They asked not to be contacted',
-        text: '',
-        note: 'They have been marked as opted out, so they won\'t be offered to anyone again. '
-          + 'Best not to reply at all.',
-        actions: [],
-      };
+    switch (intent) {
+      case 'mockup':
+        return {
+          intent,
+          label: 'Send them the mock up',
+          text: sign(`Here's the mock up for ${business}: ${mockupUrl ?? '(build it first)'}\n\n`
+            + 'Have a look and let me know what you think. Happy to change anything you\'d like.'),
+          note: mockupUrl ? null : 'Build the mock up first, then draft this again for the link.',
+          actions: [],
+        };
 
-    case 'has_site':
-      return {
-        intent,
-        label: 'They already have a website',
-        text: sign('Ah, fair enough! Sorry, I must have missed it. If you ever fancy a refresh '
-          + 'or want anything added, just give me a shout.'),
-        note: null,
-        actions: [{ id: 'has-site', label: 'Mark: they have a website' }],
-      };
+      case 'stop':
+        return {
+          intent,
+          label: 'They asked not to be contacted',
+          text: '',
+          note: 'They have been marked as opted out, so they won\'t be offered to anyone again. '
+            + 'Best not to reply at all.',
+          actions: [],
+        };
 
-    case 'no':
-      return {
-        intent,
-        label: 'Not interested',
-        text: sign(`No problem at all, thanks for letting me know. All the best with ${business}.`),
-        note: null,
-        actions: [{ id: 'optout', label: 'Mark not interested (never contact again)' }],
-      };
+      case 'has_site':
+        return {
+          intent,
+          label: 'They already have a website',
+          text: sign('Ah, fair enough! Sorry, I must have missed it. If you ever fancy a refresh '
+            + 'or want anything added, just give me a shout.'),
+          note: null,
+          actions: [{ id: 'has-site', label: 'Mark: they have a website' }],
+        };
 
-    case 'elsewhere':
-      return {
-        intent,
-        label: 'Using someone else',
-        text: sign(`That's great to hear, it sounds like you're in good hands. Thanks for letting `
-          + `me know, and if anything changes, or you'd ever like a second opinion, just give me `
-          + `a shout. All the best with ${business}.`),
-        note: null,
-        actions: [{ id: 'optout', label: 'Mark lost (they’re using someone else)' }],
-      };
+      case 'no':
+        return {
+          intent,
+          label: 'Not interested',
+          text: sign(`No problem at all, thanks for letting me know. All the best with ${business}.`),
+          note: null,
+          actions: [{ id: 'optout', label: 'Mark not interested (never contact again)' }],
+        };
 
-    case 'later':
-      return {
-        intent,
-        label: 'Maybe later',
-        text: sign('No rush at all. I\'ll leave it with you, and if you\'d like the free mock up '
-          + 'any time, just drop me a message.'),
-        note: null,
-        actions: [],
-      };
+      case 'elsewhere':
+        return {
+          intent,
+          label: 'Using someone else',
+          text: sign(`That's great to hear, it sounds like you're in good hands. Thanks for letting `
+            + `me know, and if anything changes, or you'd ever like a second opinion, just give me `
+            + `a shout. All the best with ${business}.`),
+          note: null,
+          actions: [{ id: 'optout', label: 'Mark lost (they’re using someone else)' }],
+        };
 
-    case 'price': {
-      const saidYes = YES.test(stripQuoted(body));
-      const from = prices.from ? `starts from £${prices.from}` : 'is very reasonably priced';
-      const monthly = prices.monthly ? `, with hosting from £${prices.monthly} a month to keep it live` : '';
-      const lines = [
-        `Good question! The mock up is completely free, with no obligation. If you like it, a site like that ${from}${monthly}.`,
-      ];
-      if (saidYes && questions.length) lines.push('', questionBlock());
-      else lines.push('', 'Want me to put the mock up together so you can see it first?');
-      return { intent, label: 'Asked about price', text: sign(lines.join('\n')), note: null, actions: [] };
+      case 'later':
+        return {
+          intent,
+          label: 'Maybe later',
+          text: sign('No rush at all. I\'ll leave it with you, and if you\'d like the free mock up '
+            + 'any time, just drop me a message.'),
+          note: null,
+          actions: [],
+        };
+
+      case 'price': {
+        const saidYes = YES.test(stripQuoted(body));
+        const from = prices.from ? `starts from £${prices.from}` : 'is very reasonably priced';
+        const monthly = prices.monthly ? `, with hosting from £${prices.monthly} a month to keep it live` : '';
+        const lines = [
+          `Good question! The mock up is completely free, with no obligation. If you like it, a site like that ${from}${monthly}.`,
+        ];
+        if (saidYes && questions.length) lines.push('', questionBlock());
+        else lines.push('', 'Want me to put the mock up together so you can see it first?');
+        return { intent, label: 'Asked about price', text: sign(lines.join('\n')), note: null, actions: [] };
+      }
+
+      case 'answers': {
+        const text = stripQuoted(body);
+        const { found } = answered(text, brief, lead, questions);
+        const got = [];
+        if (brief.trading_name) got.push(`• Name on the site: ${brief.trading_name}`);
+        if (brief.primary_cta && found.primary_cta) {
+          got.push(`• Main thing visitors do: ${CTA_WORDS[brief.primary_cta] ?? brief.primary_cta}`);
+        }
+        const areas = (brief.areas ?? []).filter(Boolean);
+        if (found.areas && areas.length) got.push(`• Areas: ${listOf(areas)}`);
+        if (found.assets) {
+          got.push(brief.has_logo ? '• Logo: great, send it over when you can'
+            : '• Logo: no worries, I\'ll put a simple one together');
+          got.push(brief.has_photos ? '• Photos: brilliant, send a few of your best over'
+            : '• Photos: I\'ll use some good stock ones for now');
+        }
+        if ((brief.brand_colours ?? []).length) got.push(`• Colours: ${listOf(brief.brand_colours)}`);
+
+        const missing = questions.filter((row) => {
+          const f = fieldOf(row.q);
+          return f && !found[f];
+        }).map((row) => row.q);
+
+        const lines = ['Thanks, that\'s perfect. Here\'s what I\'ve got:', '', ...got];
+        if (missing.length === 1) lines.push('', `Just one more thing: ${missing[0]}`);
+        else if (missing.length > 1) {
+          lines.push('', 'Just a couple more things:', ...missing.map((q, i) => `${i + 1}. ${q}`));
+        }
+        lines.push('', 'I\'ll get the mock up over to you in the next day or two.');
+        return {
+          intent,
+          label: 'They answered the questions',
+          text: sign(lines.join('\n')),
+          note: got.length ? null : 'Couldn\'t read their answers clearly: check the brief on Replies.',
+          actions: [{ id: 'build', label: 'Build the mock up' }],
+        };
+      }
+
+      case 'yes':
+        return {
+          intent,
+          label: 'Said yes to a mock up',
+          text: sign(`Brilliant, thanks for getting back to me!\n\n${questionBlock()}`),
+          note: null,
+          actions: [],
+        };
+
+      default: {
+        // Never a pitch: a turn-down it failed to read must not get an offer.
+        const who = asksWho(tidy(stripQuoted(body)));
+        return {
+          intent: 'other',
+          label: who ? 'Asked who you are' : 'Not sure what they\'re after',
+          text: who
+            ? sign(`Sorry for the confusion! I'd messaged about putting together a free mock up of a `
+              + `website for ${business}, no obligation at all. If it's not for you, no problem.`)
+            : sign('Thanks for getting back to me!'),
+          note: who ? null
+            : 'It couldn\'t tell what they meant. Pick what they said above and the answer is written for it, or write your own.',
+          actions: [],
+        };
+      }
     }
-
-    case 'answers': {
-      const text = stripQuoted(body);
-      const { found } = answered(text, brief, lead, questions);
-      const got = [];
-      if (brief.trading_name) got.push(`• Name on the site: ${brief.trading_name}`);
-      if (brief.primary_cta && found.primary_cta) {
-        got.push(`• Main thing visitors do: ${CTA_WORDS[brief.primary_cta] ?? brief.primary_cta}`);
-      }
-      const areas = (brief.areas ?? []).filter(Boolean);
-      if (found.areas && areas.length) got.push(`• Areas: ${listOf(areas)}`);
-      if (found.assets) {
-        got.push(brief.has_logo ? '• Logo: great, send it over when you can'
-          : '• Logo: no worries, I\'ll put a simple one together');
-        got.push(brief.has_photos ? '• Photos: brilliant, send a few of your best over'
-          : '• Photos: I\'ll use some good stock ones for now');
-      }
-      if ((brief.brand_colours ?? []).length) got.push(`• Colours: ${listOf(brief.brand_colours)}`);
-
-      const missing = questions.filter((row) => {
-        const f = fieldOf(row.q);
-        return f && !found[f];
-      }).map((row) => row.q);
-
-      const lines = ['Thanks, that\'s perfect. Here\'s what I\'ve got:', '', ...got];
-      if (missing.length === 1) lines.push('', `Just one more thing: ${missing[0]}`);
-      else if (missing.length > 1) {
-        lines.push('', 'Just a couple more things:', ...missing.map((q, i) => `${i + 1}. ${q}`));
-      }
-      lines.push('', 'I\'ll get the mock up over to you in the next day or two.');
-      return {
-        intent,
-        label: 'They answered the questions',
-        text: sign(lines.join('\n')),
-        note: got.length ? null : 'Couldn\'t read their answers clearly: check the brief on Replies.',
-        actions: [{ id: 'build', label: 'Build the mock up' }],
-      };
-    }
-
-    case 'yes':
-      return {
-        intent,
-        label: 'Said yes to a mock up',
-        text: sign(`Brilliant, thanks for getting back to me!\n\n${questionBlock()}`),
-        note: null,
-        actions: [],
-      };
-
-    default:
-      return {
-        intent: 'other',
-        label: 'Not sure what they\'re after',
-        text: sign(`Thanks for getting back to me! Happy to answer anything. Would you like me to put `
-          + `the free mock up together for ${business} so you can see how it could look?`),
-        note: 'Read their message and edit this before sending: it couldn\'t tell what they meant.',
-        actions: [],
-      };
   }
 }

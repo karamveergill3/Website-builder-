@@ -496,6 +496,7 @@ router.post('/replies/whatsapp-read', wrap((req, res) => {
       brief: extractByRules(found.theirText, lead),
       user: req.user,
       origin: str(req.body?.origin),
+      kind: str(req.body?.kind) || null,
       cameFrom: found.who.phone,
     }) : null,
   });
@@ -627,11 +628,11 @@ router.delete('/replies/:id', wrap((req, res) => {
   res.status(204).end();
 }));
 
-/** GET /api/replies/:id/draft?origin=&kind=mockup — the answer, drafted again. */
+/** GET /api/replies/:id/draft?origin=&kind= — the answer, drafted again (kind: mockup, or what the reply meant). */
 router.get('/replies/:id/draft', wrap((req, res) => {
   const id = int(req.params.id);
   if (!id) throw badRequest('Bad reply id');
-  const kind = str(req.query.kind) === 'mockup' ? 'mockup' : null;
+  const kind = str(req.query.kind) || null;
   res.json({ draft: draftFor(id, { user: req.user, origin: str(req.query.origin), kind }) });
 }));
 

@@ -66,3 +66,22 @@ test('each kind of reply is read right nearly every time', () => {
   }
   assert.ok(right / REPLIES.length >= 0.97, `${right}/${REPLIES.length} overall`);
 });
+
+test('when it can’t tell what they meant, the answer offers nothing', () => {
+  const d = draftReply({ body: 'Hmm, we will see', lead: LEAD, sender: 'Javier', ask: ASK_DEFAULTS });
+  assert.equal(d.intent, 'other');
+  assert.doesNotMatch(d.text, /mock ?up|free|website/i, 'a turn-down it failed to read must not get a pitch');
+  assert.match(d.note, /pick what they said/i);
+});
+
+test('the rep can say what a reply meant, and the answer is written for that', () => {
+  const body = 'Hmm, we will see';
+  const d = draftReply({ body, lead: LEAD, sender: 'Javier', ask: ASK_DEFAULTS, kind: 'no' });
+  assert.equal(d.intent, 'no');
+  assert.equal(d.read, 'other', 'what it read is kept alongside');
+  assert.equal(d.picked, true);
+  assert.match(d.text, /no problem/i);
+  // "stop" opts them out, so it can only be read, never picked; nonsense is ignored.
+  assert.equal(draftReply({ body, lead: LEAD, kind: 'stop' }).intent, 'other');
+  assert.equal(draftReply({ body, lead: LEAD, kind: 'bogus' }).intent, 'other');
+});

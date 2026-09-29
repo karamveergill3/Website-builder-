@@ -66,7 +66,9 @@ const TRADING_NAME_PATTERNS = [
   /\b(?:we (?:trade|go) (?:as|by)|trading as|t\/a)\s+["'“]?([^\n."'”]{2,60})/i,
   /\b(?:the (?:business|company|firm) name is|business name is|company name is)\s+["'“]?([^\n."'”]{2,60})/i,
   /\b(?:(?:put|use|call it|call us|it'?s|its|name'?s)\s+)["'“]([^\n"'”]{2,60})["'”]/i,
-  /\b(?:we'?re called|we are called|known as)\s+["'“]?([^\n."'”]{2,60})/i,
+  /\b(?:we'?re called|we are called|known as)\s+["'“]?([^\n.,"'”]{2,60})/i,
+  // "Business is called Full Stop Plumbing, we do Tamworth"
+  /\b(?:business|company|firm|shop|salon)(?:'s| is)\s+called\s+["'“]?([^\n.,"'”]{2,60})/i,
 ];
 
 const HEX = /#[0-9a-f]{3,8}\b/gi;
@@ -208,10 +210,13 @@ export function extractByRules(replyBody, lead = {}) {
   let areas = [];
   const areasAnswer = slot.areas ? answers.get(slot.areas) : null;
   const areaMatch = text.match(
-    /\b(?:cover(?:ing|s)?|serv(?:e|ing|es)|work(?:ing)?\s+(?:in|around|round)|based\s+(?:in|around|round)|round|around|within)\s+([^\n.]{3,120})/i
+    /\b(?:cover(?:ing|s)?|serv(?:e|ing|es)|work(?:ing)?\s+(?:in|around|round)|based\s+(?:in|around|round)|round|around|within|areas? (?:is|are)|areas?:)\s+([^\n.]{3,120})/i
   );
   if (areasAnswer) areas = splitAreas(areasAnswer);
-  else if (areaMatch) areas = splitServices(areaMatch[1]).slice(0, 8);
+  else if (areaMatch) {
+    // "Swadlincote and 10 mile round": the distance is not a place.
+    areas = splitServices(areaMatch[1]).filter((a) => !/^(\d+\s*)?(miles?|mi|km)\b/i.test(a)).slice(0, 8);
+  }
   // Merge the lead's own town in — a reply naming other towns rarely repeats
   // the one we already knew about.
   if (lead.location && !areas.some((a) => a.toLowerCase() === String(lead.location).toLowerCase())) {

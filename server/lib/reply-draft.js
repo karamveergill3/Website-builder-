@@ -22,34 +22,13 @@
 import { stripQuoted, numberedAnswers } from './brief.js';
 import { fieldOf } from './ask.js';
 
-// Acted on automatically (they are opted out), so only an unmistakable ask:
-// "Stop" as a whole message (or a whole line of one, when several WhatsApps
-// are read together), or "stop messaging", never "stop by any time".
-const STOP = /(^\s*stop\s*(please|pls|now|thanks|thank you)?\s*[.!]*\s*$|\bplease stop\b|\bstop (messaging|texting|contacting|sending|it)\b|\bunsubscribe\b|\bremove (me|us|my (number|details))\b|\b(do not|don'?t|dont) (message|text|contact|msg|whatsapp) (me|us)\b|\bleave (me|us) alone\b|\btake (me|us) off\b)/im;
-const NOT_A_SITE = /\b(don'?t|dont|do not|haven'?t|havent|have not|no|never had)\b[^.!?\n]{0,20}\b(web ?site|site)\b/i;
-const HAS_SITE = /\b(already (have|got) (one|a (web ?)?site)|(we'?ve|we have|i'?ve|i have|we've got|i've got|we got|i got|already got) (got )?(a|our own|one|our) ?(web ?)?site|we (already )?have one|our (web ?)?site (is|at))\b/i;
-const NO = /\b(not interested|no thanks|no thank you|no ta|not for (us|me)|(thanks|thank you|appreciate(d)?) (for )?(the|your) offer,? but|no longer (need|want|looking)|not looking (for|to)|all sorted|we'?re (ok|okay|fine|good|sorted|all good)|i'?m (ok|okay|fine|good|sorted)|all good thanks|no need|not needed|not required|(don'?t|dont|do not) need (one|it|a (web ?)?site))\b/i;
-const BARE_NO = /^\s*(no|nope|nah|no ta|no thanks)[\s.!]*$/i;
-// They are having a site made by someone else: a developer, an agency, a
-// relative. Not a "no" to us so much as "sorted, thanks", and answered as such.
-const SITE_WORDS = String.raw`[^.!?\n]{0,30}\b(web ?sites?|site|web|ours|one for (us|me))\b`;
-const ELSEWHERE = new RegExp([
-  String.raw`\b(already|currently|now) (engaged|working|sorted|dealing|going|speaking|talking|in talks|signed up|booked in|committed|set up)\b[^.!?\n]{0,25}\b(with|to)\b`,
-  // Someone whose job it is: a developer, a web designer, an agency.
-  String.raw`\b(have|got|'ve got|use|using|found|hired|booked)( got)? (a|an|our|my|our own|my own) (web ?developer|web ?designer|developer|agency|design agency|design company|web company)\b`,
-  // Anyone else, only when it's the website they're doing.
-  String.raw`\b(have|got|'ve got|use|using|found|hired|booked)( got)? (a|an|our|my) (guy|bloke|lad|person|someone|mate|friend|company|designer)${SITE_WORDS}`,
-  String.raw`\b(someone|somebody|a friend|a mate|a relative|(my|our) (son|daughter|nephew|niece|brother|sister|husband|wife|partner|cousin|dad|mum|friend|mate))( who)?('s| is| was| will be| has been)? (already )?(doing|building|making|sorting|designing|setting up|working on|going to (do|build|make))\b`,
-  String.raw`\b(someone|somebody|a friend|a mate|a relative|(my|our) (son|daughter|nephew|niece|brother|sister|husband|wife|partner|cousin|dad|mum|friend|mate))( who)? (does|builds|makes|built|made|designs|designed|sorted)${SITE_WORDS}`,
-  String.raw`\b(gone|going|went|decided to go|decided to use|chosen to go|opted to go) (with|for) (someone|somebody|another|a different|a local|an agency|a company|a developer|a designer)\b`,
-  String.raw`\bin the (process|middle) of (getting|having|building|setting up|making)\b`,
-  String.raw`\b(site|website) is (being|getting) (built|made|done|sorted|designed)\b`,
-].join('|'), 'i');
-// A plain yes in the same message outweighs any mention of someone else.
-const CLEAR_YES = /\b(yes|yeah|yep|go ahead|go for it|please do|crack on|let'?s do it|send (it|me one|one))\b/i;
-const LATER = /\b(not (right )?now|maybe later|later on|(too|very|really) busy|busy at the moment|next (week|month|year)|new year|get back to you|think about it|have a think|in a few (weeks|months)|not at the moment)\b/i;
-const PRICE = /(\bhow much\b|\bprices?\b|\bpricing\b|\bcosts?\b|\bcharges?\b|\bfees?\b|£|\bwhat'?s the catch\b|\bexpensive\b)/i;
-const YES = /(\b(yes|yeah|yea|yep|yup|sure|ok|okay|go on|go ahead|go for it|sounds (good|great)|please do|why not|interested|send (it|me one|one|it over)|love (to|one|that)|that would be (great|good|lovely|brilliant)|happy to|definitely|of course|alright|aye|let'?s do it|crack on)\b|👍)/i;
+import {
+  tidy, isStop, isElsewhere, hasSite, isNo, leansNo, isLater, isPrice, isYes, accepts, asksWho,
+} from './reply-intent.js';
+
+// The drafts below still ask these two questions of a reply's wording.
+const PRICE = { test: (t) => isPrice(tidy(t)) };
+const YES = { test: (t) => isYes(tidy(t)) };
 
 const CTA_WORDS = {
   call: 'call you', quote: 'ask for a quote', book: 'book in', prices: 'see your prices',
@@ -68,16 +47,21 @@ const signOff = (name) => String(name ?? '').trim();
  * reply that answers the questions ("2. No logo") is not a "no".
  */
 export function classifyReply(body, brief = {}, lead = {}) {
-  const text = stripQuoted(body).replace(/[’`]/g, "'");
-  if (STOP.test(text)) return 'stop';
-  // "Our website is being built" is someone else's work in progress, not a site they have.
-  if (ELSEWHERE.test(text) && !CLEAR_YES.test(text) && !NOT_A_SITE.test(text)) return 'elsewhere';
-  if (HAS_SITE.test(text) && !NOT_A_SITE.test(text)) return 'has_site';
+  const text = tidy(stripQuoted(body));
+  if (isStop(text)) return 'stop';
+  // Someone else making it, or a site they already have: said politely or not,
+  // these are answered differently from a plain no.
+  if (isElsewhere(text) && !accepts(text)) return 'elsewhere';
+  if (hasSite(text) && !accepts(text)) return 'has_site';
   if (answered(text, brief, lead).count >= 2) return 'answers';
-  if (NO.test(text) || BARE_NO.test(text)) return 'no';
-  if (LATER.test(text)) return 'later';
-  if (PRICE.test(text)) return 'price';
-  if (YES.test(text)) return 'yes';
+  if (isNo(text)) return 'no';
+  if (isLater(text)) return 'later';
+  // "Who is this?", "wrong number": they need an answer, not a pitch.
+  if (asksWho(text) && !accepts(text)) return 'other';
+  if (isPrice(text)) return 'price';
+  if (isYes(text)) return 'yes';
+  // "All our work comes through word of mouth" with nothing else said.
+  if (leansNo(text)) return 'no';
   return 'other';
 }
 

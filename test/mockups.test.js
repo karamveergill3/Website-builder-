@@ -187,7 +187,7 @@ test('the name they asked for is the name on the mockup', async () => {
 
   const html = await (await fetch(`${base}/m/${r.body.mockup.token}/`)).text();
   assert.ok(html.includes('Hillside Roofing'));
-  assert.match(html, /A trading name of HILLSIDE ROOFING LIMITED/,
+  assert.match(html, /A trading name of Hillside Roofing Limited/,
     'the legal name still has to appear — Companies Act 2006 s.1202');
 });
 

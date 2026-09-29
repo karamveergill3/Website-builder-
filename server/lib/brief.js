@@ -512,7 +512,9 @@ export function briefForBuild(brief, lead = {}) {
     // Masthead: as the owner would write it ("Hillside Roofing", not
     // "HILLSIDE ROOFING LTD"), lib/names.js.
     business_name: brief.trading_name || businessName(lead.business_name) || 'Your Business',
-    registered_name: lead.business_name ?? null,
+    // In normal case: the legal name is the same name however it is cased,
+    // and the footer shouldn't shout it ("Hillside Roofing Ltd").
+    registered_name: registeredName(lead.business_name) || null,
     trade,
     services: services.length ? services : defaultServices(trade, lead),
     primary_cta: CTAS.includes(brief.primary_cta) ? brief.primary_cta : 'call',

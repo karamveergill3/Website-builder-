@@ -237,7 +237,7 @@ test('briefForBuild prefers the trading name and keeps the legal one', () => {
     { ...lead, business_name: 'HILLSIDE ROOFING LIMITED' });
   const b = briefForBuild(r, { ...lead, business_name: 'HILLSIDE ROOFING LIMITED' });
   assert.equal(b.business_name, 'Hillside Roofing');
-  assert.equal(b.registered_name, 'HILLSIDE ROOFING LIMITED');
+  assert.equal(b.registered_name, 'Hillside Roofing Limited', 'the legal name, not shouted');
 });
 
 test('briefForBuild coerces a stray string list into an array', () => {

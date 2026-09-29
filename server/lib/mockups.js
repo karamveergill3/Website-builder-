@@ -38,9 +38,15 @@ export function buildMockup({ lead, briefRow = null, layout = 'single' }) {
 
   const token = newToken();
   const studio = getSetting('biz_name', 'this studio');
+  // Built from the lead alone (for a follow-up), it has to read as a finished
+  // page to someone who never asked for it: ready to show, not a form.
+  const showcase = !briefRow;
   const files = renderSite(brief, {
-    draftNote: `Draft mockup for ${brief.business_name} — prepared by ${studio}`,
+    draftNote: showcase
+      ? `Draft mockup for ${brief.business_name} — prepared by ${studio}. Your own photos, prices and reviews go in when it's built.`
+      : `Draft mockup for ${brief.business_name} — prepared by ${studio}`,
     pages: layout,
+    showcase,
   });
   try {
     writeSite(MOCKUP_ROOT, token, files);

@@ -755,3 +755,45 @@ test('a long address cannot push the page sideways', () => {
   assert.match(html, /body\{overflow-wrap:break-word\}/);
   assert.match(html, /a\[href\^="mailto:"\][^{]*\{overflow-wrap:anywhere\}/);
 });
+
+test('a mock up ready to show (sent before they told us anything) reads as a finished page', async () => {
+  const { briefForBuild } = await import('../server/lib/brief.js');
+  const leads = [
+    { business_name: 'HILLSIDE ROOFING LTD', category: 'roofer', location: 'STOKE-ON-TRENT' },
+    { business_name: 'BEAUTICAT LTD', category: 'beauty salon', location: 'Cannock' },
+    { business_name: 'THE LITTLE CAFE (BURTON) LIMITED', category: 'cafe', location: 'Burton upon Trent' },
+    { business_name: 'PERFECT PAWS GROOMING LTD', category: 'dog groomer', location: 'Burton' },
+    { business_name: 'KWIK FIT GARAGE LTD', category: 'garage', location: 'Walsall' },
+    { business_name: 'PETALS FLORIST LTD', category: 'florist', location: 'Lichfield' },
+    { business_name: 'GREEN THUMB LANDSCAPES LTD', category: 'landscaper', location: 'Tamworth' },
+    { business_name: 'SPARKLE CLEANING LTD', category: 'cleaner', location: 'Derby' },
+    { business_name: 'NO CATEGORY LTD', category: null, location: null },
+  ];
+  for (const lead of leads) {
+    const html = renderSite(briefForBuild({}, { ...lead, phone: '07700 900123' }), { showcase: true })['index.html'];
+    const text = html.replace(/<style[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ');
+    for (const blank of [/your copy to change/i, /Blank for you/i, /£—/, /Your numbers go here/i, /\bJob \d\b/,
+      /A real review/i, /Your opening hours go here/i, /add the rest/i, /Your own words go here/i, /undefined|null/]) {
+      assert.doesNotMatch(text, blank, `${lead.business_name}: ${blank}`);
+    }
+    assert.doesNotMatch(text, /HILLSIDE|STOKE-ON-TRENT|\bLTD\b/, `${lead.business_name}: names and towns as a person writes them`);
+    // Every link in the menu goes somewhere on the page.
+    for (const [, id] of html.matchAll(/href="#([a-z-]+)"/g)) {
+      if (id === 'top') continue;
+      assert.ok(html.includes(`id="${id}"`), `${lead.business_name}: menu link #${id} has a section`);
+    }
+    if (/cafe|florist/.test(lead.category ?? '')) {
+      assert.doesNotMatch(text, /No charge for looking|How it works|Need it looking at/, `${lead.business_name}: no tradesman's copy`);
+    }
+    if (/beauty|groom/.test(lead.category ?? '')) {
+      assert.doesNotMatch(text, /No charge for looking|Years on the tools|Need it looking at/, `${lead.business_name}: no tradesman's copy`);
+    }
+  }
+});
+
+test('a mock up built from their reply still shows the owner where their details go', async () => {
+  const { briefForBuild } = await import('../server/lib/brief.js');
+  const html = renderSite(briefForBuild({}, { business_name: 'Hillside Roofing', category: 'roofer', location: 'Walsall' }))['index.html'];
+  assert.match(html, /this is your copy to change/);
+  assert.match(html, /Years on the tools/);
+});

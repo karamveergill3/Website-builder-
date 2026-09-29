@@ -873,8 +873,11 @@ const SECTION_LABELS = {
   trust:  'Why us',
 };
 
-function anchorsFor(sections = []) {
+function anchorsFor(sections = [], body = null) {
   const extra = sections.map((k) => [`#${k}`, SECTION_LABELS[k]]).filter(([, l]) => l);
+  // Only sections this page actually has: a cafe has no "how it works", and
+  // a mock up ready to show leaves the blank ones out.
+  const here = ([href]) => body === null || body.includes(`id="${href.slice(1)}"`);
 
   // Contact is the whole point of the page and Services is what they came
   // to check, so those two are never trimmed. Everything else competes for
@@ -888,7 +891,7 @@ function anchorsFor(sections = []) {
     ['#work', 'Our work'],
     ['#about', 'About'],
     ['#process', 'How it works'],
-  ];
+  ].filter(here);
   return [
     ['#services', 'Services'],
     ...middle.slice(0, MAX_NAV - 2),
@@ -1694,7 +1697,7 @@ function page({ title, brief, palette, theme, current, body, draftNote, single =
   const t = theme;
   const tel = telHref(b.phone);
   const mail = mailtoHref(b.email);
-  const links = single ? anchorsFor(t.sections) : NAV;
+  const links = single ? anchorsFor(t.sections, body) : NAV;
   const home = single ? '#top' : 'index.html';
   const brandParts = String(b.business_name).trim().split(/\s+/);
   const brandHtml = brandParts.length > 1
@@ -1939,6 +1942,13 @@ function contactBody(b) {
 function serviceBlurb(service, b) {
   const where = b.areas?.[0];
   const s = String(service).toLowerCase();
+  // Ready to show (a mock up sent before they've told us anything): words a
+  // customer would read, not a note to the owner.
+  if (b.showcase) {
+    return where
+      ? `${service} across ${where} and nearby. Get in touch to talk about what you need.`
+      : `${service}. Get in touch to talk about what you need.`;
+  }
   return where
     ? `${service} across ${where} and nearby. A line or two here about how you approach ${s} — this is your copy to change.`
     : `${service}. A line or two here about how you approach ${s} — this is your copy to change.`;
@@ -1952,8 +1962,17 @@ const BAND = {
   gallery: ['Seen something you like?', 'Have a look at what we have done and get in touch.'],
   enquire: ['Got a question?', 'Send it over and we will come back to you.'],
 };
-const bandHeading = (b) => (BAND[b.primary_cta] ?? BAND.enquire)[0];
-const bandCopy    = (b) => (BAND[b.primary_cta] ?? BAND.enquire)[1];
+// "Need it looking at?" is a tradesman's line. A salon, a cafe, a shop or a
+// tutor being rung up hears something that fits them.
+const CALL_BAND = {
+  beauty: ['Fancy booking in?', 'Give us a ring and we will find you a time.'],
+  food:   ['Fancy popping in?', 'Give us a ring, or just come by.'],
+  retail: ['Looking for something?', 'Give us a ring and we will check for you.'],
+  pro:    ['Got a question?', 'Give us a ring and we will talk it through.'],
+};
+const band = (b) => (b.primary_cta === 'call' && CALL_BAND[b.family]) || BAND[b.primary_cta] || BAND.enquire;
+const bandHeading = (b) => band(b)[0];
+const bandCopy    = (b) => band(b)[1];
 
 /**
  * The extra blocks a particular trade's site actually needs.
@@ -1979,23 +1998,27 @@ function extraSections(b, wanted = []) {
     <div class="reveal">
       <p class="eyebrow">Price list</p>
       <h2>What it costs</h2>
-      <p style="max-width:52ch;color:var(--muted)">Prices are the page people
+      <p style="max-width:52ch;color:var(--muted)">${b.showcase
+        ? 'Prices depend on what you need. Ask, and you get a straight answer.'
+        : `Prices are the page people
         come for. These are blanks for you to fill in — real numbers here save
-        you answering the same question all week.</p>
+        you answering the same question all week.`}</p>
     </div>
     <div class="price-list reveal">
       ${(rows.length ? rows : ['Your service']).map((sv) => `
       <div class="price-row">
         <span class="price-name">${esc(sv)}</span>
         <span class="price-dots"></span>
-        <span class="price-val">from £—</span>
+        <span class="price-val">${b.showcase ? 'Ask us' : 'from £—'}</span>
       </div>`).join('')}
     </div>
   </div>
 </section>`);
   }
 
-  if (wanted.includes('hours')) {
+  // Their hours aren't known yet, and a week of dashes is a blank form, not a
+  // page: left out of a mock up that is ready to show.
+  if (wanted.includes('hours') && !b.showcase) {
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     out.push(`
 <section id="hours">
@@ -2023,21 +2046,28 @@ function extraSections(b, wanted = []) {
     <div class="reveal">
       <p class="eyebrow">Where we work</p>
       <h2>Areas we cover</h2>
-      <p style="max-width:52ch;color:var(--muted)">Naming the towns matters
+      <p style="max-width:52ch;color:var(--muted)">${b.showcase
+        ? esc(`Based in ${areas[0]} and covering the surrounding area.`)
+        : `Naming the towns matters
         twice over: it answers the first question a caller has, and it is what
-        people actually type into a search.</p>
+        people actually type into a search.`}</p>
     </div>
     <div class="chips reveal">
       ${areas.map((a) => `<span class="chip">${esc(a)}</span>`).join('')}
-      <span class="chip chip-add">+ add the rest</span>
+      ${b.showcase ? '' : '<span class="chip chip-add">+ add the rest</span>'}
     </div>
   </div>
 </section>`);
   }
 
-  if (wanted.includes('trust')) {
+  if (wanted.includes('trust') && !b.showcase) {
     // Deliberately unfilled. Inventing a trade body or an insurance figure
-    // for someone would be a lie printed on their own website.
+    // for someone would be a lie printed on their own website. Left out of a
+    // mock up that is ready to show, where three blanks would read as
+    // unfinished; the owner fills them in once it is theirs.
+    const tools = b.family === 'pro'
+      ? ['Years in business', 'Qualified and insured', 'Your qualifications and your cover. Only what is genuinely yours goes here.']
+      : ['Years on the tools', 'Insured and accredited', 'Your trade body, your cover, your registration number. Only what is genuinely yours goes here.'];
     out.push(`
 <section id="trust">
   <div class="wrap">
@@ -2046,12 +2076,11 @@ function extraSections(b, wanted = []) {
       <h2>Reasons to pick up the phone</h2>
     </div>
     <div class="grid reveal" data-n="3" style="margin-top:36px">
-      <div class="card"><h3>Years on the tools</h3>
+      <div class="card"><h3>${tools[0]}</h3>
         <p>How long you have been going. Blank for you to fill in — it is not
            our claim to make.</p></div>
-      <div class="card"><h3>Insured and accredited</h3>
-        <p>Your trade body, your cover, your registration number. Only what is
-           genuinely yours goes here.</p></div>
+      <div class="card"><h3>${tools[1]}</h3>
+        <p>${tools[2]}</p></div>
       <div class="card"><h3>What people say</h3>
         <p>One real review beats a page of marketing copy. Send a couple over
            and they go here.</p></div>
@@ -2190,6 +2219,8 @@ function bentoServices(b, family = 'pro') {
  * is a two-minute job for them.
  */
 function statsBand(b) {
+  // A row of dashes is a form to fill in: not on a mock up ready to show.
+  if (b.showcase) return '';
   const stats = [
     ['Years doing this', '—'],
     ['Jobs completed', '—'],
@@ -2223,22 +2254,39 @@ function processSteps(b) {
     enquire: ['You get in touch', 'Send a message and we come back to you.'],
   }[b.primary_cta] ?? ['You get in touch', 'Send a message and we come back to you.'];
 
-  const steps = [
-    first,
+  // A cafe or a shop has no "how it works": you walk in.
+  if (b.family === 'food' || b.family === 'retail') return '';
+  // "We take a look, no charge for looking" is a tradesman's visit. A salon
+  // and everyone else in the catch-all group get steps that fit them.
+  const after = {
+    beauty: [
+      ['We talk it through', 'What you would like, and what will suit you best.'],
+      ['Your appointment', 'Sit back and enjoy it.'],
+      ['Aftercare', 'A few tips to keep it looking its best.'],
+    ],
+    pro: [
+      ['We talk it through', 'What you need, and what it will cost, before anything is agreed.'],
+      ['We get to work', 'When we said we would.'],
+      ['Any questions after', 'Just ask. We are only a message away.'],
+    ],
+  }[b.family] ?? [
     ['We take a look', 'A visit or a photo, whichever suits. No charge for looking.'],
     ['You get a price', 'In writing, fixed, before anything starts.'],
     ['We do the work', 'Tidy, on time, and cleared up after.'],
   ];
+  const steps = [first, ...after];
+  const job = !['beauty', 'pro'].includes(b.family);
+  const count = ['', 'One', 'Two', 'Three', 'Four', 'Five'][steps.length] ?? String(steps.length);
   return `
 <section id="process">
   <div class="wrap">
     <div class="sec-head reveal">
       <div>
         <p class="eyebrow">How it works</p>
-        <h2>From a call to a finished job</h2>
+        <h2>${job ? 'From a call to a finished job' : 'Simple from start to finish'}</h2>
       </div>
-      <p class="sec-note">Four steps, no surprises. Change any of this to
-        match how you actually work.</p>
+      <p class="sec-note">${count} steps, no surprises.${b.showcase ? '' : ` Change any of this to
+        match how you actually work.`}</p>
     </div>
     <ol class="steps reveal">
       ${steps.map(([title, body], i) => `
@@ -2258,6 +2306,9 @@ function processSteps(b) {
  * Left as an obvious blank rather than a fabricated review.
  */
 function pullQuote(b) {
+  // A made-up review would be a lie; a blank one is a form. Not on a mock up
+  // ready to show.
+  if (b.showcase) return '';
   const where = b.areas?.[0];
   return `
 <section class="quote-wrap">
@@ -2271,6 +2322,23 @@ function pullQuote(b) {
     </blockquote>
   </div>
 </section>`;
+}
+
+/** What the three picture slots say on a mock up ready to show, by kind of business. */
+function plateLabels(b) {
+  return {
+    food:   ['On the menu', 'Fresh today', 'Come and see us'],
+    retail: ['New in', 'In the shop', 'Gift ideas'],
+    beauty: ['Recent work', 'Up close', 'The finished look'],
+  }[b.family] ?? ['Recent work', 'Up close', 'Finished work'];
+}
+
+/** The About line on a mock up ready to show: only what we know, no claims. */
+function aboutLine(b) {
+  const what = shortTrade(b.trade);
+  const where = b.areas?.length ? b.areas.join(', ') : null;
+  const kind = what ? `A local ${what.toLowerCase()} business` : 'A local business';
+  return `${kind}${where ? `, covering ${where}` : ''}. Get in touch to find out more.`;
 }
 
 /* --------------------------------------------------------------- build */
@@ -2353,12 +2421,13 @@ ${extraSections(b, sections)}
         <h2>Recent work</h2>
       </div>
       <p class="sec-note">${
-        b.has_photos
+        b.showcase ? 'Your own photos go straight in here.'
+        : b.has_photos
           ? 'Send your photos over and they drop straight into these slots.'
           : 'Phone photos of finished jobs are fine — real work sells far better than stock images.'}</p>
     </div>
     <div class="grid reveal" data-n="3" style="margin-top:36px">
-      ${[2, 3, 4].map((n) => photoPlate(n, `Job ${n - 1}`, family)).join('\n      ')}
+      ${[2, 3, 4].map((n, i) => photoPlate(n, b.showcase ? plateLabels(b)[i] : `Job ${n - 1}`, family)).join('\n      ')}
     </div>
   </div>
 </section>
@@ -2372,16 +2441,16 @@ ${pullQuote(b)}
     <div>
       <p class="eyebrow">About</p>
       <h2>${esc(b.business_name)}</h2>
-      <p>Your own words go here — how long you have been going, what you are
+      ${b.showcase ? `<p>${esc(aboutLine(b))}</p>` : `<p>Your own words go here — how long you have been going, what you are
          known for locally, who you usually work for. A short honest paragraph
          beats a page of marketing copy.</p>
-      <p>${esc(`We cover ${where}.`)}</p>
+      <p>${esc(`We cover ${where}.`)}</p>`}
       ${b.notes ? `<p>${esc(b.notes)}</p>` : ''}
     </div>
     <div>
       <p class="eyebrow">At a glance</p>
       <ul class="facts">
-        <li><b>Trade</b> <span>${esc(b.trade ?? services[0] ?? '—')}</span></li>
+        <li><b>Trade</b> <span>${esc((b.showcase ? shortTrade(b.trade) : b.trade) ?? services[0] ?? '—')}</span></li>
         <li><b>Area</b> <span>${esc(where)}</span></li>
         ${tel ? `<li><b>Phone</b> <span>${esc(b.phone)}</span></li>` : ''}
         ${mail ? `<li><b>Email</b> <span>${esc(b.email)}</span></li>` : ''}
@@ -2416,7 +2485,7 @@ ${tel ? `
         ${tel ? `<li><b>Phone</b> <span><a href="${tel}">${esc(b.phone)}</a></span></li>` : ''}
         ${mail ? `<li><b>Email</b> <span><a href="${mail}">${esc(b.email)}</a></span></li>` : ''}
         <li><b>Area</b> <span>${esc(where)}</span></li>
-        <li><b>Hours</b> <span>Your opening hours go here</span></li>
+        ${b.showcase ? '' : '<li><b>Hours</b> <span>Your opening hours go here</span></li>'}
       </ul>
     </div>
     <div>
@@ -2439,26 +2508,39 @@ ${tel ? `
  * `pages: 'single'` (the default) produces one index.html carrying every
  * section. `pages: 'multi'` produces the four-file version.
  */
-export function renderSite(brief, { draftNote = null, pages = 'single' } = {}) {
+export function renderSite(brief, { draftNote = null, pages = 'single', showcase = false } = {}) {
   const trade = brief.trade ?? (brief.services ?? [])[0];
   const palette = resolvePalette(trade, brief.brand_colours ?? []);
   const theme = themeFor(trade);
-  const common = { brief, palette, theme, draftNote };
+  // `showcase`: built before they've told us anything (a follow-up's mock up),
+  // so it must read as a finished page to a customer, not as a form for the
+  // owner. Blank stats, a blank review and a week of dashes are left out; no
+  // claim is invented to fill the gap.
+  const b = { ...brief, family: theme.family, showcase: Boolean(showcase) };
+  // With nothing from them, the one service is the register's name for the
+  // trade ("Cafes and unlicensed restaurants"); the short one the headline
+  // uses ("Coffee & food") is what a customer would read.
+  const short = shortTrade(brief.trade);
+  if (b.showcase && short && (b.services ?? []).length === 1
+      && b.services[0].toLowerCase() === String(brief.trade ?? '').toLowerCase()) {
+    b.services = [short];
+  }
+  const common = { brief: b, palette, theme, draftNote };
 
   if (pages === 'single') {
     return {
       'index.html': page({
         ...common, title: 'Home', current: '#services', single: true,
-        body: singleBody(brief, theme.family, theme.sections ?? []),
+        body: singleBody(b, theme.family, theme.sections ?? []),
       }),
     };
   }
 
   return {
-    'index.html':    page({ ...common, title: 'Home',     current: 'index.html',    body: homeBody(brief) }),
-    'services.html': page({ ...common, title: 'Services', current: 'services.html', body: servicesBody(brief) }),
-    'about.html':    page({ ...common, title: 'About',    current: 'about.html',    body: aboutBody(brief) }),
-    'contact.html':  page({ ...common, title: 'Contact',  current: 'contact.html',  body: contactBody(brief) }),
+    'index.html':    page({ ...common, title: 'Home',     current: 'index.html',    body: homeBody(b) }),
+    'services.html': page({ ...common, title: 'Services', current: 'services.html', body: servicesBody(b) }),
+    'about.html':    page({ ...common, title: 'About',    current: 'about.html',    body: aboutBody(b) }),
+    'contact.html':  page({ ...common, title: 'Contact',  current: 'contact.html',  body: contactBody(b) }),
   };
 }
 

@@ -1766,6 +1766,21 @@ Thanks so much, and have a lovely day.
       }
     },
   },
+  {
+    name: '064_no_sales_claim_anywhere',
+    run() {
+      // 063 again, stricter: the whole sentence making the 40% claim goes,
+      // however it was worded or ended ("…40%!", "…40%. 📈", twice over),
+      // so nothing is left behind of a copy someone edited.
+      const now = new Date().toISOString();
+      for (const row of db.prepare('SELECT id, body FROM templates').all()) {
+        const body = withoutSalesLine(row.body);
+        if (body !== row.body) {
+          db.prepare('UPDATE templates SET body = ?, updated_at = ? WHERE id = ?').run(body, now, row.id);
+        }
+      }
+    },
+  },
 ];
 
 function migrate() {

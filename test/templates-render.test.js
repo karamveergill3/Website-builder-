@@ -186,20 +186,29 @@ test('the WhatsApp opener reads exactly as Keylo sends it, for a window cleaner'
   ].join('\n'));
 });
 
-test('the sales line comes out of a saved opener, and nothing else changes', async () => {
-  const { withoutSalesLine } = await import('../server/lib/starters.js');
+test('the sales claim comes out of a saved opener, and nothing else changes', async () => {
+  const { withoutSalesLine: out } = await import('../server/lib/starters.js');
   const line = 'Having a website is proven to boost sales by 40%.';
   // As shipped: a paragraph of its own, so the paragraph goes.
   assert.equal(
-    withoutSalesLine(`Hi, it is Karam.\n\nWe build sites.\n\n${line}\n\nFancy a free mock up? Just say.\n\nKaram`),
+    out(`Hi, it is Karam.\n\nWe build sites.\n\n${line}\n\nFancy a free mock up? Just say.\n\nKaram`),
     'Hi, it is Karam.\n\nWe build sites.\n\nFancy a free mock up? Just say.\n\nKaram',
   );
   // Written into someone's own paragraph: their words stay.
-  assert.equal(withoutSalesLine(`We build sites. ${line} Honestly.`), 'We build sites. Honestly.');
-  assert.equal(withoutSalesLine(`We build sites.\n${line}\nFancy one?`), 'We build sites.\nFancy one?');
-  // Nothing to take out: left exactly as it is.
-  const plain = 'Hi.\n\n  Spaced   as they like.\n\nKaram';
-  assert.equal(withoutSalesLine(plain), plain);
+  assert.equal(out(`We build sites. ${line} Honestly.`), 'We build sites. Honestly.');
+  assert.equal(out(`We build sites.\n${line}\nFancy one?`), 'We build sites.\nFancy one?');
+  // However it was edited, the whole sentence goes and nothing is left of it.
+  assert.equal(out('A\n\nHaving a website is proven to boost sales by 40%!\n\nB'), 'A\n\nB');
+  assert.equal(out(`A\n\n${line} 📈\n\nB`), 'A\n\nB');
+  assert.equal(out(`• ${line}\n• Second point.`), '• Second point.');
+  assert.equal(out("Hi.\n\nHaving a website is proven to boost sales by 40%, so let's talk.\n\nBye"), 'Hi.\n\nBye');
+  assert.equal(out('Did you know having a website is proven to boost sales by 40%? Mad.'), 'Mad.');
+  assert.equal(out(`Hi.\n\n${line}\n${line} ${line}\n\nBye`), 'Hi.\n\nBye', 'every copy');
+  assert.equal(out(`It is 4.5 stars. ${line} Honest.`), 'It is 4.5 stars. Honest.');
+  // Nothing to take out: left exactly as it is, spacing and all.
+  const plain = 'Hi.\n\n  Spaced   as they like.\n\n\n\nKaram 4.5 stars!!';
+  assert.equal(out(plain), plain);
+  assert.equal(out(`A\n\n${line}\n\nB\n\n\n\nC`), 'A\n\nB\n\n\n\nC', 'blank lines elsewhere are theirs');
 });
 
 test('one WhatsApp opener, with a different middle for every kind of business', async () => {

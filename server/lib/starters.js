@@ -34,30 +34,46 @@
  */
 
 /**
- * The sales line the WhatsApp openers carried until Keylo took it out: a
- * figure nobody could back up reads as spam and costs trust on a first
- * message.
+ * The sales claim the WhatsApp openers carried until Keylo took it out
+ * ("Having a website is proven to boost sales by 40%."): a figure nobody
+ * could back up reads as spam and costs trust on a first message. Matched
+ * loosely, so a copy someone reworded ("did you know having a website is
+ * proven to boost sales by 40%?") goes too.
  */
-const SALES_LINE = /[ \t]*Having a website is proven to boost sales by 40%\.?[ \t]*(\n)?/;
+const SALES_CLAIM = /\bboost(?:s|ing)? sales by 40\s*(?:%|per ?cent)/i;
+
+// One sentence at a time: up to and including its closing punctuation, any
+// closing quote or bracket, and emoji tacked on after it ("40%. 📈").
+const SENTENCE = /[^.!?\n]*(?:[.!?]+[)"'”’]*(?:\s*\p{Extended_Pictographic}[‍️\p{Extended_Pictographic}]*)*[ \t]*|$)/gu;
+// What is left of a line that held only the claim: a bullet, stray
+// punctuation, an emoji.
+const NOTHING_LEFT = /^[\s•·*\-–—.,;:!?\p{Extended_Pictographic}‍️]*$/u;
 
 /**
- * An opener with the sales line taken out. Only that sentence goes: on a
- * paragraph of its own the paragraph goes with it, and in a paragraph someone
- * wrote around it the rest of their words stay.
+ * A template with the sales claim taken out, every copy of it. The whole
+ * sentence that makes it goes (with its "!" or "📈"); a line left with
+ * nothing but a bullet goes with it, and so does an emptied paragraph.
+ * Every other word stays exactly as it was.
  */
 export function withoutSalesLine(body) {
   const text = String(body ?? '');
-  if (!SALES_LINE.test(text)) return text;
-  return text.split('\n\n').flatMap((para) => {
-    if (!SALES_LINE.test(para)) return [para];
-    const rest = para.replace(SALES_LINE, (m, newline, at, str) => {
-      const before = str[at - 1];
-      if (before === undefined || before === '\n') return '';   // it started the line
-      if (newline) return '\n';                                 // it ended the line
-      return str[at + m.length] === undefined ? '' : ' ';        // mid-sentence
-    }).replace(/\n+$/, '');
-    return rest.trim() ? [rest] : [];
-  }).join('\n\n');
+  if (!SALES_CLAIM.test(text)) return text;
+  const out = [];
+  let gone = false;   // the line before was taken out
+  for (const line of text.split('\n')) {
+    if (!SALES_CLAIM.test(line)) {
+      // A blank line either side of one taken out: keep one, not two.
+      if (!(gone && line === '' && (out.length === 0 || out.at(-1) === ''))) out.push(line);
+      gone = false;
+      continue;
+    }
+    const kept = (line.match(SENTENCE) ?? []).filter((x) => !SALES_CLAIM.test(x)).join('').trimEnd();
+    if (NOTHING_LEFT.test(kept)) gone = true;
+    else { out.push(kept); gone = false; }
+  }
+  // Taken out at the very end: no blank line left trailing after the rest.
+  if (gone && out.at(-1) === '' && !/\n$/.test(text)) out.pop();
+  return out.join('\n');
 }
 
 /** The long close the WhatsApp openers used to end on. */

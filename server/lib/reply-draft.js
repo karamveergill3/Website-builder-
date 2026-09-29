@@ -20,6 +20,7 @@
  * before it goes anywhere. Nothing here touches the database.
  */
 import { stripQuoted, numberedAnswers } from './brief.js';
+import { businessName } from './names.js';
 import { fieldOf } from './ask.js';
 
 import {
@@ -127,7 +128,7 @@ function answered(text, brief, lead, questions = null) {
 export function draftReply({
   body, brief = {}, lead = {}, sender = '', ask, prices = {}, mockupUrl = null, kind = null,
 }) {
-  const business = lead.business_name ?? 'your business';
+  const business = businessName(lead.business_name ?? '') || 'your business';
   const name = signOff(sender);
   const sign = (t) => (name ? `${t}\n\n${name}` : t);
   const read = classifyReply(body, brief, lead);

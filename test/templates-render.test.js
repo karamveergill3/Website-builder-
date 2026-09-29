@@ -173,7 +173,7 @@ test('the WhatsApp opener reads exactly as Keylo sends it, for a window cleaner'
     { name: 'javier aydogan' },
   );
   assert.equal(r.body, [
-    "Hi, my name is Javier and I'm from Keylo Studios. I came across Barlows Window Services in Stoke-On-Trent and noticed you don't have a website yet, so I thought I'd get in touch.",
+    "Hi, my name is Javier and I'm from Keylo Studios. I came across Barlows Window Services in Stoke-on-Trent and noticed you don't have a website yet, so I thought I'd get in touch.",
     '',
     own.pitch,
     '',

@@ -27,6 +27,7 @@
  * empty string, and unknown tokens are left alone so a typo is visible in the
  * preview instead of silently vanishing.
  */
+import { businessName, placeName } from './names.js';
 import { getSettings } from '../db.js';
 import { pitchFor } from './pitch-match.js';
 
@@ -95,7 +96,8 @@ const TOKEN = /\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}/gi;
 
 /** Build the substitution map for a lead row. */
 export function leadContext(lead = {}) {
-  const business = lead.business_name ?? '';
+  // As the owner would write it, not as the register shouts it (lib/names.js).
+  const business = businessName(lead.business_name ?? '');
   const summary = String(lead.editorial_summary ?? '').trim();
   // What this kind of business's customers want, and what we build for it:
   // a roofer and a dog groomer hear different things (lib/pitches.js).
@@ -103,7 +105,7 @@ export function leadContext(lead = {}) {
   return {
     business,
     category: lead.category ?? '',
-    location: lead.location ?? '',
+    location: placeName(lead.location ?? ''),
     phone: lead.phone ?? '',
     email: lead.email ?? '',
     // Best-effort friendly name: first word of the business name.

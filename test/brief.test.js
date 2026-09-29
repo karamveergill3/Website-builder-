@@ -224,7 +224,9 @@ test('looksLikeAName separates a name from prose', () => {
 
 test('an all-caps registered name is title-cased for the masthead', () => {
   assert.equal(tidyRegisteredName('HILLSIDE ROOFING LIMITED'), 'Hillside Roofing Limited');
-  assert.equal(tidyRegisteredName('MJ ELECTRICAL LTD'), 'Mj Electrical LTD');
+  // Initials stay letters, and "Ltd" is a word.
+  assert.equal(tidyRegisteredName('MJ ELECTRICAL LTD'), 'MJ Electrical Ltd');
+  assert.equal(tidyRegisteredName("JOHN'S PLUMBING LTD"), "John's Plumbing Ltd");
   // A name someone deliberately styled is left alone.
   assert.equal(tidyRegisteredName('McKinnon Roofing Ltd'), 'McKinnon Roofing Ltd');
   assert.equal(tidyRegisteredName(''), 'Your Business');

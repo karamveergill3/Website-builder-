@@ -18,6 +18,7 @@
  * deterministic answer beats a generated one, and it costs nothing.
  */
 
+import { businessName, registeredName, placeName } from './names.js';
 import { available, extractJson, asList, asText, asBool, asOneOf } from './ollama.js';
 import { resolveTrade } from './sic.js';
 
@@ -220,7 +221,7 @@ export function extractByRules(replyBody, lead = {}) {
   // Merge the lead's own town in — a reply naming other towns rarely repeats
   // the one we already knew about.
   if (lead.location && !areas.some((a) => a.toLowerCase() === String(lead.location).toLowerCase())) {
-    areas.unshift(titleCase(lead.location));
+    areas.unshift(placeName(lead.location));
   }
 
   return {
@@ -508,12 +509,14 @@ export function briefForBuild(brief, lead = {}) {
     // What they asked to be called wins over the register's version. The
     // registered name is kept alongside for the footer, where the legal
     // name is the correct one to show.
-    business_name: brief.trading_name || tidyRegisteredName(lead.business_name),
+    // Masthead: as the owner would write it ("Hillside Roofing", not
+    // "HILLSIDE ROOFING LTD"), lib/names.js.
+    business_name: brief.trading_name || businessName(lead.business_name) || 'Your Business',
     registered_name: lead.business_name ?? null,
     trade,
     services: services.length ? services : defaultServices(trade, lead),
     primary_cta: CTAS.includes(brief.primary_cta) ? brief.primary_cta : 'call',
-    areas: areas.length ? areas : (lead.location ? [String(lead.location)] : []),
+    areas: (areas.length ? areas : (lead.location ? [String(lead.location)] : [])).map(placeName),
     phone: lead.phone ?? null,
     email: lead.email ?? null,
     has_logo: Boolean(brief.has_logo),
@@ -531,11 +534,7 @@ export function briefForBuild(brief, lead = {}) {
  * deliberately styled is left alone.
  */
 export function tidyRegisteredName(name) {
-  const s = String(name ?? '').trim();
-  if (!s) return 'Your Business';
-  if (s !== s.toUpperCase()) return s;
-  return s.toLowerCase().replace(/\b([a-z])/g, (c) => c.toUpperCase())
-    .replace(/\b(Ltd|Llp|Plc|Cic)\b/gi, (m) => m.toUpperCase());
+  return registeredName(name) || 'Your Business';
 }
 
 function defaultServices(trade, lead) {

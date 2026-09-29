@@ -7,7 +7,7 @@
 /* eslint-disable require-atomic-updates */
 import { api } from '../api.js';
 import { html, modal, toast, on, fmtDateTime } from '../dom.js';
-import { appFromWaMe } from '../wa-link.js';
+import { appFromWaMe, webFromWaMe } from '../wa-link.js';
 
 const CHANNEL_LABEL = {
   email: 'Email',
@@ -165,7 +165,7 @@ function renderBody(state) {
       ${signalsPanel(state)}
       ${channelPicker(state)}
       ${messagePanel(state)}
-      ${state.lastPrepare ? preparedPanel(state.lastPrepare) : ''}
+      ${state.lastPrepare ? preparedPanel(state.lastPrepare, state) : ''}
     </div>
   `;
 }
@@ -451,16 +451,41 @@ function messagePanel(state) {
           <textarea id="reach-text" rows="5" data-act="text">${text ?? ''}</textarea>
         </div>
         <div class="bar">
-          <button class="primary" data-act="prepare" ${!text ? 'disabled' : ''}>
+          <button class="primary" data-act="prepare" ${!text || !lead.can_contact ? 'disabled' : ''}>
             Prepare ${CHANNEL_LABEL[channel]}
           </button>
-          <span class="meta">Nothing is sent yet. This opens ${CHANNEL_LABEL[channel]} with the text ready.</span>
+          ${lead.can_contact ? html`
+            <span class="meta">Nothing is sent yet. This opens ${CHANNEL_LABEL[channel]} with the text ready.</span>` : html`
+            <span class="meta">Already approached${lead.contacted_via ? ` by ${lead.contacted_via}` : ''}${
+              lead.contacted_at ? ` on ${String(lead.contacted_at).slice(0, 10)}` : ''}, so it can't go again.</span>
+            ${lead.whatsapp_sent_at && !state.sentHere ? html`
+              <button type="button" data-act="undo-sent" title="Takes that WhatsApp off the record, so you can send it properly">That WhatsApp never went</button>` : ''}`}
         </div>
       </div>
     </div>`;
 }
 
-function preparedPanel(prep) {
+function preparedPanel(prep, state) {
+  const wa = prep.channel === 'whatsapp';
+  // WhatsApp opened and the send is on the record.
+  if (wa && state.sentHere === prep.event_id) {
+    return html`
+      <div class="panel">
+        <div class="panel-hd"><h3>Sent</h3></div>
+        <div class="panel-bd">
+          <p>WhatsApp opened for <span class="mono">${prep.e164}</span>, so this is recorded as sent,
+            and ${state.lead.business_name} has moved to
+            <a href="#/whatsapp" data-act="tpl-hop">Sent via WhatsApp</a>.</p>
+          <div class="bar" style="margin-top:8px">
+            <a class="btn" href="${appFromWaMe(prep.url)}"
+               title="Back to their chat, if you closed it before sending">Open WhatsApp again</a>
+            <button type="button" data-act="undo-sent">It didn’t go</button>
+          </div>
+          <p class="tip">Pressed send? You’re done. If it never went (WhatsApp didn’t open, or the
+            number isn’t on WhatsApp), <b>It didn’t go</b> takes it off the record so you can try again.</p>
+        </div>
+      </div>`;
+  }
   return html`
     <div class="panel">
       <div class="panel-hd"><h3>Ready to send</h3></div>
@@ -469,7 +494,7 @@ function preparedPanel(prep) {
           ${prep.mobile ? '' : html`<span class="flag" style="margin-left:4px">landline — WhatsApp may not answer</span>`}</p>
         ${prep.advice ? html`<div class="msg msg-info"><div class="grow">${prep.advice}</div></div>` : ''}
         <div class="bar" style="margin-top:8px">
-          ${prep.channel === 'whatsapp' ? html`
+          ${wa ? html`
           <a class="btn primary" href="${appFromWaMe(prep.url)}"
              data-act="hop" data-event="${prep.event_id}"
              title="Opens their chat in WhatsApp Desktop with the message typed in">Open WhatsApp</a>` : html`
@@ -477,12 +502,21 @@ function preparedPanel(prep) {
              data-act="hop" data-event="${prep.event_id}">Open ${CHANNEL_LABEL[prep.channel]}</a>`}
           <button data-act="mark-sent" data-event="${prep.event_id}">I sent it</button>
         </div>
-        <p class="tip">"Open" launches ${CHANNEL_LABEL[prep.channel]} with the message,
-          and marks this company as approached — so tomorrow's list will not offer
-          it to you again.${prep.channel === 'whatsapp'
-            ? html` If it never went (say the number isn't on WhatsApp), use <b>Not sent</b>
-              on the <a href="#/whatsapp" data-act="tpl-hop">Sent via WhatsApp</a> screen to put it back.`
-            : ''}</p>
+        ${wa && state.appHelp ? html`
+          <div class="msg msg-warn" style="margin-top:8px"><div class="grow">
+            <b>WhatsApp didn’t open?</b> The first time, your browser asks “Open WhatsApp?”:
+            press <b>Open</b>, and tick <b>Always allow</b> so it never asks again. No WhatsApp
+            Desktop on this computer? Send it from WhatsApp Web instead. Nothing is recorded as
+            sent until WhatsApp opens.</div>
+            <a class="btn mini" href="${webFromWaMe(prep.url)}" target="_blank" rel="noopener"
+               data-act="hop-web" data-event="${prep.event_id}">Open in WhatsApp Web</a>
+          </div>` : ''}
+        <p class="tip">${wa
+          ? html`Once WhatsApp opens with the message, this company is marked as approached,
+            so tomorrow's list will not offer it again. If it never went, you can undo it here, or
+            with <b>It never sent</b> on the <a href="#/whatsapp" data-act="tpl-hop">Sent via WhatsApp</a> screen.`
+          : html`"Open" launches ${CHANNEL_LABEL[prep.channel]} with the message, and marks this
+            company as approached, so tomorrow's list will not offer it to you again.`}</p>
       </div>
     </div>`;
 }
@@ -677,19 +711,72 @@ function wire(dlg, state) {
    *
    * The link is left to navigate normally; this only files the fact.
    */
-  on(dlg, 'click', '[data-act="hop"]', async (_e, el) => {
+  let recording = null;
+  const recordSent = async (eventId) => {
+    // Once per send, however many signals say WhatsApp opened.
+    if (recording === eventId || state.sentHere === Number(eventId)) return;
+    recording = eventId;
     try {
-      await api.outreach.sent(el.dataset.event);
+      await api.outreach.sent(eventId);
       const fresh = await api.leads.get(state.lead.id);
       state.lead = fresh.lead ?? fresh;
+      if (state.lastPrepare?.channel === 'whatsapp') state.sentHere = Number(eventId);
+      state.appHelp = false;
       rerender();
     } catch {
       // Never block the handoff on bookkeeping: the user is mid-send, and
       // "I sent it" is still there to file it.
+    } finally {
+      recording = null;
+    }
+  };
+
+  // A WhatsApp is recorded as sent when WhatsApp really opens: the app takes
+  // the focus from this window. A link that opened nothing (no WhatsApp
+  // Desktop, or "Open WhatsApp?" cancelled) records nothing, and after a few
+  // seconds the dialog says what to do instead.
+  let stopWatching = null;
+  on(dlg, 'click', '[data-act="hop"]', (_e, el) => {
+    const eventId = el.dataset.event;
+    if (state.lastPrepare?.channel !== 'whatsapp') { recordSent(eventId); return; }
+    stopWatching?.();
+    const opened = () => { stopWatching?.(); recordSent(eventId); };
+    const hidden = () => { if (document.visibilityState === 'hidden') opened(); };
+    const help = setTimeout(() => {
+      if (!state.sentHere && dlg.isConnected) { state.appHelp = true; rerender(); }
+    }, 3500);
+    const quit = setTimeout(() => stopWatching?.(), 2 * 60 * 1000);
+    stopWatching = () => {
+      window.removeEventListener('blur', opened);
+      document.removeEventListener('visibilitychange', hidden);
+      clearTimeout(help);
+      clearTimeout(quit);
+      stopWatching = null;
+    };
+    window.addEventListener('blur', opened);
+    document.addEventListener('visibilitychange', hidden);
+  });
+
+  // WhatsApp Web opens in a tab, so opening it is the send, as it always was.
+  on(dlg, 'click', '[data-act="hop-web"]', (_e, el) => { stopWatching?.(); recordSent(el.dataset.event); });
+
+  on(dlg, 'click', '[data-act="undo-sent"]', async (_e, btn) => {
+    btn.disabled = true;
+    try {
+      const r = await api.post(`/api/leads/${state.lead.id}/whatsapp-unsend`, {});
+      state.lead = r.lead;
+      state.sentHere = null;
+      state.appHelp = false;
+      toast('Taken off the record: you can send it now');
+      rerender();
+    } catch (err) {
+      toast(err.message ?? 'Could not undo it', { error: true });
+      btn.disabled = false;
     }
   });
 
   on(dlg, 'click', '[data-act="mark-sent"]', async (_e, el) => {
+    stopWatching?.();
     try {
       await api.outreach.sent(el.dataset.event);
       toast(state.lastPrepare?.channel === 'whatsapp'

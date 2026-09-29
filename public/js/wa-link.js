@@ -27,3 +27,9 @@ export function appFromWaMe(url) {
   const m = /^https:\/\/wa\.me\/(\d+)(?:\?text=(.*))?$/.exec(String(url ?? ''));
   return m ? `whatsapp://send?phone=${m[1]}${m[2] ? `&text=${m[2]}` : ''}` : url;
 }
+
+/** A wa.me link turned into its WhatsApp Web link, for a computer without the app. */
+export function webFromWaMe(url) {
+  const m = /^https:\/\/wa\.me\/(\d+)(?:\?text=(.*))?$/.exec(String(url ?? ''));
+  return m ? `https://web.whatsapp.com/send?phone=${m[1]}${m[2] ? `&text=${m[2]}` : ''}` : url;
+}

@@ -52,15 +52,28 @@ export function on(root, type, selector, handler) {
 /* ---------------- Toasts ---------------- */
 
 export function toast(message, { error = false, ms = 3600 } = {}) {
+  const box = document.getElementById('toasts');
+  // The same message again while it is still showing: keep the one, for
+  // longer, rather than stacking a column of copies down the screen.
+  const same = [...box.children].find((t) => t.textContent === String(message)
+    && t.classList.contains('err') === error && !t.dataset.leaving);
+  if (same) {
+    clearTimeout(Number(same.dataset.timer));
+    same.dataset.timer = String(setTimeout(() => fade(same), ms));
+    return;
+  }
   const el = document.createElement('div');
   el.className = `toast${error ? ' err' : ''}`;
   el.textContent = message;
-  document.getElementById('toasts').append(el);
-  setTimeout(() => {
-    el.style.transition = 'opacity .25s';
-    el.style.opacity = '0';
-    setTimeout(() => el.remove(), 260);
-  }, ms);
+  box.append(el);
+  el.dataset.timer = String(setTimeout(() => fade(el), ms));
+}
+
+function fade(el) {
+  el.dataset.leaving = '1';
+  el.style.transition = 'opacity .25s';
+  el.style.opacity = '0';
+  setTimeout(() => el.remove(), 260);
 }
 
 /* ---------------- Modal ---------------- */

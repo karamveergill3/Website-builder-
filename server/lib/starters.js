@@ -33,21 +33,31 @@
  * template.
  */
 
-/** The stat every WhatsApp opener carries, between what we build and the mock-up offer. */
-export const SALES_LINE = 'Having a website is proven to boost sales by 40%.';
+/**
+ * The sales line the WhatsApp openers carried until Keylo took it out: a
+ * figure nobody could back up reads as spam and costs trust on a first
+ * message.
+ */
+const SALES_LINE = /[ \t]*Having a website is proven to boost sales by 40%\.?[ \t]*(\n)?/;
 
 /**
- * Put SALES_LINE into an opener just before its free mock-up offer, once.
- * Leaves the rest of the wording alone, so an opener someone edited on the
- * Templates screen keeps their edits; one with no mock-up offer to anchor on
- * is returned unchanged rather than guessed at.
+ * An opener with the sales line taken out. Only that sentence goes: on a
+ * paragraph of its own the paragraph goes with it, and in a paragraph someone
+ * wrote around it the rest of their words stay.
  */
-export function withSalesLine(body) {
+export function withoutSalesLine(body) {
   const text = String(body ?? '');
-  if (/boost sales/i.test(text)) return text;
-  const at = text.search(/\n\n[^\n]*free mock ?-?up/i);
-  if (at < 0) return text;
-  return `${text.slice(0, at)}\n\n${SALES_LINE}${text.slice(at)}`;
+  if (!SALES_LINE.test(text)) return text;
+  return text.split('\n\n').flatMap((para) => {
+    if (!SALES_LINE.test(para)) return [para];
+    const rest = para.replace(SALES_LINE, (m, newline, at, str) => {
+      const before = str[at - 1];
+      if (before === undefined || before === '\n') return '';   // it started the line
+      if (newline) return '\n';                                 // it ended the line
+      return str[at + m.length] === undefined ? '' : ' ';        // mid-sentence
+    }).replace(/\n+$/, '');
+    return rest.trim() ? [rest] : [];
+  }).join('\n\n');
 }
 
 /** The long close the WhatsApp openers used to end on. */
@@ -244,8 +254,6 @@ Kind regards,
     body: `Hi, my name is {{my_name}} and I'm from {{my_business}}. I came across {{business}} in {{location}} and noticed you don't have a website yet, so I thought I'd get in touch.
 
 {{trade_pitch}}
-
-${SALES_LINE}
 
 I'd be happy to put together a free mock up for {{business}} so you can see how it could look, with no cost and no obligation.
 

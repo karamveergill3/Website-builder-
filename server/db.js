@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import {
-  STARTERS, missingStarters, withSalesLine, withShortClose, withNewWording,
+  STARTERS, missingStarters, withoutSalesLine, withShortClose, withNewWording,
   withTradePitch, RETIRED_OPENERS, withoutNoMessageAgain,
 } from './lib/starters.js';
 import { mkdirSync } from 'node:fs';
@@ -1615,21 +1615,9 @@ Thanks so much, and have a lovely day.
   {
     name: '054_whatsapp_openers_sales_line',
     run() {
-      // The sales line goes into each shipped WhatsApp opener just before its
-      // mock-up offer. Inserted rather than the body replaced, so wording
-      // changed on the Templates screen is kept.
-      const now = new Date().toISOString();
-      for (const s of STARTERS.filter((t) => t.channel === 'whatsapp')) {
-        const cur = db.prepare(
-          "SELECT id, body FROM templates WHERE name = ? AND channel = 'whatsapp'"
-        ).get(s.name);
-        if (!cur) continue;
-        const body = withSalesLine(cur.body);
-        if (body !== cur.body) {
-          db.prepare('UPDATE templates SET body = ?, updated_at = ? WHERE id = ?')
-            .run(body, now, cur.id);
-        }
-      }
+      // This put "Having a website is proven to boost sales by 40%." into the
+      // WhatsApp openers. The line was taken out again (063), so a database
+      // made from new never gets it.
     },
   },
   {
@@ -1692,7 +1680,9 @@ Thanks so much, and have a lovely day.
       // per-business if that paragraph was left as shipped.
       const now = new Date().toISOString();
       for (const row of db.prepare("SELECT id, name, body FROM templates WHERE channel = 'whatsapp'").all()) {
-        if (Object.hasOwn(RETIRED_OPENERS, row.name) && RETIRED_OPENERS[row.name] === row.body) {
+        // As last shipped, or as shipped before 054 (now a no-op) put the sales line in.
+        const retired = Object.hasOwn(RETIRED_OPENERS, row.name) ? RETIRED_OPENERS[row.name] : null;
+        if (retired !== null && (row.body === retired || row.body === withoutSalesLine(retired))) {
           db.prepare('DELETE FROM templates WHERE id = ?').run(row.id);
           continue;
         }
@@ -1760,6 +1750,21 @@ Thanks so much, and have a lovely day.
       ALTER TABLE users ADD COLUMN replies_seen_at TEXT;
       CREATE INDEX idx_replies_fetched ON replies(fetched_at);
     `,
+  },
+  {
+    name: '063_no_sales_line',
+    run() {
+      // Keylo's call: "Having a website is proven to boost sales by 40%." comes
+      // out of every template. Only that sentence goes, so anything else
+      // edited on the Templates screen is kept.
+      const now = new Date().toISOString();
+      for (const row of db.prepare('SELECT id, body FROM templates').all()) {
+        const body = withoutSalesLine(row.body);
+        if (body !== row.body) {
+          db.prepare('UPDATE templates SET body = ?, updated_at = ? WHERE id = ?').run(body, now, row.id);
+        }
+      }
+    },
   },
 ];
 

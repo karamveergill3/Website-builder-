@@ -154,16 +154,10 @@ test('a lead carries its sector, so the right opener can pick itself', async () 
   assert.equal(byId[other.id].sector_label, null, 'an unrecognised trade uses the generic opener');
 });
 
-test('every WhatsApp opener carries the sales line, just before the mock-up offer', async () => {
-  const { SALES_LINE } = await import('../server/lib/starters.js');
-  for (const s of STARTERS.filter((x) => x.channel === 'whatsapp')) {
-    const line = s.body.indexOf(SALES_LINE);
-    const offer = s.body.search(/free mock up/);
-    assert.ok(line > 0, `${s.name} is missing the sales line`);
-    assert.ok(line < offer, `${s.name}: the line belongs before the offer`);
-  }
-  for (const s of STARTERS.filter((x) => x.channel !== 'whatsapp')) {
-    assert.ok(!s.body.includes(SALES_LINE), `${s.name} should not carry it`);
+test('no opener claims "proven to boost sales by 40%", shipped or saved', async () => {
+  for (const s of STARTERS) assert.doesNotMatch(s.body, /boost sales|proven to/i, s.name);
+  for (const t of (await get('/api/templates')).body.templates) {
+    assert.doesNotMatch(t.body, /boost sales|proven to/i, `${t.name} (as saved)`);
   }
 });
 
@@ -183,8 +177,6 @@ test('the WhatsApp opener reads exactly as Keylo sends it, for a window cleaner'
     '',
     own.pitch,
     '',
-    'Having a website is proven to boost sales by 40%.',
-    '',
     "I'd be happy to put together a free mock up for Barlows Window Services so you can see how it could look, with no cost and no obligation.",
     '',
     'Would you like me to do that for you? No pressure at all.',
@@ -194,15 +186,20 @@ test('the WhatsApp opener reads exactly as Keylo sends it, for a window cleaner'
   ].join('\n'));
 });
 
-test('the sales line is added to an existing opener without undoing edits', async () => {
-  const { withSalesLine, SALES_LINE } = await import('../server/lib/starters.js');
-  const edited = 'Hi, it is Karam.\n\nWe build sites.\n\nFancy a free mock up? Just say.\n\nKaram';
-  const once = withSalesLine(edited);
-  assert.equal(once,
-    `Hi, it is Karam.\n\nWe build sites.\n\n${SALES_LINE}\n\nFancy a free mock up? Just say.\n\nKaram`);
-  assert.equal(withSalesLine(once), once, 'never added twice');
-  const noOffer = 'Hi.\n\nNo offer paragraph in this one.';
-  assert.equal(withSalesLine(noOffer), noOffer, 'nothing to anchor on, so left alone');
+test('the sales line comes out of a saved opener, and nothing else changes', async () => {
+  const { withoutSalesLine } = await import('../server/lib/starters.js');
+  const line = 'Having a website is proven to boost sales by 40%.';
+  // As shipped: a paragraph of its own, so the paragraph goes.
+  assert.equal(
+    withoutSalesLine(`Hi, it is Karam.\n\nWe build sites.\n\n${line}\n\nFancy a free mock up? Just say.\n\nKaram`),
+    'Hi, it is Karam.\n\nWe build sites.\n\nFancy a free mock up? Just say.\n\nKaram',
+  );
+  // Written into someone's own paragraph: their words stay.
+  assert.equal(withoutSalesLine(`We build sites. ${line} Honestly.`), 'We build sites. Honestly.');
+  assert.equal(withoutSalesLine(`We build sites.\n${line}\nFancy one?`), 'We build sites.\nFancy one?');
+  // Nothing to take out: left exactly as it is.
+  const plain = 'Hi.\n\n  Spaced   as they like.\n\nKaram';
+  assert.equal(withoutSalesLine(plain), plain);
 });
 
 test('one WhatsApp opener, with a different middle for every kind of business', async () => {

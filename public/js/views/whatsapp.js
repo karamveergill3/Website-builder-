@@ -156,8 +156,11 @@ export default async function whatsappView(root, params, { refresh }) {
                 <button type="button" class="mini" data-act="paste" data-id="${l.id}" data-name="${l.business_name}">Paste another reply</button>` : ''}
               ${tab !== 'archive' && !l.last_reply_id && l.follow_up_due ? html`
                 <button type="button" class="mini" data-act="paste" data-id="${l.id}" data-name="${l.business_name}">Paste their reply</button>` : ''}
-              ${tab !== 'archive' && ['replied', 'won'].includes(l.status) ? html`
-                <button type="button" class="mini" data-act="reach" data-id="${l.id}">Message or call them</button>` : ''}
+              ${tab !== 'archive' ? html`
+                <button type="button" class="mini" data-act="reach" data-id="${l.id}"
+                  title="${['replied', 'won'].includes(l.status) ? 'Message or ring them from Reach'
+                    : 'Ring them, or note a call, from Reach (a follow-up goes by Send follow-up)'}">${
+                  ['replied', 'won'].includes(l.status) ? 'Message or call them' : 'Call them'}</button>` : ''}
               ${chat ? html`
                 <a class="btn mini" href="${onWeb(chat)}" target="_blank" rel="noopener">Open chat in WhatsApp Web</a>` : ''}
               ${others.map((u) => html`
@@ -169,7 +172,8 @@ export default async function whatsappView(root, params, { refresh }) {
                 <button type="button" class="mini" data-act="del-reply" data-reply="${l.last_reply_id}"
                   data-name="${l.business_name}">Delete their last reply</button>` : ''}
               <button type="button" class="mini" data-act="unsend" data-id="${l.id}" data-name="${l.business_name}"
-                data-fu="${l.follow_up?.sent ?? 0}">${l.follow_up?.sent ? 'The last follow-up never sent' : 'It never sent'}</button>
+                data-fu="${l.last_whatsapp_kind === 'follow_up' ? 1 : 0}">${l.last_whatsapp_kind === 'follow_up'
+                  ? 'The last follow-up never sent' : 'It never sent'}</button>
               <button type="button" class="mini danger" data-act="del" data-id="${l.id}" data-name="${l.business_name}">Delete</button>
             </div>
           </details>

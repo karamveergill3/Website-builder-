@@ -109,9 +109,13 @@ function toApi(row) {
       const f = followUpFor(row);
       const m = latestMockup(row.id);
       return {
-        follow_up: f && f.state !== 'off'
+        follow_up: f && f.state !== 'off' && f.state !== 'disabled'
           ? { state: f.state, at: f.at, sent: f.sent, left: f.left, step: f.step } : null,
         follow_up_due: Boolean(f?.due),
+        // Whatever the state: how many follow-ups went, and whether the latest
+        // WhatsApp was one, so "it never sent" says what it will take back.
+        follow_ups_sent: f?.sent ?? 0,
+        last_whatsapp_kind: f?.last_kind ?? null,
         mockup_token: m?.token ?? null,
       };
     })(),
@@ -347,9 +351,13 @@ function contactedElsewhere(lead, at) {
 router.get('/follow-ups', wrap((req, res) => {
   const due = dueFollowUps();
   const me = req.user?.id ?? null;
+  // Nobody's: no owner, or one no longer on the team (the WhatsApp screen
+  // shows those under Unassigned, so they count for everyone there).
+  const active = new Set(db.prepare('SELECT id FROM users WHERE active = 1').all().map((u) => u.id));
+  const nobodys = (d) => d.assigned_to === null || !active.has(d.assigned_to);
   res.json({
     count: due.length,
-    mine: due.filter((d) => d.assigned_to === me || d.assigned_to === null).length,
+    mine: due.filter((d) => d.assigned_to === me || nobodys(d)).length,
     due,
   });
 }));

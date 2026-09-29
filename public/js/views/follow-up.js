@@ -39,7 +39,12 @@ export async function openFollowUp(id, name) {
 
   const f = draft.follow_up;
   const number = String(prep.e164 ?? '').replace(/\D/g, '');
+  const days = Number(draft.days ?? 3);
   let sent = false;
+  // Once the dialog is gone nothing here may record a send: a window switch
+  // after "Not now" is not a follow-up going.
+  let closed = false;
+  let stop = null;
 
   await modal({
     title: `Follow up with ${name ?? draft.mockup?.business_name ?? 'them'}`,
@@ -71,17 +76,21 @@ export async function openFollowUp(id, name) {
       const box = dlg.querySelector('#fu-text');
       const open = dlg.querySelector('[data-act="open"]');
       const help = dlg.querySelector('[data-help]');
-      box.addEventListener('input', () => { open.href = inApp(number, box.value); });
+      box.addEventListener('input', () => {
+        open.href = inApp(number, box.value);
+        const web = help.querySelector('[data-act="web"]');
+        if (web) web.href = onWeb(number, box.value);
+      });
 
       let recording = false;
       const record = async () => {
-        if (recording || sent) return;
+        if (closed || recording || sent) return;
         recording = true;
         try {
           await api.outreach.sent(prep.event_id, box.value);
           sent = true;
           toast(f.left > 1
-            ? `Follow-up recorded. The next is due in ${draft.days ?? 3} days if they don't answer`
+            ? `Follow-up recorded. The next is due in ${days} day${days === 1 ? '' : 's'} if they don't answer`
             : 'Follow-up recorded. That was the last one: they’re left alone now');
           close(true);
         } catch (err) {
@@ -93,13 +102,12 @@ export async function openFollowUp(id, name) {
 
       // Recorded when WhatsApp really opens and takes the focus; a link that
       // opened nothing records nothing, and says what to do instead.
-      let stop = null;
       open.addEventListener('click', () => {
         stop?.();
         const opened = () => { stop?.(); record(); };
         const hidden = () => { if (document.visibilityState === 'hidden') opened(); };
         const late = setTimeout(() => {
-          if (sent || !dlg.isConnected) return;
+          if (sent || closed) return;
           mount(help, html`
             <div class="msg msg-warn" style="margin-top:10px"><div class="grow">
               WhatsApp didn’t open? Use <a href="${onWeb(number, box.value)}" target="_blank" rel="noopener"
@@ -129,5 +137,9 @@ export async function openFollowUp(id, name) {
       });
     },
   });
+  // However it closed (Not now, ✕, Esc, the backdrop, or a send): stop
+  // listening for WhatsApp opening.
+  closed = true;
+  stop?.();
   return sent;
 }

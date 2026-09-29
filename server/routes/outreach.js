@@ -316,6 +316,16 @@ router.post('/outreach/:id/sent', wrap((req, res) => {
   // Tapping "Open" and then "I sent it" (or Open twice) is one message, not
   // two: the second confirmation changes nothing and files no second contact.
   if (row.confirmed_sent_at) return res.json({ ok: true, confirmed_sent_at: row.confirmed_sent_at });
+  // A follow-up counts only while one is due: a second one made ready for
+  // the same gap, or a stale "WhatsApp opened" after another went, is not a
+  // second follow-up.
+  if (row.kind === 'follow_up' && row.lead_id) {
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(row.lead_id);
+    const f = lead ? followUpFor(lead) : null;
+    if (!f?.due) {
+      return res.status(409).json({ error: notDueReason(f), code: 'NOT_DUE', follow_up: f });
+    }
+  }
   const now = nowIso();
   db.prepare('UPDATE outreach_events SET confirmed_sent_at = ? WHERE id = ?').run(now, id);
   // The words as they went, when they were edited after the link was made

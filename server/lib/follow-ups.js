@@ -31,10 +31,15 @@ export function followUpRules() {
   };
 }
 
-/** Still waiting on an answer, and nothing says to leave them be. */
-const waiting = (lead) => lead.status === 'sent'
+/**
+ * Still waiting on an answer, and nothing says to leave them be. Any reply on
+ * file stops them too, whatever the status says: a lead who answered and was
+ * put back to "awaiting reply" is mid-conversation, not someone to chase.
+ */
+const waiting = (lead, history) => lead.status === 'sent'
   && !(lead.opted_out === 1 || lead.opted_out === true)
-  && lead.has_website !== 1;
+  && lead.has_website !== 1
+  && !Number(history?.replies ?? 0);
 
 /**
  * Where one lead stands, from its last WhatsApp and how many follow-ups it
@@ -43,7 +48,8 @@ const waiting = (lead) => lead.status === 'sent'
  *   waiting   one will be, on `at`
  *   done      it has had as many as Settings allows
  *   off       not waiting on them (they replied, were won or lost, opted
- *             out, have a site), or follow-ups are turned off
+ *             out, have a site)
+ *   disabled  follow-ups are turned off in Settings
  * Null when nothing has gone to them on WhatsApp.
  */
 export function followUpState(lead, history, { now = new Date(), rules = followUpRules() } = {}) {
@@ -52,7 +58,8 @@ export function followUpState(lead, history, { now = new Date(), rules = followU
   const left = Math.max(0, rules.max - sent);
   const at = new Date(Date.parse(history.last_at) + rules.days * DAY).toISOString();
   let state;
-  if (!waiting(lead) || rules.max === 0) state = 'off';
+  if (rules.max === 0) state = 'disabled';
+  else if (!waiting(lead, history)) state = 'off';
   else if (left === 0) state = 'done';
   else state = at <= now.toISOString() ? 'due' : 'waiting';
   return {
@@ -63,6 +70,9 @@ export function followUpState(lead, history, { now = new Date(), rules = followU
     left,
     step: sent + 1,
     last_at: history.last_at,
+    // Whether the latest WhatsApp was a follow-up, so "it never sent" can say
+    // what it will take back.
+    last_kind: history.last_kind ?? 'first',
   };
 }
 
@@ -70,10 +80,14 @@ export function followUpState(lead, history, { now = new Date(), rules = followU
 export function whatsAppHistory(leadId) {
   return db.prepare(
     `SELECT MAX(confirmed_sent_at) AS last_at,
-            SUM(CASE WHEN kind = 'follow_up' THEN 1 ELSE 0 END) AS follow_ups
+            SUM(CASE WHEN kind = 'follow_up' THEN 1 ELSE 0 END) AS follow_ups,
+            (SELECT kind FROM outreach_events
+              WHERE lead_id = @id AND channel = 'whatsapp' AND confirmed_sent_at IS NOT NULL
+              ORDER BY confirmed_sent_at DESC, id DESC LIMIT 1) AS last_kind,
+            (SELECT COUNT(*) FROM replies WHERE lead_id = @id) AS replies
        FROM outreach_events
-      WHERE lead_id = ? AND channel = 'whatsapp' AND confirmed_sent_at IS NOT NULL`
-  ).get(leadId);
+      WHERE lead_id = @id AND channel = 'whatsapp' AND confirmed_sent_at IS NOT NULL`
+  ).get({ id: leadId });
 }
 
 /** followUpState for one lead, reading its history. */
@@ -95,6 +109,7 @@ export function dueFollowUps({ now = new Date(), rules = followUpRules() } = {})
        JOIN outreach_events oe
          ON oe.lead_id = l.id AND oe.channel = 'whatsapp' AND oe.confirmed_sent_at IS NOT NULL
       WHERE l.status = 'sent' AND l.opted_out = 0 AND COALESCE(l.has_website, 0) != 1
+        AND NOT EXISTS (SELECT 1 FROM replies r WHERE r.lead_id = l.id)
       GROUP BY l.id`
   ).all();
   return rows
@@ -113,6 +128,7 @@ export function notDueReason(f) {
     const day = new Date(f.at).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
     return `Their next follow-up is due on ${day}.`;
   }
+  if (f.state === 'disabled') return 'Follow-ups are turned off in Settings.';
   return 'They have replied, or are marked won, lost or not to be contacted, so no follow-up is due.';
 }
 

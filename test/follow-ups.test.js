@@ -213,3 +213,62 @@ test('both follow-up messages are shipped and seeded', async () => {
   assert.ok(names.includes('Follow-up — WhatsApp'));
   assert.ok(names.includes('Follow-up 2 — WhatsApp'));
 });
+
+test('a reply stops them even when the lead is put back to "awaiting reply"', async () => {
+  const l = await messaged('Put Back Ltd', '07700 950013', 1);
+  await post('/api/replies/whatsapp-paste', {
+    text: '[10:00, 18/06/2025] +44 7700 950013: How much would it be?', lead_id: l.id,
+  });
+  assert.equal((await patch(`/api/leads/${l.id}`, { status: 'sent' })).status, 200);
+  backdate(l.id, 5);
+  const lead = await leadOf(l.id);
+  assert.equal(lead.follow_up_due, false);
+  assert.equal(lead.follow_up, null);
+  assert.ok(!(await get('/api/leads/follow-ups')).body.due.some((d) => d.id === l.id), 'not in the count');
+  const prep = await post('/api/outreach/prepare', { lead_id: l.id, channel: 'whatsapp', text: 'Hi', follow_up: true });
+  assert.equal(prep.status, 422);
+});
+
+test('two follow-ups made ready for one gap: only the first to go is recorded', async () => {
+  const l = await messaged('Double Ready Ltd', '07700 950014', 3);
+  const draft = (await post(`/api/leads/${l.id}/follow-up`, { origin: ORIGIN })).body;
+  const one = await post('/api/outreach/prepare', { lead_id: l.id, channel: 'whatsapp', text: draft.text, follow_up: true });
+  const two = await post('/api/outreach/prepare', { lead_id: l.id, channel: 'whatsapp', text: draft.text, follow_up: true });
+  assert.equal((await post(`/api/outreach/${one.body.event_id}/sent`, {})).status, 200);
+  const late = await post(`/api/outreach/${two.body.event_id}/sent`, {});
+  assert.equal(late.status, 409, 'a stale "WhatsApp opened" is not a second follow-up');
+  assert.equal(late.body.code, 'NOT_DUE');
+  const lead = await leadOf(l.id);
+  assert.equal(lead.follow_ups_sent, 1);
+  assert.equal(lead.last_whatsapp_kind, 'follow_up');
+  assert.equal(db.prepare('SELECT confirmed_sent_at FROM outreach_events WHERE id = ?').get(two.body.event_id).confirmed_sent_at, null);
+});
+
+test('the words recorded are the words sent, after an edit', async () => {
+  const l = await messaged('Edited Words Ltd', '07700 950015', 3);
+  const draft = (await post(`/api/leads/${l.id}/follow-up`, { origin: ORIGIN })).body;
+  const prep = await post('/api/outreach/prepare', { lead_id: l.id, channel: 'whatsapp', text: draft.text, follow_up: true });
+  await post(`/api/outreach/${prep.body.event_id}/sent`, { text: 'Edited: here is your mock up' });
+  assert.equal(db.prepare('SELECT body_snapshot FROM outreach_events WHERE id = ?').get(prep.body.event_id).body_snapshot,
+    'Edited: here is your mock up');
+});
+
+test('with follow-ups turned off, the reason says so', async () => {
+  const l = await messaged('Switched Off Ltd', '07700 950016', 4);
+  await put('/api/settings', { followup_max: '0' });
+  const r = await post(`/api/leads/${l.id}/follow-up`, { origin: ORIGIN });
+  assert.equal(r.status, 422);
+  assert.match(r.body.error, /turned off in Settings/);
+  await put('/api/settings', { followup_max: '2' });
+});
+
+test('a due follow-up on a lead whose owner left the team counts for everyone', async () => {
+  const l = await messaged('Orphaned Owner Ltd', '07700 950017', 4);
+  const colleague = await post('/api/auth/users', { name: 'Gone Rep', email: 'gone@test.example', password: 'test-pass-123' });
+  const gone = colleague.body.user?.id ?? db.prepare("SELECT id FROM users WHERE email = 'gone@test.example'").get().id;
+  db.prepare('UPDATE leads SET assigned_to = ? WHERE id = ?').run(gone, l.id);
+  const before = (await get('/api/leads/follow-ups')).body;
+  db.prepare('UPDATE users SET active = 0 WHERE id = ?').run(gone);
+  const after = (await get('/api/leads/follow-ups')).body;
+  assert.equal(after.mine, before.mine + 1, 'shown under Unassigned, so counted as nobody’s');
+});

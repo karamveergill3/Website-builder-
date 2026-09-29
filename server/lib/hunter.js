@@ -740,13 +740,6 @@ async function confirmAndImportPlaceLead(row, trade, area, seen, {
   }
   if (!sameFirm(auto, row, area)) return { filed: false, reason: 'elsewhere' };
 
-  // Only now is it known which company this listing is, and so how old it is.
-  // Asked before the website check, which is slow, and would be spent on a
-  // company the rep has already said they don't want.
-  if (!fitsCompanyAge(auto.date_of_creation, companyAge)) {
-    return { filed: false, reason: 'age', incorporated_on: auto.date_of_creation ?? null };
-  }
-
   const number = String(auto.company_number ?? '').trim().toUpperCase();
   if (!number) return { filed: false, reason: 'unconfirmed' };
   if (seen.has(number)) return { filed: false, reason: 'known' };
@@ -755,6 +748,15 @@ async function confirmAndImportPlaceLead(row, trade, area, seen, {
   }
   if (db.prepare('SELECT 1 FROM company_ledger WHERE company_number = ?').get(auto.company_number)) {
     return { filed: false, reason: 'known' };
+  }
+
+  // Only now is it known which company this listing is, and so how old it is.
+  // After the "already have them" checks, as everywhere else, so one we hold
+  // is counted as known rather than as the wrong age; before the website
+  // check, which is slow, and would be spent on a company the rep has already
+  // said they don't want.
+  if (!fitsCompanyAge(auto.date_of_creation, companyAge)) {
+    return { filed: false, reason: 'age', incorporated_on: auto.date_of_creation ?? null };
   }
 
   // Last, because it is the slow one: Google shows no website, but does the

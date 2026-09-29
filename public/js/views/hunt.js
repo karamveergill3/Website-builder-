@@ -86,9 +86,10 @@ export default async function huntView(root, _p, { refresh }) {
         + `and stopped, with ${areasLeft.toLocaleString()} combinations still to try. `
         + 'Raise “Google searches, max” below and run again (1,000 free a month, '
         + 'then about 3p each).';
-    } else if (biggest && biggest.label === AGE_DROP && biggest.n >= last.found) {
+    } else if (biggest && biggest.label === AGE_DROP && biggest.n >= last.found && c.companyAge !== 'any') {
       // Ahead of the phone explanations: an age was chosen on purpose, and
-      // when it is what removed the most, it is the thing to say.
+      // when it is what removed the most, it is the thing to say. Not once
+      // "Any age" is chosen: that is the advice, already taken.
       shortReason = `Most were outside the age you chose (${biggest.n.toLocaleString()}). `
         + `${c.companyAge === 'new'
           ? 'Newly registered companies are a small share of the register, and sole traders are left out too. '
@@ -526,7 +527,11 @@ export default async function huntView(root, _p, { refresh }) {
               <span class="meta">— showing ${results.companies.length}</span></h3>
             <button class="primary" data-act="find-add" disabled>Add selected</button>
           </div>
-          ${fresh.length === 0 ? html`
+          ${results.companies.length === 0 ? html`
+            <div class="blank"><strong>Nothing found</strong>
+              Try another town, a different trade${results.company_age && results.company_age !== 'any'
+                ? ', or any age' : ''}.</div>`
+          : fresh.length === 0 ? html`
             <div class="blank"><strong>All of these are already leads</strong>
               Try another town, or a different trade.</div>` : html`
             <div class="scroll-x"><table class="rows">

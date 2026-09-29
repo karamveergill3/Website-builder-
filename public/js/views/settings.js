@@ -88,6 +88,28 @@ export default async function settingsView(root, _p, { refresh }) {
       </div>
 
       <div class="panel">
+        <div class="panel-hd"><h3>WhatsApp follow-ups</h3></div>
+        <div class="panel-bd">
+          <div class="cols-3">
+            <div class="f">
+              <label for="s-followup_days">Every (days)</label>
+              <input id="s-followup_days" name="followup_days" type="number" min="1" max="30"
+                     value="${s.followup_days ?? 3}">
+            </div>
+            <div class="f">
+              <label for="s-followup_max">At most</label>
+              <input id="s-followup_max" name="followup_max" type="number" min="0" max="10"
+                     value="${s.followup_max ?? 2}">
+            </div>
+          </div>
+          <p class="tip">Someone who hasn't answered comes due a follow-up this many days after your
+            last message, shown on Sent via WhatsApp. The first carries a mock up of their site,
+            built for them; the next checks they saw it. After the most you set they're left
+            alone. 0 turns follow-ups off. Nothing is sent for you: you send each one.</p>
+        </div>
+      </div>
+
+      <div class="panel">
         <div class="panel-hd"><h3>Search</h3></div>
         <div class="panel-bd">
           <div class="cols">

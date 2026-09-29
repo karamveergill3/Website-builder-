@@ -35,6 +35,8 @@ function fill(str, lead, me = {}) {
   const ctx = {
     trade_pitch: samplePitch.pitch ?? '',
     trade_close: samplePitch.close ?? '',
+    // A follow-up's link to the mock up built for them; a made-up one here.
+    mockup_link: `${location.origin}/m/0f3a9c…/`,
     business: lead.business_name, category: lead.category, location: lead.location,
     phone: lead.phone, email: lead.email,
     first_name: String(lead.business_name).split(/\s+/)[0],
@@ -93,6 +95,7 @@ async function openEditor(t, me = {}) {
           <code>{{about_line}}</code> <code>{{editorial_summary}}</code>.
           Written for their kind of business: <code>{{trade_pitch}}</code> (what their customers
           want, and what we build for it) and <code>{{trade_close}}</code> (a sign-off to suit).
+          In a follow-up: <code>{{mockup_link}}</code>, the link to the mock up built for them.
           Stats to cite: <code>{{boost_search_share}}</code>
           <code>{{boost_credibility}}</code> <code>{{boost_lost_enquiries}}</code>
           <code>{{boost_enquiries_range}}</code>.

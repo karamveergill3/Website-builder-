@@ -66,6 +66,7 @@ export const ALL_PLACEHOLDERS = [
   'primary_type',
   'trade_pitch',
   'trade_close',
+  'mockup_link',
   ...STAT_PLACEHOLDER_NAMES,
   ...SENDER_PLACEHOLDERS,
 ];
@@ -121,6 +122,9 @@ export function leadContext(lead = {}) {
       : '',
     trade_pitch: pitch.pitch,
     trade_close: pitch.close,
+    // The link to a mock up of their site, for a follow-up. Filled in only
+    // when one is built and a follow-up is being written (lib/follow-ups.js).
+    mockup_link: lead.mockup_link ?? '',
     ...STAT_PLACEHOLDERS,
   };
 }

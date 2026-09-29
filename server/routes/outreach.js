@@ -11,7 +11,7 @@
 
 import { Router } from 'express';
 import { db } from '../db.js';
-import { wrap, badRequest, notFound, nowIso, requiredStr } from '../lib/http.js';
+import { wrap, badRequest, notFound, nowIso, requiredStr, int } from '../lib/http.js';
 import { sendability } from '../lib/pecr.js';
 import { recontactCheck, recordContact } from '../lib/recontact.js';
 import { isSuppressed } from '../lib/suppression.js';
@@ -19,6 +19,8 @@ import { discover, signalsForLead, promoteSignal, recentFinds, autoPromote } fro
 import { handoff } from '../lib/handoff.js';
 import { renderTemplate } from '../lib/template.js';
 import { leadVoice } from '../lib/auth.js';
+import { followUpFor, notDueReason } from '../lib/follow-ups.js';
+import { ensureMockup } from '../lib/mockups.js';
 
 const router = Router();
 
@@ -203,12 +205,32 @@ router.post('/outreach/prepare', wrap((req, res) => {
     });
   }
 
+  // A follow-up to someone who hasn't answered: the one kind of second
+  // WhatsApp allowed, and only when it is due (lib/follow-ups.js), so it can't
+  // become a way round the rule below. It still has to pass the PECR check
+  // above, and it still counts on the company's record when it goes.
+  const followUp = req.body?.follow_up === true;
+  let mockupId = null;
+  if (followUp) {
+    if (channel !== 'whatsapp') throw badRequest('Follow-ups go by WhatsApp.');
+    const f = followUpFor(lead);
+    if (!f?.due) {
+      return res.status(422).json({ error: notDueReason(f), code: 'NOT_DUE', channel, follow_up: f });
+    }
+    mockupId = int(req.body?.mockup_id);
+    if (mockupId && !db.prepare('SELECT 1 FROM mockups WHERE id = ? AND lead_id = ?').get(mockupId, leadId)) {
+      throw badRequest('That mock up is not one of this business’s.');
+    }
+  }
+
   // Whether this company has been approached before, on ANY channel. Until
   // now this endpoint had exactly one gate — the PECR check above — which
   // asks whether we may lawfully contact this business at all, never whether
   // we already have. So the same roofer could be handed a fresh WhatsApp
   // link every morning, and an email yesterday placed no obstacle at all.
-  const again = recontactCheck(lead, { allowRepeat: Boolean(req.body?.allow_repeat) });
+  const again = followUp
+    ? { allowed: true, code: 'FOLLOW_UP' }
+    : recontactCheck(lead, { allowRepeat: Boolean(req.body?.allow_repeat) });
   if (!again.allowed) {
     return res.status(422).json({
       error: again.reason,
@@ -244,7 +266,14 @@ router.post('/outreach/prepare', wrap((req, res) => {
     if (!text) throw badRequest('Message body is empty.');
   }
 
-  const link = handoff({ channel, phone: lead.phone, text });
+  // A follow-up goes to the chat the first message went to, even if the
+  // lead's number has changed since.
+  const sentTo = followUp ? db.prepare(
+    `SELECT recipient FROM outreach_events
+      WHERE lead_id = ? AND channel = 'whatsapp' AND confirmed_sent_at IS NOT NULL
+      ORDER BY confirmed_sent_at DESC, id DESC LIMIT 1`
+  ).get(leadId)?.recipient : null;
+  const link = handoff({ channel, phone: sentTo || lead.phone, text });
   if (!link.ok) {
     return res.status(422).json({
       error: `Cannot build a ${channel} link: ${link.reason}`,
@@ -256,9 +285,12 @@ router.post('/outreach/prepare', wrap((req, res) => {
   // Log the prepare so recent activity shows what was queued.
   const info = db.prepare(
     `INSERT INTO outreach_events
-       (lead_id, template_id, lead_name, channel, recipient, body_snapshot, prepared_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(leadId, templateId, lead.business_name, channel, link.e164, text, nowIso());
+       (lead_id, template_id, lead_name, channel, recipient, body_snapshot, prepared_at, kind, mockup_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    leadId, templateId, lead.business_name, channel, link.e164, text, nowIso(),
+    followUp ? 'follow_up' : 'first', mockupId,
+  );
 
   res.json({
     event_id: info.lastInsertRowid,
@@ -286,12 +318,27 @@ router.post('/outreach/:id/sent', wrap((req, res) => {
   if (row.confirmed_sent_at) return res.json({ ok: true, confirmed_sent_at: row.confirmed_sent_at });
   const now = nowIso();
   db.prepare('UPDATE outreach_events SET confirmed_sent_at = ? WHERE id = ?').run(now, id);
+  // The words as they went, when they were edited after the link was made
+  // (the follow-up box can be changed right up to the send).
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+  if (text && row.channel !== 'call') {
+    db.prepare('UPDATE outreach_events SET body_snapshot = ? WHERE id = ?').run(text, id);
+  }
   if (row.lead_id) {
     db.prepare(
       `UPDATE leads SET last_contacted_at = ?, status = CASE WHEN status = 'new' THEN 'sent' ELSE status END WHERE id = ?`
     ).run(now, row.lead_id);
     const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(row.lead_id);
     if (lead) recordContact(lead, row.channel, now);
+    // Their mock up, built now from what we know of them, so it is ready
+    // (and can be looked over) by the time a follow-up comes due. Never in
+    // the way of recording the send.
+    if (lead && row.channel === 'whatsapp' && row.kind !== 'follow_up') {
+      try { ensureMockup(lead); } catch (err) { console.warn(`[mockup] ${lead.id}: ${err.message}`); }
+    }
+    if (row.kind === 'follow_up' && row.mockup_id) {
+      db.prepare('UPDATE mockups SET sent_at = COALESCE(sent_at, ?) WHERE id = ?').run(now, row.mockup_id);
+    }
   }
   res.json({ ok: true, confirmed_sent_at: now });
 }));

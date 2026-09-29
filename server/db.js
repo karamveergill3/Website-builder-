@@ -1781,6 +1781,27 @@ Thanks so much, and have a lovely day.
       }
     },
   },
+  {
+    name: '065_whatsapp_follow_ups',
+    up: `
+      -- Which WhatsApps were follow-ups, so "due" can count them (a follow-up
+      -- goes every few days to someone who hasn't answered, up to a limit),
+      -- and which mock up a follow-up carried.
+      ALTER TABLE outreach_events ADD COLUMN kind TEXT NOT NULL DEFAULT 'first';
+      ALTER TABLE outreach_events ADD COLUMN mockup_id INTEGER REFERENCES mockups(id) ON DELETE SET NULL;
+    `,
+    run() {
+      // The two follow-up messages. Only these: a starter someone deleted on
+      // purpose is not brought back.
+      const now = new Date().toISOString();
+      for (const t of STARTERS.filter((x) => /^Follow-up( 2)? — WhatsApp$/.test(x.name))) {
+        db.prepare(
+          `INSERT INTO templates (name, subject, body, channel, created_at, updated_at)
+           SELECT ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM templates WHERE name = ?)`
+        ).run(t.name, t.subject, t.body, t.channel, now, now, t.name);
+      }
+    },
+  },
 ];
 
 function migrate() {

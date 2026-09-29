@@ -280,6 +280,37 @@ Would you like me to do that for you? No pressure at all.
   },
 
   {
+    name: 'Follow-up — WhatsApp',
+    channel: 'whatsapp',
+    subject: '',
+    // Sent a few days after the first message to someone who hasn't answered
+    // (lib/follow-ups.js). It shows them their own site rather than asking
+    // again whether they'd like one: {{mockup_link}} is a mock up built from
+    // their name, trade and town.
+    body: `Hi, it's {{my_name}} from {{my_business}} again. I went ahead and made a free mock up of a website for {{business}}, so you can see how it could look:
+
+{{mockup_link}}
+
+It's yours to look at, with no cost and no obligation. If you like it, I can change anything you want and get it live for you. No pressure at all.
+
+{{my_name}}, {{my_business}}`,
+  },
+
+  {
+    name: 'Follow-up 2 — WhatsApp',
+    channel: 'whatsapp',
+    subject: '',
+    // Every follow-up after the first: a short check they saw the mock up.
+    body: `Hi, {{my_name}} here from {{my_business}}. Just checking you saw the mock up I made for {{business}}:
+
+{{mockup_link}}
+
+Happy to change anything on it, or to leave it there if it's not for you. No pressure at all.
+
+{{my_name}}, {{my_business}}`,
+  },
+
+  {
     name: 'First message — SMS',
     channel: 'sms',
     subject: '',

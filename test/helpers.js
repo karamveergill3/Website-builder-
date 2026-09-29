@@ -8,6 +8,8 @@ import { join } from 'node:path';
  */
 const dir = mkdtempSync(join(tmpdir(), 'prospect-book-test-'));
 process.env.DB_PATH = join(dir, 'test.db');
+// Mock ups built in a test go beside its database, not among the real ones.
+process.env.MOCKUP_DIR = join(dir, 'mockups');
 process.env.NODE_ENV = 'test';
 
 const { app } = await import('../server/index.js');

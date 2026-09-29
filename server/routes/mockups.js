@@ -20,8 +20,6 @@
  */
 
 import { Router } from 'express';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { db } from '../db.js';
 import { wrap, badRequest, notFound, conflict, nowIso, str, int } from '../lib/http.js';
 import {
@@ -34,8 +32,9 @@ import {
 import { getUserById } from '../lib/auth.js';
 import { sendingDomain } from '../lib/sending-policy.js';
 import { looksLikeEmail } from '../lib/http.js';
-import { renderSite, writeSite, newToken, PAGES, SINGLE_PAGE } from '../lib/site-builder.js';
-import { briefForBuild, CTAS, extractByRules } from '../lib/brief.js';
+import { PAGES, SINGLE_PAGE } from '../lib/site-builder.js';
+import { MOCKUP_ROOT, buildMockup } from '../lib/mockups.js';
+import { CTAS, extractByRules } from '../lib/brief.js';
 import { available as ollamaAvailable, model as ollamaModel } from '../lib/ollama.js';
 import { getSetting, getSettings } from '../db.js';
 import { draftReply, classifyReply } from '../lib/reply-draft.js';
@@ -120,8 +119,8 @@ function optOut(lead) {
   recordContact(lead, 'opted out');
 }
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-export const MOCKUP_ROOT = resolve(__dirname, '..', '..', 'data', 'mockups');
+// Where mock ups are written; the build itself lives in lib/mockups.js.
+export { MOCKUP_ROOT };
 
 const router = Router();
 
@@ -727,41 +726,14 @@ router.post('/mockups', wrap((req, res) => {
   // A mockup can be built with no brief at all — from the lead alone. It is
   // more generic, but "no reply yet" should not block making something to
   // show them.
-  const brief = briefRow
-    ? briefForBuild(briefToApi(briefRow), lead)
-    : briefForBuild({ services: [], areas: [] }, lead);
-
-  const token = newToken();
-  const studio = getSetting('biz_name', 'this studio');
   // One page unless the caller explicitly asks for the four-file build.
   const layout = req.body?.pages === 'multi' ? 'multi' : 'single';
-  const files = renderSite(brief, {
-    draftNote: `Draft mockup for ${brief.business_name} — prepared by ${studio}`,
-    pages: layout,
-  });
-
-  let error = null;
-  try {
-    writeSite(MOCKUP_ROOT, token, files);
-  } catch (err) {
-    error = err.message;
-  }
-  if (error) throw new Error(`Could not write the mockup: ${error}`);
-
-  const info = db.prepare(
-    `INSERT INTO mockups
-       (lead_id, brief_id, token, business_name, trade, pages, palette, generated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    lead.id, briefRow?.id ?? null, token, lead.business_name,
-    brief.trade ?? lead.category ?? null,
-    JSON.stringify(layout === 'multi' ? PAGES : SINGLE_PAGE),
-    JSON.stringify(brief.brand_colours ?? []), nowIso()
-  );
+  const made = buildMockup({ lead, briefRow: briefRow ?? null, layout });
+  const { token, brief } = made;
 
   res.status(201).json({
     mockup: {
-      id: Number(info.lastInsertRowid),
+      id: made.id,
       token,
       url: `/m/${token}/`,
       pages: layout === 'multi' ? PAGES : SINGLE_PAGE,

@@ -240,9 +240,15 @@ export function listReplies({ limit = 50, leadId = null, unreadOnly = false } = 
        LEFT JOIN leads   l ON l.id = r.lead_id
        LEFT JOIN briefs  b ON b.reply_id = r.id
        -- The latest mock up only: a rebuild adds a row, and a plain join
-       -- listed the reply once per build.
-       LEFT JOIN mockups m ON m.id = (SELECT m2.id FROM mockups m2 WHERE m2.brief_id = b.id
-                                        ORDER BY m2.generated_at DESC, m2.id DESC LIMIT 1)
+       -- listed the reply once per build. Built from this reply, or failing
+       -- that the one built for them before they replied (a follow-up's),
+       -- so it shows here rather than being built a second time.
+       LEFT JOIN mockups m ON m.id = COALESCE(
+         (SELECT m2.id FROM mockups m2 WHERE m2.brief_id = b.id
+           ORDER BY m2.generated_at DESC, m2.id DESC LIMIT 1),
+         (SELECT m3.id FROM mockups m3 WHERE m3.lead_id = r.lead_id AND m3.brief_id IS NULL
+             AND m3.error IS NULL
+           ORDER BY m3.generated_at DESC, m3.id DESC LIMIT 1))
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY r.received_at DESC
       LIMIT ?`

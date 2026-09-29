@@ -50,6 +50,8 @@ export const api = {
     consent:    (id, note)    => request('POST', `/api/leads/${id}/consent`, { consent: true, note }),
     unconsent:  (id)          => request('POST', `/api/leads/${id}/consent`, { consent: false }),
     callOutcome:(id, body)    => request('POST', `/api/leads/${id}/call-outcome`, body),
+    followUps:  ()            => request('GET', '/api/leads/follow-ups'),
+    followUp:   (id, origin)  => request('POST', `/api/leads/${id}/follow-up`, { origin }),
   },
   templates: {
     list:   ()          => request('GET', '/api/templates'),
@@ -78,7 +80,7 @@ export const api = {
   },
   outreach: {
     prepare: (body)    => request('POST', '/api/outreach/prepare', body),
-    sent:    (eventId) => request('POST', `/api/outreach/${eventId}/sent`, {}),
+    sent:    (eventId, text) => request('POST', `/api/outreach/${eventId}/sent`, text ? { text } : {}),
     list:    (params)  => request('GET',  '/api/outreach' + qs(params)),
   },
   invoices: {

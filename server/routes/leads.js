@@ -9,6 +9,12 @@ import {
   recordContact, recordFound, recontactCheck, ledgerFor, companyKey, nameKey,
 } from '../lib/recontact.js';
 import { sectorFor, sectorLabel } from '../lib/sectors.js';
+import {
+  followUpFor, dueFollowUps, notDueReason, followUpTemplate, followUpRules,
+} from '../lib/follow-ups.js';
+import { ensureMockup, latestMockup, mockupLink } from '../lib/mockups.js';
+import { renderTemplate } from '../lib/template.js';
+import { leadVoice } from '../lib/auth.js';
 
 export const STATUSES = ['new', 'sent', 'replied', 'won', 'lost'];
 
@@ -96,6 +102,18 @@ function toApi(row) {
     ...(() => {
       const wa = lastWhatsApp(row.id);
       return { whatsapp_sent_at: wa?.at ?? null, whatsapp_to: wa?.recipient ?? null };
+    })(),
+    // Where their WhatsApp follow-ups stand (due now, due on a day, done),
+    // and the mock up built for them, which the first follow-up carries.
+    ...(() => {
+      const f = followUpFor(row);
+      const m = latestMockup(row.id);
+      return {
+        follow_up: f && f.state !== 'off'
+          ? { state: f.state, at: f.at, sent: f.sent, left: f.left, step: f.step } : null,
+        follow_up_due: Boolean(f?.due),
+        mockup_token: m?.token ?? null,
+      };
     })(),
     // What they said last, so it can be answered from the list.
     ...(() => {
@@ -321,6 +339,21 @@ function contactedElsewhere(lead, at) {
     : null;
 }
 
+/**
+ * GET /api/leads/follow-ups — the WhatsApp follow-ups due now: how many in
+ * all, and how many are yours (your leads, and nobody's), for the count on
+ * the WhatsApp tab.
+ */
+router.get('/follow-ups', wrap((req, res) => {
+  const due = dueFollowUps();
+  const me = req.user?.id ?? null;
+  res.json({
+    count: due.length,
+    mine: due.filter((d) => d.assigned_to === me || d.assigned_to === null).length,
+    due,
+  });
+}));
+
 router.get('/:id', wrap((req, res) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
   if (!lead) throw notFound('Lead not found');
@@ -341,6 +374,36 @@ router.get('/:id', wrap((req, res) => {
  * recorded it and when, so it can be shown and proven. Pass consent:false to
  * withdraw it (they changed their mind).
  */
+/**
+ * POST /api/leads/:id/follow-up { origin } — the follow-up, written and ready.
+ *
+ * Builds their mock up if it isn't built yet (from their name, trade and
+ * town), and fills in the follow-up message with its link: the first
+ * follow-up shows them the site, a later one checks they saw it. Nothing is
+ * sent: the screen opens WhatsApp with it, as for a first message, and
+ * records it through /api/outreach/prepare with follow_up: true.
+ */
+router.post('/:id/follow-up', wrap((req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+  if (!lead) throw notFound('Lead not found');
+  const f = followUpFor(lead);
+  if (!f?.due) {
+    return res.status(422).json({ error: notDueReason(f), code: 'NOT_DUE', follow_up: f });
+  }
+  const mockup = ensureMockup(lead);
+  const link = mockupLink(str(req.body?.origin), mockup.token);
+  const template = followUpTemplate(f.step);
+  if (!template) throw notFound('The follow-up message is missing: restore it on the Templates screen.');
+  const { body } = renderTemplate(template, { ...lead, mockup_link: link }, undefined, leadVoice(lead, req.user));
+  res.json({
+    follow_up: { state: f.state, at: f.at, sent: f.sent, left: f.left, step: f.step },
+    days: followUpRules().days,
+    template_name: template.name,
+    text: body,
+    mockup: { id: mockup.id, token: mockup.token, url: `/m/${mockup.token}/`, link, built: mockup.built },
+  });
+}));
+
 router.post('/:id/consent', wrap((req, res) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
   if (!lead) throw notFound('Lead not found');

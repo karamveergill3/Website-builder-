@@ -72,7 +72,31 @@ export async function updateRepliesBadge(count = null) {
   badge.textContent = n > 99 ? '99+' : String(n);
   badge.title = `${n} new repl${n === 1 ? 'y' : 'ies'}`;
 }
-setInterval(() => { if (document.visibilityState === 'visible') updateRepliesBadge(); }, 2 * 60 * 1000);
+
+/**
+ * How many of your WhatsApp follow-ups are due (your leads and nobody's), on
+ * the Sent via WhatsApp tab, so someone who didn't answer isn't forgotten.
+ */
+export async function updateFollowUpBadge() {
+  const link = document.querySelector('#nav a[href="#/whatsapp"]');
+  if (!link) return;
+  let n;
+  try { n = (await api.leads.followUps()).mine ?? 0; } catch { return; }
+  let badge = link.querySelector('.nav-badge');
+  if (!n) { badge?.remove(); return; }
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.className = 'nav-badge';
+    link.append(badge);
+  }
+  badge.textContent = n > 99 ? '99+' : String(n);
+  badge.title = `${n} follow-up${n === 1 ? '' : 's'} due`;
+}
+setInterval(() => {
+  if (document.visibilityState !== 'visible') return;
+  updateRepliesBadge();
+  updateFollowUpBadge();
+}, 2 * 60 * 1000);
 
 export function navigate(to) {
   if (location.hash === `#${to}`) return refresh();
@@ -110,6 +134,7 @@ async function route() {
   try {
     await render(el, params, { refresh, navigate });
     if (path !== '/replies') updateRepliesBadge();
+    updateFollowUpBadge();
   } catch (err) {
     // A session that lapsed mid-use: drop straight to the login rather than
     // showing a confusing error on a screen the viewer is no longer allowed.

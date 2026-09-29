@@ -53,6 +53,9 @@ export const ALLOWED_KEYS = new Set([
   // stored intro + numbered questions + outro so the wording travels
   // with the studio, not with one browser.
   'phase2_questions_json',
+  // WhatsApp follow-ups: how many days after the last message one comes due,
+  // and how many at most before a lead that never answered is left alone.
+  'followup_days', 'followup_max',
 ]);
 
 export const DEFAULTS = {
@@ -135,6 +138,10 @@ export const DEFAULTS = {
   optout_line: DEFAULT_OPTOUT_LINE,
   marketing_line: DEFAULT_MARKETING_LINE,
   source_line: DEFAULT_SOURCE_LINE,
+  // A follow-up every 3 days, twice: the first carries their mock up, the
+  // second checks they saw it. After that they are left alone.
+  followup_days: '3',
+  followup_max: '2',
 };
 
 /** Secrets live in the settings table but are never exposed through this API. */
@@ -201,6 +208,8 @@ router.put('/', wrap((req, res) => {
     ['hunt_max_places_requests', 1, 500],
     ['hunt_max_register_pages', 1, 200],
     ['hunt_max_per_trade', 1, 50],
+    ['followup_days', 1, 30],
+    ['followup_max', 0, 10],
   ]) {
     if (body[key] === undefined) continue;
     const raw = String(body[key]).trim();

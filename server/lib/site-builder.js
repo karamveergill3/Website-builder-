@@ -1721,7 +1721,13 @@ function page({ title, brief, palette, theme, current, body, draftNote, single =
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${single ? esc(b.business_name) : `${esc(title)} — ${esc(b.business_name)}`}</title>
-<meta name="description" content="${esc(subhead(b)).slice(0, 155)}">
+<meta name="description" content="${esc(String(subhead(b)).slice(0, 155))}">
+<!-- What WhatsApp shows under the link when a follow-up carries it: their
+     name and what they do, not a bare address. -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="${esc(b.business_name)}">
+<meta property="og:description" content="${esc(String(subhead(b)).slice(0, 155))}">
+<meta property="og:site_name" content="${esc(b.business_name)}">
 <meta name="robots" content="noindex,nofollow">
 <meta name="color-scheme" content="light dark">
 <!-- A real favicon, not the browser's default document glyph. WEB-CRAFT.md

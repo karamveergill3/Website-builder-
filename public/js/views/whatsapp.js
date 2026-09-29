@@ -20,12 +20,22 @@ import {
 import { openLeadForm } from './leads.js';
 import { copy, waLink, runDraftAction, fetchDraft, showReplyDraft, kindPicker } from './reply-draft.js';
 import { inApp, onWeb } from '../wa-link.js';
+import { openFollowUp, dueDay } from './follow-up.js';
 
 /** What can happen after a WhatsApp goes out. */
 const AFTER = ['sent', 'replied', 'won', 'lost'];
 const label = (s) => (s === 'sent' ? 'awaiting reply' : s);
-/** Within a column: the ones to answer first, then those waiting, then won. */
-const ORDER = { replied: 0, new: 1, sent: 2, won: 3, lost: 4 };
+/**
+ * Within a column: the ones to answer first, then follow-ups due, then those
+ * waiting, then won.
+ */
+const ORDER = { replied: 0, new: 2, sent: 2, won: 3, lost: 4 };
+const rank = (l) => (l.follow_up_due ? 1 : ORDER[l.status] ?? 9);
+
+/** "Thu 2 Oct": when the next follow-up comes due, short enough for a card. */
+const shortDay = (iso) => new Date(iso).toLocaleDateString('en-GB', {
+  weekday: 'short', day: 'numeric', month: 'short',
+});
 
 /** "+447700900123" as a UK reader writes it: "07700 900123". */
 const ukNumber = (v) => {
@@ -51,6 +61,7 @@ export default async function whatsappView(root, params, { refresh }) {
   const tab = params.tab === 'archive' ? 'archive' : 'active';
   const q = params.q ?? '';
   const due = params.due === '1';
+  const fu = params.fu === '1';
 
   const [{ leads: all }, stats, rosterRes, meRes] = await Promise.all([
     api.leads.list({ q, sort: 'whatsapp', limit: 1000, pile: 'whatsapp' }),
@@ -66,8 +77,10 @@ export default async function whatsappView(root, params, { refresh }) {
   const archived = all.filter((l) => l.status === 'lost');
   const active = all.filter((l) => l.status !== 'lost');
   const dueCount = active.filter((l) => l.callback_due).length;
+  const fuCount = active.filter((l) => l.follow_up_due).length;
   let shown = tab === 'archive' ? archived : active;
   if (due && tab === 'active') shown = shown.filter((l) => l.callback_due);
+  if (fu && tab === 'active') shown = shown.filter((l) => l.follow_up_due);
 
   // One column per person on the team, and one for anyone nobody owns.
   const columns = team.map((u) => ({
@@ -78,12 +91,12 @@ export default async function whatsappView(root, params, { refresh }) {
   const orphans = shown.filter((l) => !team.some((u) => u.id === l.assigned_to));
   if (orphans.length || !columns.length) columns.push({ id: null, title: 'Unassigned', leads: orphans });
   for (const c of columns) {
-    c.leads.sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9)
+    c.leads.sort((a, b) => rank(a) - rank(b)
       || String(b.whatsapp_sent_at ?? '').localeCompare(String(a.whatsapp_sent_at ?? '')));
   }
 
   const go = (key, value) => {
-    const next = new URLSearchParams({ tab, q, due: due ? '1' : '' });
+    const next = new URLSearchParams({ tab, q, due: due ? '1' : '', fu: fu ? '1' : '' });
     if (!value || value === 'active') next.delete(key); else next.set(key, value);
     for (const [k, v] of [...next]) if (!v) next.delete(k);
     const s = next.toString();
@@ -114,13 +127,26 @@ export default async function whatsappView(root, params, { refresh }) {
           <span class="meta">· messaged ${l.whatsapp_sent_at ? relative(l.whatsapp_sent_at) : '—'}</span>
           ${l.next_call_at ? html`<span class="flag" title="Call-back arranged">call back ${relative(l.next_call_at)}</span>` : ''}
         </div>
+        ${tab !== 'archive' && (l.follow_up || l.mockup_token) ? html`
+          <div class="wa-card-fu">
+            ${l.follow_up?.state === 'due' ? html`<span class="flag" data-warn
+                title="They haven't answered: a follow-up with their mock up is ready to send">follow-up due</span>`
+              : l.follow_up?.state === 'waiting' ? html`<span class="meta" title="${dueDay(l.follow_up.at)}">next follow-up ${
+                shortDay(l.follow_up.at)}</span>`
+              : l.follow_up?.state === 'done' ? html`<span class="meta">follow-ups done</span>` : ''}
+            ${l.mockup_token ? html`<a href="/m/${l.mockup_token}/" target="_blank" rel="noopener"
+              title="The mock up of their site that the follow-up carries">their mock up ↗</a>` : ''}
+          </div>` : ''}
         <div class="wa-card-act">
           ${tab === 'archive' ? html`
             <button class="mini primary" data-act="restore" data-id="${l.id}" data-name="${l.business_name}"
               title="Put them back in the active columns, awaiting a reply">Restore</button>`
           : l.last_reply_id ? html`
             <button class="mini primary" data-act="draft" data-reply="${l.last_reply_id}"
-              title="Their last message, with your answer written">Answer them</button>` : html`
+              title="Their last message, with your answer written">Answer them</button>`
+          : l.follow_up_due ? html`
+            <button class="mini primary" data-act="follow-up" data-id="${l.id}" data-name="${l.business_name}"
+              title="Their follow-up, with a mock up of their site, ready to send">Send follow-up</button>` : html`
             <button class="mini primary" data-act="paste" data-id="${l.id}" data-name="${l.business_name}"
               title="They replied: paste what they sent and your answer is written">Paste their reply</button>`}
           <details class="more">
@@ -128,8 +154,10 @@ export default async function whatsappView(root, params, { refresh }) {
             <div class="more-menu">
               ${tab !== 'archive' && l.last_reply_id ? html`
                 <button type="button" class="mini" data-act="paste" data-id="${l.id}" data-name="${l.business_name}">Paste another reply</button>` : ''}
-              ${tab !== 'archive' ? html`
-                <button type="button" class="mini" data-act="reach" data-id="${l.id}">Follow up or call</button>` : ''}
+              ${tab !== 'archive' && !l.last_reply_id && l.follow_up_due ? html`
+                <button type="button" class="mini" data-act="paste" data-id="${l.id}" data-name="${l.business_name}">Paste their reply</button>` : ''}
+              ${tab !== 'archive' && ['replied', 'won'].includes(l.status) ? html`
+                <button type="button" class="mini" data-act="reach" data-id="${l.id}">Message or call them</button>` : ''}
               ${chat ? html`
                 <a class="btn mini" href="${onWeb(chat)}" target="_blank" rel="noopener">Open chat in WhatsApp Web</a>` : ''}
               ${others.map((u) => html`
@@ -140,7 +168,8 @@ export default async function whatsappView(root, params, { refresh }) {
               ${l.last_reply_id ? html`
                 <button type="button" class="mini" data-act="del-reply" data-reply="${l.last_reply_id}"
                   data-name="${l.business_name}">Delete their last reply</button>` : ''}
-              <button type="button" class="mini" data-act="unsend" data-id="${l.id}" data-name="${l.business_name}">It never sent</button>
+              <button type="button" class="mini" data-act="unsend" data-id="${l.id}" data-name="${l.business_name}"
+                data-fu="${l.follow_up?.sent ?? 0}">${l.follow_up?.sent ? 'The last follow-up never sent' : 'It never sent'}</button>
               <button type="button" class="mini danger" data-act="del" data-id="${l.id}" data-name="${l.business_name}">Delete</button>
             </div>
           </details>
@@ -180,8 +209,11 @@ export default async function whatsappView(root, params, { refresh }) {
         <button class="pill" data-tab="active" aria-pressed="${tab === 'active'}">Active <b>${active.length}</b></button>
         <button class="pill" data-tab="archive" aria-pressed="${tab === 'archive'}"
           title="Everyone marked lost">Archive <b>${archived.length}</b></button>
+        ${tab === 'active' && (fuCount || fu || dueCount || due) ? html`<span class="sep"></span>` : ''}
+        ${tab === 'active' && (fuCount || fu) ? html`
+          <button class="pill" data-act="fu" aria-pressed="${fu}"
+            title="No answer yet: their follow-up, with a mock up of their site, is ready">follow-ups due <b>${fuCount}</b></button>` : ''}
         ${tab === 'active' && (dueCount || due) ? html`
-          <span class="sep"></span>
           <button class="pill" data-act="due" aria-pressed="${due}"
             title="Call-backs you arranged that are now due">call-backs due <b>${dueCount}</b></button>` : ''}
       </div>
@@ -194,8 +226,8 @@ export default async function whatsappView(root, params, { refresh }) {
         ${tab === 'archive' ? html`
           <strong>${q ? 'Nothing matches' : 'The archive is empty'}</strong>
           ${q ? 'Try another search.' : 'Anyone you mark lost moves here.'}` : html`
-          <strong>${q || due ? 'Nothing matches' : 'Nobody messaged on WhatsApp yet'}</strong>
-          ${q || due ? 'Try another search.' : html`
+          <strong>${q || due || fu ? 'Nothing matches' : 'Nobody messaged on WhatsApp yet'}</strong>
+          ${q || due || fu ? 'Try another search.' : html`
             Send one from <b>Reach</b> on the <a href="#/leads">Leads</a> screen. Once you
             confirm it went, the lead moves over here.`}`}
       </div></div>` : html`
@@ -215,6 +247,14 @@ export default async function whatsappView(root, params, { refresh }) {
 
   on(root, 'click', '[data-tab]', (_e, el) => go('tab', el.dataset.tab));
   on(root, 'click', '[data-act="due"]', () => go('due', due ? '' : '1'));
+  on(root, 'click', '[data-act="fu"]', () => go('fu', fu ? '' : '1'));
+
+  on(root, 'click', '[data-act="follow-up"]', async (_e, el) => {
+    el.disabled = true;
+    const sent = await openFollowUp(el.dataset.id, el.dataset.name);
+    el.disabled = false;
+    if (sent) refresh();
+  });
 
   const search = $('#q', root);
   if (search) {
@@ -576,7 +616,15 @@ export default async function whatsappView(root, params, { refresh }) {
   });
 
   on(root, 'click', '[data-act="unsend"]', async (_e, el) => {
-    if (!await confirmDialog({
+    // After a follow-up, the latest WhatsApp is that follow-up: only it is
+    // taken back, and they stay here, due it again.
+    const followUp = Number(el.dataset.fu) > 0;
+    if (!await confirmDialog(followUp ? {
+      title: 'The follow-up never went?',
+      message: `Take the last follow-up to ${el.dataset.name} off the record, so it is due again. `
+        + 'Their first message stays on record.',
+      confirmLabel: 'Take it off',
+    } : {
       title: 'The WhatsApp never went?',
       message: `Put ${el.dataset.name} back on Leads, as not messaged. Only do this if the `
         + 'message really did not send, say the number isn’t on WhatsApp.',
@@ -584,7 +632,7 @@ export default async function whatsappView(root, params, { refresh }) {
     })) return;
     try {
       await api.post(`/api/leads/${el.dataset.id}/whatsapp-unsend`, {});
-      toast('Back on Leads');
+      toast(followUp ? 'Taken off: the follow-up is due again' : 'Back on Leads');
       refresh();
     } catch (err) {
       toast(err.message ?? 'Could not put it back', { error: true });

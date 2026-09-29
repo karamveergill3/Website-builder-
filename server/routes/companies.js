@@ -7,6 +7,7 @@ import {
 } from '../lib/companies-house.js';
 import { resolveTrade, tradeList } from '../lib/sic.js';
 import { recordFound } from '../lib/recontact.js';
+import { COMPANY_AGES, incorporatedRange } from '../../public/js/company-age.js';
 
 const router = Router();
 
@@ -209,8 +210,18 @@ router.post('/discover', wrap(async (req, res) => {
   const size = Math.min(Math.max(int(req.body.size, 100), 1), 500);
   const startIndex = Math.max(int(req.body.start_index, 0), 0);
 
+  // Newly registered or established only, the same line the daily hunt
+  // draws. Asked of the register itself here, so a page of results is a page
+  // of the companies wanted rather than a hundred to sift.
+  const companyAge = str(req.body.company_age) ?? 'any';
+  if (!COMPANY_AGES.includes(companyAge)) {
+    throw badRequest(`company_age must be one of: ${COMPANY_AGES.join(', ')}`);
+  }
+  const since = incorporatedRange(companyAge);
+
   const { total, items } = await advancedSearch({
     sicCodes: trade.codes.join(','), location, size, startIndex,
+    incorporatedFrom: since.from, incorporatedTo: since.to,
   });
 
   const known = new Set(
@@ -221,6 +232,7 @@ router.post('/discover', wrap(async (req, res) => {
   res.json({
     trade,
     location: location ?? null,
+    company_age: companyAge,
     total,
     start_index: startIndex,
     companies: items.map((c) => ({

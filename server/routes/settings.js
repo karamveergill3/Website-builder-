@@ -12,6 +12,7 @@ import {
   OPTIONAL_IDENTITY_FIELDS, DEFAULT_OPTOUT_LINE,
   DEFAULT_MARKETING_LINE, DEFAULT_SOURCE_LINE,
 } from '../lib/compliance.js';
+import { COMPANY_AGES } from '../../public/js/company-age.js';
 
 const router = Router();
 
@@ -37,6 +38,7 @@ export const ALLOWED_KEYS = new Set([
   'hunt_require_no_website', 'hunt_include_unlisted', 'hunt_require_phone',
   'hunt_require_mobile', 'hunt_include_places', 'hunt_messageable_only',
   'hunt_include_sole_traders', 'hunt_max_company_lookups', 'hunt_check_websites',
+  'hunt_company_age',
   // Lead search defaults (Phase 2)
   'default_areas', 'default_region_code',
   // Places pricing, so Google's repricing does not need a code change
@@ -131,6 +133,11 @@ export const DEFAULTS = {
   // one on the web (its name as a domain, then a search). Google's listing
   // alone missed sites the firm never linked from it.
   hunt_check_websites: '1',
+  // Which companies to find by age: 'any' (every age, as it always has),
+  // 'new' (incorporated under two years ago) or 'established' (two years or
+  // more). The line itself is drawn in public/js/company-age.js. Any age by
+  // default, because either of the others narrows who the hunt can find.
+  hunt_company_age: 'any',
   // Invoicing
   invoice_prefix: 'INV',
   invoice_terms: 'Payment is due within 24 hours of the invoice date.',
@@ -223,6 +230,12 @@ router.put('/', wrap((req, res) => {
     if (!Number.isFinite(n) || n < min || n > max) {
       throw badRequest(`${key} must be a number between ${min} and ${max}`);
     }
+  }
+  // A choice from a short list, not free text. Anything else would be stored,
+  // read back by the hunt as "any", and look saved when it was not.
+  if (body.hunt_company_age !== undefined
+      && !COMPANY_AGES.includes(String(body.hunt_company_age).trim())) {
+    throw badRequest(`hunt_company_age must be one of: ${COMPANY_AGES.join(', ')}`);
   }
 
   for (const [key, value] of Object.entries(body)) setSetting(key, String(value ?? '').trim());

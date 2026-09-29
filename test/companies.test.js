@@ -210,6 +210,39 @@ test('discovery returns only active companies, and imports them already qualifie
   for (const l of imported.body.leads) await del(`/api/leads/${l.id}`);
 });
 
+test('discovery asks the register for newly registered or established companies by date', async () => {
+  const { incorporatedRange } = await import('../public/js/company-age.js');
+  const sent = async (body) => {
+    stub();
+    replies = [{ status: 200, body: { hits: 0, items: [] } }];
+    const res = await post('/api/companies/discover', { trade: 'roofers', location: 'Otley', ...body });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    return { res, params: new URL(calls[0].url).searchParams };
+  };
+
+  const young = await sent({ company_age: 'new' });
+  assert.equal(young.params.get('incorporated_from'), incorporatedRange('new').from);
+  assert.match(young.params.get('incorporated_from'), /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(young.params.get('incorporated_to'), null);
+  assert.equal(young.res.body.company_age, 'new');
+
+  const old = await sent({ company_age: 'established' });
+  assert.equal(old.params.get('incorporated_to'), incorporatedRange('established').to);
+  assert.equal(old.params.get('incorporated_from'), null);
+
+  // Any age, or none given, sends no dates: the search is what it always was.
+  for (const body of [{ company_age: 'any' }, {}]) {
+    const { params } = await sent(body);
+    assert.equal(params.get('incorporated_from'), null);
+    assert.equal(params.get('incorporated_to'), null);
+  }
+
+  stub();
+  const bad = await post('/api/companies/discover', { trade: 'roofers', company_age: 'bogus' });
+  assert.equal(bad.status, 400);
+  assert.equal(calls.length, 0, 'no request is made for an unknown age');
+});
+
 test('discovery refuses a query the register would reject', async () => {
   stub();
   const res = await post('/api/companies/discover', { trade: 'unmappable nonsense' });

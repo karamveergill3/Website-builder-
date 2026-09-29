@@ -83,6 +83,7 @@ test('the hunt form covers the options the hunt actually reads', () => {
     'hunt_require_mobile', 'hunt_include_unlisted', 'hunt_enabled',
     'hunt_messageable_only', 'hunt_include_sole_traders',
     'hunt_max_places_requests', 'hunt_max_company_lookups', 'hunt_check_websites',
+    'hunt_company_age',
   ]) {
     assert.ok(names.has(key), `the Hunt screen has no control for ${key}`);
   }

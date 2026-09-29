@@ -25,6 +25,7 @@ let calls = { register: 0, search: 0, places: 0 };
 let placesLog = [];     // what each Places request asked for, and with which field mask
 let sites = {};         // the web, for the website check: url -> page html
 let siteLog = [];       // every other URL the hunt asked for
+let registerLog = [];   // every advanced-search URL, to read the filters it sent
 
 function stub() {
   register = [];
@@ -34,6 +35,7 @@ function stub() {
   placesLog = [];
   sites = {};
   siteLog = [];
+  registerLog = [];
   globalThis.fetch = async (url, opts = {}) => {
     const u = String(url);
     // The test's own calls to the app go through for real.
@@ -52,6 +54,7 @@ function stub() {
     }
     if (u.includes('company-information.service.gov.uk')) {
       calls.register++;
+      registerLog.push(u);
       const next = register.shift();
       if (!next) return reply({}, 404);            // zero results: 404, empty body
       const body = next.body ?? next;
@@ -142,6 +145,9 @@ const configure = (over = {}) => put('/api/settings', {
   // Off here, so the tests above measure the filters they are about. The
   // website check has its own tests below.
   hunt_check_websites: '0',
+  // Every age, as the hunt always did. Newly registered and established have
+  // their own tests at the end.
+  hunt_company_age: 'any',
   ...over,
 });
 
@@ -1646,4 +1652,257 @@ test('a site check that blows up is "don\u2019t know": the run carries on and fi
   const run = await runAndWait();
   assert.equal(run.error, null, run.error ?? '');
   assert.equal(run.found, 1);
+});
+
+/* -------------------------------------- newly registered or established */
+
+// Dates here are counted back from today, so these keep meaning the same
+// thing as the calendar moves on. One year old is newly registered; five is
+// established. (The fixtures above date from 2014 to 2016: established.)
+
+/** A date of incorporation `years` before today, the way the register writes it. */
+const yearsAgo = (years) => {
+  const d = new Date();
+  d.setUTCFullYear(d.getUTCFullYear() - years);
+  return d.toISOString().slice(0, 10);
+};
+
+/** A name-search hit for a company in Otley, incorporated on `date`. */
+const dated = (title, number, date) => ({ ...hit(title, number, 'Otley'), date_of_creation: date });
+
+const verdictFor = (name) => db.prepare(
+  'SELECT register_verdict, incorporated_on FROM place_cache WHERE place_id = ?'
+).get(place(name).id);
+
+/**
+ * A messageable-only run over two Google listings the register confirms as
+ * Otley companies: `word` Fresh Roofing, incorporated a year ago, and `word`
+ * Oldfield Roofing, five years ago. Company numbers start with `num`.
+ */
+async function googleFirstByAge(choice, word, num) {
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_messageable_only: '1', hunt_include_places: '1', hunt_daily_target: '5',
+    hunt_company_age: choice,
+  });
+  // The right age for either choice, and not on Google, so the register path
+  // drops it for having no number and it adds nothing to the counts here.
+  register = [{ body: { hits: 1, items: [company(`${word.toUpperCase()} FILLER LIMITED`, `${num}01`, {
+    date_of_creation: choice === 'new' ? yearsAgo(1) : yearsAgo(5),
+  })] } }];
+  places = [{ places: [
+    place(`${word} Fresh Roofing`, { phone: '07700 930001' }),
+    place(`${word} Oldfield Roofing`, { phone: '07700 930002' }),
+  ] }];
+  search = [
+    { body: { items: [dated(`${word.toUpperCase()} FRESH ROOFING LIMITED`, `${num}02`, yearsAgo(1))] } },
+    { body: { items: [dated(`${word.toUpperCase()} OLDFIELD ROOFING LIMITED`, `${num}03`, yearsAgo(5))] } },
+  ];
+  const run = await runAndWait();
+  assert.equal(run.error, null, run.error ?? '');
+  const names = (await get('/api/leads')).body.leads.map((l) => l.business_name);
+  return { run, names };
+}
+
+test('the company age is a setting the hunt reads, and nothing but the three choices is accepted', async () => {
+  const fresh = await get('/api/settings');
+  assert.equal(fresh.body.settings.hunt_company_age, 'any', 'every age by default');
+
+  const bad = await put('/api/settings', { hunt_company_age: 'bogus' });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /hunt_company_age/);
+
+  for (const choice of ['new', 'established', 'any']) {
+    const ok = await configure({ hunt_company_age: choice });
+    assert.equal(ok.status, 200);
+    assert.equal(huntConfig().companyAge, choice);
+  }
+});
+
+test('newly registered: the Google-first path files the young company, not the old one', async () => {
+  const { run, names } = await googleFirstByAge('new', 'Ashby', '780001');
+  assert.ok(names.includes('Ashby Fresh Roofing'), 'the one incorporated a year ago is filed');
+  assert.ok(!names.includes('Ashby Oldfield Roofing'), 'the five year old one is not');
+  assert.equal(run.found, 1);
+  assert.equal(run.wrong_age, 1, 'it is counted as outside the age chosen');
+  assert.equal(run.not_confirmed, 0, 'not as a business the register could not confirm');
+
+  // Remembered as a company of the wrong age, with its date: never as "not a company".
+  assert.deepEqual({ ...verdictFor('Ashby Oldfield Roofing') },
+    { register_verdict: 'age', incorporated_on: yearsAgo(5) });
+});
+
+test('established: the Google-first path files the old company, not the young one', async () => {
+  const { run, names } = await googleFirstByAge('established', 'Brook', '780002');
+  assert.ok(names.includes('Brook Oldfield Roofing'));
+  assert.ok(!names.includes('Brook Fresh Roofing'));
+  assert.equal(run.found, 1);
+  assert.equal(run.wrong_age, 1);
+});
+
+test('newly registered: the register path files the young company, and skips the old one before Google', async () => {
+  stub();
+  await clearLeads();
+  await configure({ hunt_company_age: 'new', hunt_daily_target: '5' });
+  register = [{ body: { hits: 2, items: [
+    company('YOUNGBLOOD ROOFING LIMITED', '78000301', { date_of_creation: yearsAgo(1) }),
+    company('ELDERLY ROOFING LIMITED', '78000302', { date_of_creation: yearsAgo(5) }),
+  ] } }];
+  places = [{ places: [] }];
+
+  const run = await runAndWait();
+  const names = (await get('/api/leads')).body.leads.map((l) => l.business_name);
+  assert.deepEqual(names, ['YOUNGBLOOD ROOFING LIMITED']);
+  assert.equal(run.wrong_age, 1);
+  assert.equal(db.prepare('SELECT wrong_age FROM hunt_runs WHERE id = ?').get(run.id).wrong_age, 1,
+    'saved on the run row');
+
+  // The register search itself is not narrowed by date: how far through a
+  // town the hunt has read is a count of what one query returned, and it has
+  // to mean the same thing whichever age is chosen.
+  const asked = new URL(registerLog[0]).searchParams;
+  assert.equal(asked.get('incorporated_from'), null);
+  assert.equal(asked.get('incorporated_to'), null);
+
+  // A page with nobody the right age costs no Google search at all.
+  db.prepare('UPDATE hunt_targets SET cursor = 0, last_run_at = NULL').run();
+  stub();
+  register = [{ body: { hits: 1, items: [
+    company('ELDERLY TWO ROOFING LIMITED', '78000303', { date_of_creation: yearsAgo(5) }),
+  ] } }];
+  const none = await runAndWait();
+  assert.equal(none.found, 0);
+  assert.equal(none.wrong_age, 1);
+  assert.equal(none.places_requests, 0, 'nothing to judge, so nothing spent on Google');
+});
+
+test('established: the register path files the old company, and skips the young one', async () => {
+  stub();
+  await clearLeads();
+  await configure({ hunt_company_age: 'established', hunt_daily_target: '5' });
+  register = [{ body: { hits: 2, items: [
+    company('YOUNGBLOOD TWO LIMITED', '78000401', { date_of_creation: yearsAgo(1) }),
+    company('ELDERLY THREE LIMITED', '78000402', { date_of_creation: yearsAgo(5) }),
+  ] } }];
+  places = [{ places: [] }];
+
+  const run = await runAndWait();
+  const names = (await get('/api/leads')).body.leads.map((l) => l.business_name);
+  assert.deepEqual(names, ['ELDERLY THREE LIMITED']);
+  assert.equal(run.wrong_age, 1);
+});
+
+test('a company with no date of incorporation is only found with Any age', async () => {
+  const undated = () => company('UNDATED ROOFING LIMITED', '78000501', { date_of_creation: undefined });
+
+  stub();
+  await clearLeads();
+  await configure({ hunt_company_age: 'established', hunt_daily_target: '5' });
+  register = [{ body: { hits: 1, items: [undated()] } }];
+  places = [{ places: [] }];
+  const run = await runAndWait();
+  assert.equal(run.found, 0, 'nothing says it is established, so it is not taken as one');
+  assert.equal(run.wrong_age, 1);
+
+  // Any age takes it, exactly as before.
+  db.prepare('UPDATE hunt_targets SET cursor = 0, last_run_at = NULL').run();
+  await configure({ hunt_company_age: 'any', hunt_daily_target: '5' });
+  stub();
+  register = [{ body: { hits: 1, items: [undated()] } }];
+  places = [{ places: [] }];
+  const any = await runAndWait();
+  assert.equal(any.found, 1);
+  assert.equal(any.wrong_age, 0);
+});
+
+test('with sole traders on and newly registered chosen, an old company is not filed as a sole trader', async () => {
+  stub();
+  await clearLeads();
+  await configure({
+    hunt_messageable_only: '1', hunt_include_sole_traders: '1', hunt_include_places: '1',
+    hunt_daily_target: '5', hunt_company_age: 'new',
+  });
+  register = [{ body: { hits: 1, items: [
+    company('SOLO AGE FILLER LIMITED', '78000601', { date_of_creation: yearsAgo(1) }),
+  ] } }];
+  places = [{ places: [
+    place('Venerable Roofing', { phone: '07700 930601' }),   // an old limited company
+    place('Solo Age Dave', { phone: '07700 930602' }),       // a sole trader
+  ] }];
+  search = [
+    { body: { items: [dated('VENERABLE ROOFING LIMITED', '78000602', yearsAgo(5))] } },
+    { body: { items: [] } },
+  ];
+
+  const run = await runAndWait();
+  assert.equal(run.error, null, run.error ?? '');
+  assert.deepEqual((await get('/api/leads')).body.leads.map((l) => l.business_name), [],
+    'neither the old company nor the sole trader is filed, call-only or otherwise');
+  assert.equal(run.wrong_age, 2, 'both are counted as outside the age chosen');
+  assert.equal(verdictFor('Venerable Roofing').register_verdict, 'age',
+    'the company is remembered as the wrong age, not as "not a limited company"');
+  assert.equal(verdictFor('Solo Age Dave').register_verdict, 'not_ltd');
+});
+
+test('with Google-direct filing on and an age chosen, Google-only businesses are not filed', async () => {
+  stub();
+  await clearLeads();
+  await configure({ hunt_include_places: '1', hunt_daily_target: '5', hunt_company_age: 'established' });
+  register = [{ body: { hits: 1, items: [
+    company('DIRECT AGE ROOFING LIMITED', '78000701', { date_of_creation: yearsAgo(5) }),
+  ] } }];
+  places = [{ places: [place('Direct Only Roofing', { phone: '07700 930701' })] }];
+
+  const run = await runAndWait();
+  const leads = (await get('/api/leads')).body.leads;
+  assert.equal(leads.filter((l) => l.source === 'Daily hunt (Google)').length, 0,
+    'no date of incorporation to judge it by');
+  assert.ok(leads.some((l) => l.business_name === 'DIRECT AGE ROOFING LIMITED'),
+    'the register company of the right age still is');
+  assert.equal(run.wrong_age, 1);
+});
+
+test('a listing remembered as the wrong age is not asked about again, until it fits', async () => {
+  const setUp = () => {
+    stub();
+    register = [{ body: { hits: 1, items: [
+      company('AGE CACHE FILLER LIMITED', '78000801', { date_of_creation: yearsAgo(1) }),
+    ] } }];
+    places = [{ places: [place('Oakwood Roofing', { phone: '07700 930801' })] }];
+    search = [{ body: { items: [dated('OAKWOOD ROOFING LIMITED', '78000802', yearsAgo(5))] } }];
+  };
+  const choose = (choice) => configure({
+    hunt_messageable_only: '1', hunt_include_places: '1', hunt_daily_target: '5',
+    hunt_company_age: choice,
+  });
+
+  await clearLeads();
+  await choose('new');
+  setUp();
+  const first = await runAndWait();
+  assert.equal(calls.search, 1);
+  assert.equal(first.wrong_age, 1);
+
+  // Next run, same choice: the stored date answers it, with no register search.
+  db.prepare('UPDATE hunt_targets SET cursor = 0, last_run_at = NULL').run();
+  setUp();
+  const second = await runAndWait();
+  assert.equal(calls.search, 0, 'the register was not asked a second time');
+  assert.equal(second.wrong_age, 1, 'and it is still counted as the wrong age');
+  assert.equal(second.not_confirmed, 0);
+
+  // The rep switches to established: the old company fits now, so it is
+  // looked up afresh and filed.
+  db.prepare('UPDATE hunt_targets SET cursor = 0, last_run_at = NULL').run();
+  await choose('established');
+  setUp();
+  const third = await runAndWait();
+  assert.equal(calls.search, 1, 'asked again once it fits the choice');
+  assert.equal(third.found, 1);
+  const lead = (await get('/api/leads')).body.leads.find((l) => l.business_name === 'Oakwood Roofing');
+  assert.ok(lead, 'and filed');
+  assert.equal(lead.company_number, '78000802');
+  assert.equal(lead.incorporated_on, yearsAgo(5));
+  await configure();
 });

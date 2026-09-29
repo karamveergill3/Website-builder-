@@ -34,8 +34,10 @@ if (cfg.requireNoWebsite && !process.env.GOOGLE_MAPS_API_KEY) {
 const override = Number(process.argv[2]);
 const target = Number.isFinite(override) && override > 0 ? override : cfg.target;
 
+const ageNote = { new: ', newly registered companies only', established: ', established companies only' };
 console.log(`Hunting for ${target} prospect(s) across ${cfg.trades.length} trade(s)`
-          + `${cfg.areas.length ? ` and ${cfg.areas.length} town(s)` : ''}…`);
+          + `${cfg.areas.length ? ` and ${cfg.areas.length} town(s)` : ''}`
+          + `${ageNote[cfg.companyAge] ?? ''}…`);
 
 const run = await hunt({ trigger: 'cli', target });
 
@@ -52,6 +54,7 @@ console.log([
   `No phone         ${run.no_contact ?? 0}`,
   `Landline only    ${run.not_mobile ?? 0}`,
   `Wrong town       ${run.wrong_town ?? 0}`,
+  `Wrong age        ${run.wrong_age ?? 0}`,
   `Register pages   ${run.register_requests}`,
   `Places requests  ${run.places_requests}`,
   run.areas_covered ? `Covered          ${run.areas_covered}` : null,
@@ -68,6 +71,9 @@ if (run.found < run.target && !run.error) {
     : hitLookups
     ? `Used its budget of ${cfg.maxPlacesRequests} Google lookups and stopped. `
       + 'Raise hunt_max_places_requests (1,000 free a month, then about 3p each).'
+    : (run.wrong_age ?? 0) > 0 && run.wrong_age >= run.found
+    ? `${run.wrong_age} were outside the company age you chose. `
+      + 'Set hunt_company_age to any to take every age, or add more towns.'
     : 'Most high-street trades are sole traders the register does not hold. '
       + 'Add more towns, or mix in limited-company trades.';
   console.log(`\nShort of target. ${why}`);

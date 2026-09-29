@@ -171,9 +171,13 @@ export async function searchByName(name, { limit = 20 } = {}) {
 /**
  * The useful one: filter by trade and town, and get SIC codes and a full
  * registered office back inline with no follow-up call per company.
+ *
+ * incorporatedFrom / incorporatedTo ('YYYY-MM-DD', both days included) keep
+ * to companies formed in that window. Left out, they are not sent at all.
  */
 export async function advancedSearch({
   sicCodes, location, nameIncludes, companyType, size = 100, startIndex = 0,
+  incorporatedFrom, incorporatedTo,
 } = {}) {
   // Our own guard, not the register's: an unfiltered advanced search is
   // accepted but returns the whole register a page at a time, which is never
@@ -189,6 +193,8 @@ export async function advancedSearch({
     company_name_includes: nameIncludes,
     company_type: companyType,
     company_status: 'active',
+    incorporated_from: incorporatedFrom,
+    incorporated_to: incorporatedTo,
     size: Math.min(size, 5000),
     start_index: startIndex,
   });

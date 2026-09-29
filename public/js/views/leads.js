@@ -4,6 +4,7 @@ import {
   html, mount, on, $, $$, modal, confirmDialog, toast,
   statusPill, relative, viewKeys, registerInterval,
 } from '../dom.js';
+import { companyAgeBand } from '../company-age.js';
 
 const STATUSES = ['new', 'sent', 'replied', 'won', 'lost'];
 
@@ -16,6 +17,19 @@ const BLOCKED = {
   OPTED_OUT: 'opted out',
   NO_EMAIL: 'no email',
 };
+
+/**
+ * How old the company is, in a few words for the row: "new company, 2025"
+ * under two years since incorporation, "since 2014" after. The same line the
+ * Hunt's "Which companies" choice draws. Nothing when there is no date.
+ */
+function companyAgeNote(incorporatedOn) {
+  const band = companyAgeBand(incorporatedOn);
+  const year = String(incorporatedOn ?? '').slice(0, 4);
+  if (band === 'new') return `new company, ${year}`;
+  if (band === 'established') return `since ${year}`;
+  return '';
+}
 
 export function leadFields(lead = {}) {
   const t = (name, label, opts = {}) => html`
@@ -353,7 +367,8 @@ export default async function leadsView(root, params, { refresh }) {
                 <td class="c-name">
                   <span class="name">${l.business_name}</span>
                   <span class="meta">
-                    ${l.location ?? '—'}${l.company_number ? html` · <span class="mono">${l.company_number}</span>` : ''}
+                    ${l.location ?? '—'}${l.company_number ? html` · <span class="mono">${l.company_number}</span>` : ''}${
+                      [companyAgeNote(l.incorporated_on)].filter(Boolean).map((a) => ` · ${a}`)}
                   </span>
                 </td>
                 <td>

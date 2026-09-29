@@ -37,6 +37,7 @@ import { recordFound, knownCompanyNumbers, ledgerFor } from './recontact.js';
 import { nextAssignee } from './assign.js';
 import { expandAreas } from './towns.js';
 import { findWebsite, postcodeIn } from './site-check.js';
+import { companyAgeChoice, fitsCompanyAge } from '../../public/js/company-age.js';
 
 const PAGE = 100;
 /** Re-open an exhausted trade/town after this long; new companies incorporate. */
@@ -118,6 +119,10 @@ export function huntConfig() {
     // Google is still read for website status and phone numbers to qualify the
     // register companies.
     fileGoogleDirect: includePlaces && !messageableOnly,
+    // Which companies to find by age: 'any', 'new' (incorporated under two
+    // years ago) or 'established'. Judged by the register's date of
+    // incorporation, so a sole trader, who has none, is only found with 'any'.
+    companyAge: companyAgeChoice(getSetting('hunt_company_age', 'any')),
   };
 
   if (messageableOnly) {
@@ -363,20 +368,28 @@ const tradeSearches = (counters) => counters.places_requests - counters.company_
  * are sole traders, and without this every run asked the register about the
  * same ones again. Answers go stale — a sole trader can incorporate — so an
  * old one is ignored and the question asked afresh.
+ *
+ * 'age' is a limited company that was not the age asked for, kept with its
+ * date of incorporation. That answer only holds while the company still does
+ * not fit: once the choice changes, or a new company turns two, the date
+ * alone says so, and the listing is looked up again as if never asked.
  */
-function registerVerdict(placeId) {
+function registerVerdict(placeId, companyAge) {
   const r = db.prepare(
-    'SELECT register_verdict, register_checked_at FROM place_cache WHERE place_id = ?'
+    'SELECT register_verdict, register_checked_at, incorporated_on FROM place_cache WHERE place_id = ?'
   ).get(placeId);
   if (!r?.register_verdict || !r.register_checked_at) return null;
   const cutoff = new Date(Date.now() - RECHECK_AFTER_DAYS * 86_400_000).toISOString();
-  return r.register_checked_at >= cutoff ? r.register_verdict : null;
+  if (r.register_checked_at < cutoff) return null;
+  if (r.register_verdict === 'age' && fitsCompanyAge(r.incorporated_on, companyAge)) return null;
+  return r.register_verdict;
 }
 
-function recordRegisterVerdict(placeId, verdict) {
+function recordRegisterVerdict(placeId, verdict, { incorporatedOn = null } = {}) {
   db.prepare(
-    'UPDATE place_cache SET register_verdict = ?, register_checked_at = ? WHERE place_id = ?'
-  ).run(verdict, nowIso(), placeId);
+    `UPDATE place_cache SET register_verdict = ?, register_checked_at = ?, incorporated_on = ?
+      WHERE place_id = ?`
+  ).run(verdict, nowIso(), incorporatedOn, placeId);
 }
 
 /* --------------------------------------------- one company, by its name */
@@ -695,8 +708,14 @@ const CLEAR_MARGIN = 0.15;
  * company must be registered in the hunted town, lead any other candidate
  * there by a clear margin, and Google's address for the listing must agree
  * (sameFirm), which also turns away listings Google pulled in from nearby.
+ *
+ * 'age' is a company confirmed all the same, only not the age asked for
+ * (companyAge). It comes back with the date it was incorporated on, so the
+ * caller can remember why without asking the register again next run.
  */
-async function confirmAndImportPlaceLead(row, trade, area, seen, { checkSite = null } = {}) {
+async function confirmAndImportPlaceLead(row, trade, area, seen, {
+  checkSite = null, companyAge = 'any',
+} = {}) {
   const ranked = (await searchByName(row.display_name, { limit: 50 }))
     .map((c) => ({ ...c, score: matchScore(row.display_name, c) }))
     .filter((c) => c.score > 0)
@@ -720,6 +739,13 @@ async function confirmAndImportPlaceLead(row, trade, area, seen, { checkSite = n
     return { filed: false, reason: elsewhere ? 'elsewhere' : 'unconfirmed' };
   }
   if (!sameFirm(auto, row, area)) return { filed: false, reason: 'elsewhere' };
+
+  // Only now is it known which company this listing is, and so how old it is.
+  // Asked before the website check, which is slow, and would be spent on a
+  // company the rep has already said they don't want.
+  if (!fitsCompanyAge(auto.date_of_creation, companyAge)) {
+    return { filed: false, reason: 'age', incorporated_on: auto.date_of_creation ?? null };
+  }
 
   const number = String(auto.company_number ?? '').trim().toUpperCase();
   if (!number) return { filed: false, reason: 'unconfirmed' };
@@ -936,6 +962,8 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
 
   const cfg = config ?? huntConfig();
   const want = Math.max(1, target ?? cfg.target);
+  // Read safely, so a config built by hand without it hunts every age.
+  const companyAge = companyAgeChoice(cfg.companyAge);
 
   if (!cfg.trades.length) {
     throw new Error('No trades configured — set them under Settings before the hunt can run.');
@@ -973,6 +1001,9 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
     not_mobile: 0,
     not_confirmed: 0,
     wrong_town: 0,
+    // Passed over for being newly registered when established ones were
+    // asked for, or the other way round, or for having no date to tell by.
+    wrong_age: 0,
     places_requests: 0, register_requests: 0,
     // Of places_requests, how many looked one company up by name.
     company_lookups: 0,
@@ -995,7 +1026,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
       `UPDATE hunt_runs SET found=@found, companies_seen=@companies_seen,
          already_known=@already_known, had_website=@had_website,
          no_contact=@no_contact, not_mobile=@not_mobile, not_confirmed=@not_confirmed,
-         wrong_town=@wrong_town,
+         wrong_town=@wrong_town, wrong_age=@wrong_age,
          places_requests=@places_requests, register_requests=@register_requests,
          company_lookups=@company_lookups,
          areas_covered=@areas, finished_at=@finished, error=@error
@@ -1010,6 +1041,7 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
       not_mobile: counters.not_mobile,
       not_confirmed: counters.not_confirmed,
       wrong_town: counters.wrong_town,
+      wrong_age: counters.wrong_age,
       places_requests: counters.places_requests,
       register_requests: counters.register_requests,
       id: runId,
@@ -1133,13 +1165,18 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
 
             if (cfg.messageableOnly) {
               let outcome;
-              const prior = registerVerdict(row.place_id);
+              const prior = registerVerdict(row.place_id, companyAge);
               if (prior === 'not_ltd' || prior === 'elsewhere') {
                 // The register already said no about this listing recently.
                 outcome = {
                   filed: false, reason: prior === 'elsewhere' ? 'elsewhere' : 'unconfirmed',
                   remembered: true,
                 };
+              } else if (prior === 'age') {
+                // A company, but still not the age asked for: its date says
+                // so without a register search. (One that now fits comes back
+                // from registerVerdict as never asked, and is looked up.)
+                outcome = { filed: false, reason: 'age', remembered: true };
               } else {
                 // One register search per business. Count it against the register
                 // budget so a town of no-hopers cannot run the API dry, and stop
@@ -1147,7 +1184,9 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
                 if (counters.register_requests >= cfg.maxRegisterPages) break;
                 counters.register_requests++;
                 try {
-                  outcome = await confirmAndImportPlaceLead(row, t.trade, t.area, seen, { checkSite });
+                  outcome = await confirmAndImportPlaceLead(row, t.trade, t.area, seen, {
+                    checkSite, companyAge,
+                  });
                 } catch (err) {
                   if (err instanceof CompaniesHouseError && err.retryable) throw err;
                   counters.not_confirmed++;
@@ -1157,6 +1196,10 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
                   recordRegisterVerdict(row.place_id, 'not_ltd');
                 } else if (!outcome.filed && outcome.reason === 'elsewhere') {
                   recordRegisterVerdict(row.place_id, 'elsewhere');
+                } else if (!outcome.filed && outcome.reason === 'age') {
+                  // Never 'not_ltd': it IS a limited company, and the day the
+                  // choice changes or it turns two, it is one worth filing.
+                  recordRegisterVerdict(row.place_id, 'age', { incorporatedOn: outcome.incorporated_on });
                 }
               }
               if (!outcome.filed) {
@@ -1164,6 +1207,9 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
                 // A confirmed company with a site of its own, just not on its
                 // Google listing. Not a sole trader, so never filed call-only.
                 if (outcome.reason === 'has_website') { counters.had_website++; continue; }
+                // A confirmed company, only newer or older than the rep asked
+                // for. Not a sole trader either, so never filed call-only.
+                if (outcome.reason === 'age') { counters.wrong_age++; continue; }
                 // The register can't confirm it's a limited company in this
                 // town — a sole trader, most likely. File it call-only when
                 // that's switched on; otherwise leave it off the list.
@@ -1178,6 +1224,9 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
                 if (ledgerFor({ business_name: row.display_name, location: t.area })) {
                   counters.already_known++; continue;
                 }
+                // A sole trader has no date of incorporation, so nothing says
+                // it is newly registered or established: only 'any' takes it.
+                if (companyAge !== 'any') { counters.wrong_age++; continue; }
                 const site = checkSite ? await checkSite(placeBiz(row, t.area), [`pl:${row.place_id}`]) : null;
                 if (site?.has) { counters.had_website++; continue; }
                 notePossibleSite(
@@ -1193,6 +1242,9 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
               if (ledgerFor({ business_name: row.display_name, location: t.area })) {
                 counters.already_known++; continue;
               }
+              // Filed straight from Google, with no register entry and so no
+              // date to judge its age by: only 'any' takes it.
+              if (companyAge !== 'any') { counters.wrong_age++; continue; }
               const site = checkSite ? await checkSite(placeBiz(row, t.area), [`pl:${row.place_id}`]) : null;
               if (site?.has) { counters.had_website++; continue; }
               notePossibleSite(
@@ -1239,6 +1291,15 @@ export async function hunt({ trigger = 'manual', target, config } = {}) {
         // The register matched the address, not the town. Check the town.
         if (!sameTown(t.area, c.locality)) {
           counters.wrong_town++;
+          continue;
+        }
+        // Newer or older than the rep asked for. Checked on the page the
+        // register already sent, before any Google search or web check is
+        // spent on it. (The register search itself is not narrowed by date:
+        // each town's place in the register is kept as a count of what one
+        // query has returned, and that count must mean the same every run.)
+        if (!fitsCompanyAge(c.date_of_creation, companyAge)) {
+          counters.wrong_age++;
           continue;
         }
         fresh.push(c);

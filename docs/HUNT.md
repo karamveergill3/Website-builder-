@@ -183,6 +183,12 @@ stops rather than spending more.
 - **Towns** — one per line. Matched against the registered office as whole
   words, so a town name or a full postcode, not a partial one.
 - **Find per day** — the target. It stops as soon as it hits it.
+- **Which companies**: Any age (the default), Newly registered (incorporated
+  under two years ago) or Established (two years or more), judged by the
+  register's date of incorporation. Sole traders have no such date, so they
+  are only found with Any age. Whatever is passed over for its age is counted
+  under **Wrong age** in Recent runs. The one-off search above the settings
+  has the same choice, and asks the register for just those dates.
 - **Run automatically every day** — the built-in scheduler.
 
 More towns is the main lever. Four trades across five towns is twenty

@@ -4,6 +4,18 @@ import {
   html, mount, on, $, $$, toast, fmtDateTime, relative, registerInterval, confirmDialog,
 } from '../dom.js';
 
+/** The funnel's words for a company passed over for its age; the short-run reason looks for them. */
+const AGE_DROP = 'outside the age you chose';
+
+/** The age choices, in the words the rep reads. The two year line is drawn in ../company-age.js. */
+const AGE_CHOICES = [
+  ['any', 'Any age'],
+  ['new', 'Newly registered (under 2 years)'],
+  ['established', 'Established (2 years or more)'],
+];
+const ageOptions = (current) => AGE_CHOICES.map(([value, label]) =>
+  html`<option value="${value}" ${current === value ? 'selected' : ''}>${label}</option>`);
+
 export default async function huntView(root, _p, { refresh }) {
   const [s, ledgerRes, cstatus] = await Promise.all([
     api.get('/api/hunt/status').catch(() => null),
@@ -42,6 +54,7 @@ export default async function huntView(root, _p, { refresh }) {
       c.requireMobile ? 'had no mobile on Google' : 'had no phone on Google');
     add(r.not_confirmed ?? 0, 'not confirmed a limited company on the register');
     add(r.wrong_town, 'registered in another town');
+    add(r.wrong_age ?? 0, AGE_DROP);
     add(r.already_known, 'already seen before');
     return out.sort((a, b) => b.n - a.n);
   };
@@ -73,6 +86,14 @@ export default async function huntView(root, _p, { refresh }) {
         + `and stopped, with ${areasLeft.toLocaleString()} combinations still to try. `
         + 'Raise “Google searches, max” below and run again (1,000 free a month, '
         + 'then about 3p each).';
+    } else if (biggest && biggest.label === AGE_DROP && biggest.n >= last.found) {
+      // Ahead of the phone explanations: an age was chosen on purpose, and
+      // when it is what removed the most, it is the thing to say.
+      shortReason = `Most were outside the age you chose (${biggest.n.toLocaleString()}). `
+        + `${c.companyAge === 'new'
+          ? 'Newly registered companies are a small share of the register, and sole traders are left out too. '
+          : 'Sole traders have no registration date, so they are left out too. '}`
+        + 'Choose “Any age” under Which companies to widen it, or add more towns and trades.';
     } else if (c.messageableOnly && phoneDrop >= last.found && phoneDrop > 0) {
       shortReason = `That's this mode doing its job: ${phoneDrop.toLocaleString()} were `
         + `dropped for having no mobile you could message today. Only confirmed limited `
@@ -176,6 +197,11 @@ export default async function huntView(root, _p, { refresh }) {
             <p class="tip">Matches whole words in the registered office — a town or a
               full postcode, not a partial one like LS21.</p>
           </div>
+          <div class="f">
+            <label for="f-age">Which companies</label>
+            <select id="f-age">${ageOptions(c.companyAge)}</select>
+            <p class="tip">Starts at the daily hunt's choice. Asked of the register by date of incorporation.</p>
+          </div>
         </div>
         <div class="bar" style="margin:0">
           <button type="button" class="primary" data-act="find-run">Search the register</button>
@@ -255,6 +281,11 @@ export default async function huntView(root, _p, { refresh }) {
                 They come in <b>call-only</b> — it's lawful to phone them (check TPS first),
                 and WhatsApp/SMS/email unlock the moment they agree to it on that call, which
                 the Reach screen records for you. A bigger pool, a bit more legwork.</span></label>
+          </div>
+          <div class="f" style="max-width:460px">
+            <label for="h-age">Which companies</label>
+            <select id="h-age" name="hunt_company_age">${ageOptions(c.companyAge)}</select>
+            <p class="tip">Sole traders have no registration date, so they're only found with Any age.</p>
           </div>
           <div class="cols-3">
             <div class="f">
@@ -396,6 +427,7 @@ export default async function huntView(root, _p, { refresh }) {
             <th class="num" title="Skipped: Google held no phone number">No phone</th>
             <th class="num" title="Skipped: the only number was a landline, which WhatsApp and SMS cannot reach">Landline</th>
             <th class="num" title="Skipped: the address matched but the town did not">Wrong town</th>
+            <th class="num" title="Skipped: outside the company age you chose, or no registration date to tell by">Wrong age</th>
             <th class="num">Requests</th>
             <th>Covered</th></tr></thead>
           <tbody>
@@ -409,6 +441,7 @@ export default async function huntView(root, _p, { refresh }) {
                 <td class="meta num">${r.no_contact ?? 0}</td>
                 <td class="meta num">${r.not_mobile ?? 0}</td>
                 <td class="meta num">${r.wrong_town ?? 0}</td>
+                <td class="meta num">${r.wrong_age ?? 0}</td>
                 <td class="meta num">${r.register_requests + r.places_requests}</td>
                 <td class="meta">${r.error
                   ? html`<span style="color:var(--clay)">${r.error}</span>`
@@ -488,7 +521,8 @@ export default async function huntView(root, _p, { refresh }) {
         <div class="panel" style="margin-top:12px">
           <div class="panel-hd">
             <h3 class="grow">${results.total.toLocaleString('en-GB')} active
-              ${results.trade.label ?? 'companies'}${results.location ? ` around ${results.location}` : ''}
+              ${results.trade.label ?? 'companies'}${results.location ? ` around ${results.location}` : ''}${
+                { new: ', newly registered', established: ', established' }[results.company_age] ?? ''}
               <span class="meta">— showing ${results.companies.length}</span></h3>
             <button class="primary" data-act="find-add" disabled>Add selected</button>
           </div>
@@ -533,6 +567,7 @@ export default async function huntView(root, _p, { refresh }) {
       try {
         results = await api.post('/api/companies/discover', {
           trade, location: $('#f-town', root).value, size: 100,
+          company_age: $('#f-age', root)?.value ?? 'any',
         });
       } catch (err) {
         mount(out, html`<div class="msg msg-bad" style="margin-top:12px"><div class="grow">${err.message}</div></div>`);

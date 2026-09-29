@@ -1802,6 +1802,23 @@ Thanks so much, and have a lovely day.
       }
     },
   },
+  {
+    name: '066_hunt_company_age',
+    up: `
+      -- The hunt can be told to find only newly registered companies, or only
+      -- established ones. Those it passed over for their age are counted, so
+      -- a short run can say "12 outside the age you chose" rather than
+      -- leaving a gap that reads as broken.
+      ALTER TABLE hunt_runs ADD COLUMN wrong_age INTEGER NOT NULL DEFAULT 0;
+
+      -- When the register answers "a limited company, but not the age you
+      -- chose" about a Google listing, its date of incorporation is kept
+      -- beside that answer. The next run can then tell, without asking the
+      -- register again, whether the answer still holds: the choice may have
+      -- changed, or the company may since have turned two.
+      ALTER TABLE place_cache ADD COLUMN incorporated_on TEXT;
+    `,
+  },
 ];
 
 function migrate() {

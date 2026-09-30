@@ -1,0 +1,860 @@
+import { Router } from 'express';
+import { db } from '../db.js';
+import {
+  wrap, badRequest, notFound, conflict, nowIso, str, requiredStr, bool, int, looksLikeEmail,
+} from '../lib/http.js';
+import { ENTITY_TYPES, sendability, looksCorporate } from '../lib/pecr.js';
+import { isSuppressed, suppress } from '../lib/suppression.js';
+import {
+  recordContact, recordFound, recontactCheck, ledgerFor, companyKey, nameKey,
+} from '../lib/recontact.js';
+import { sectorFor, sectorLabel } from '../lib/sectors.js';
+import {
+  followUpFor, dueFollowUps, notDueReason, followUpTemplate, followUpRules,
+} from '../lib/follow-ups.js';
+import { ensureMockup, latestMockup, mockupLink } from '../lib/mockups.js';
+import { renderTemplate } from '../lib/template.js';
+import { leadVoice } from '../lib/auth.js';
+
+export const STATUSES = ['new', 'sent', 'replied', 'won', 'lost'];
+
+const router = Router();
+
+/** Looked up with Object.hasOwn, so a key like "constructor" cannot reach the SQL. */
+const SORTS = {
+  created:  'created_at DESC, id DESC',
+  oldest:   'created_at ASC, id ASC',
+  name:     'business_name COLLATE NOCASE ASC',
+  contacted:'last_contacted_at DESC NULLS LAST, id DESC',
+  // Most recently messaged on WhatsApp first, so a cap trims the oldest sends.
+  whatsapp: `(SELECT MAX(oe.confirmed_sent_at) FROM outreach_events oe
+               WHERE oe.lead_id = leads.id AND oe.channel = 'whatsapp') DESC NULLS LAST, id DESC`,
+};
+
+/**
+ * Which pile a lead sits in. A lead someone has messaged on WhatsApp (a send
+ * confirmed in the Reach dialog) moves off the Leads screen and onto its own
+ * "Sent via WhatsApp" screen, so Leads stays a list of people still to
+ * approach. Worked out from the send record rather than a flag, so it moves
+ * itself the moment the send is confirmed and nothing can leave it stale.
+ */
+const WHATSAPPED = `EXISTS (SELECT 1 FROM outreach_events oe
+  WHERE oe.lead_id = leads.id AND oe.channel = 'whatsapp'
+    AND oe.confirmed_sent_at IS NOT NULL)`;
+const PILES = { leads: `NOT ${WHATSAPPED}`, whatsapp: WHATSAPPED };
+
+/** The SQL condition for `?pile=`, or null for every lead. */
+function pileWhere(value) {
+  const pile = str(value);
+  if (!pile || pile === 'all') return null;
+  if (!Object.hasOwn(PILES, pile)) throw badRequest(`unknown pile "${pile}"`);
+  return PILES[pile];
+}
+
+/** The latest confirmed WhatsApp send to this lead: when, and to which number. */
+const lastWhatsApp = (id) => db.prepare(
+  `SELECT confirmed_sent_at AS at, recipient FROM outreach_events
+    WHERE lead_id = ? AND channel = 'whatsapp' AND confirmed_sent_at IS NOT NULL
+    ORDER BY confirmed_sent_at DESC LIMIT 1`
+).get(id) ?? null;
+
+/** Their latest reply, however it came in, for the screens that answer it. */
+const lastReply = (id) => db.prepare(
+  `SELECT id, received_at AS at, body FROM replies WHERE lead_id = ?
+    ORDER BY received_at DESC, id DESC LIMIT 1`
+).get(id) ?? null;
+
+/**
+ * Shape a DB row for the client: SQLite has no booleans, and every lead
+ * carries the verdict on whether it may lawfully be emailed.
+ */
+function toApi(row) {
+  if (!row) return row;
+  const suppressed = isSuppressed(row.email);
+  const verdict = sendability(row, { suppressed });
+  // Whether this COMPANY has been approached before, on any channel and under
+  // any lead row. Two separate questions the UI kept conflating: may we
+  // lawfully contact this business (can_email), and have we already
+  // (can_contact). A screen that only answers the first invites the repeat.
+  const again = recontactCheck(row);
+  return {
+    ...row,
+    opted_out: row.opted_out === 1,
+    suppressed,
+    can_email: verdict.allowed,
+    block_code: verdict.allowed ? null : verdict.code,
+    block_reason: verdict.reason,
+    looks_corporate: looksCorporate(row.business_name),
+    // Which broad sector this trade falls in, so the right opening message
+    // picks itself on the Reach screen. Server-side, so the keyword list has
+    // one home.
+    sector: sectorFor(row.category),
+    sector_label: sectorLabel(sectorFor(row.category)),
+    can_contact: again.allowed,
+    contacted_before: !again.allowed || again.code === 'IN_CONVERSATION',
+    contacted_at: again.previous ?? row.last_contacted_at ?? null,
+    contacted_via: again.channel ?? null,
+    contact_block_reason: again.allowed ? null : again.reason,
+    // A scheduled call-back that has come due (its time is now or past).
+    callback_due: Boolean(row.next_call_at) && row.next_call_at <= nowIso(),
+    // When it was last sent on WhatsApp (set means it lives on that screen),
+    // and the number it went to, which is the chat to open for the reply.
+    ...(() => {
+      const wa = lastWhatsApp(row.id);
+      return { whatsapp_sent_at: wa?.at ?? null, whatsapp_to: wa?.recipient ?? null };
+    })(),
+    // Where their WhatsApp follow-ups stand (due now, due on a day, done),
+    // and the mock up built for them, which the first follow-up carries.
+    ...(() => {
+      const f = followUpFor(row);
+      const m = latestMockup(row.id);
+      return {
+        follow_up: f && f.state !== 'off' && f.state !== 'disabled'
+          ? { state: f.state, at: f.at, sent: f.sent, left: f.left, step: f.step } : null,
+        follow_up_due: Boolean(f?.due),
+        // Whatever the state: how many follow-ups went, and whether the latest
+        // WhatsApp was one, so "it never sent" says what it will take back.
+        follow_ups_sent: f?.sent ?? 0,
+        last_whatsapp_kind: f?.last_kind ?? null,
+        mockup_token: m?.token ?? null,
+      };
+    })(),
+    // What they said last, so it can be answered from the list.
+    ...(() => {
+      const r = lastReply(row.id);
+      return {
+        last_reply_id: r?.id ?? null,
+        last_reply_at: r?.at ?? null,
+        last_reply: r ? String(r.body).replace(/\s+/g, ' ').trim().slice(0, 160) : null,
+      };
+    })(),
+  };
+}
+
+function parseLeadBody(body, { partial = false } = {}) {
+  const out = {};
+  const has = (k) => Object.prototype.hasOwnProperty.call(body, k);
+
+  if (!partial || has('business_name')) {
+    out.business_name = requiredStr(body.business_name, 'business_name');
+  }
+  for (const f of ['category', 'location', 'phone', 'notes', 'source',
+                   'google_place_id', 'entity_note']) {
+    if (!partial || has(f)) out[f] = str(body[f]);
+  }
+  // Upper-cased on the way in. It is the dedupe key for a whole company, and
+  // it was being compared with a case-sensitive '=', so 'sc123456' and
+  // 'SC123456' were two different businesses to every check that mattered.
+  if (!partial || has('company_number')) {
+    const n = str(body.company_number);
+    out.company_number = n ? n.toUpperCase() : n;
+  }
+  if (!partial || has('entity_type')) {
+    const et = str(body.entity_type) ?? 'unknown';
+    if (!ENTITY_TYPES.includes(et)) {
+      throw badRequest(`entity_type must be one of: ${ENTITY_TYPES.join(', ')}`);
+    }
+    out.entity_type = et;
+  }
+  if (!partial || has('email')) {
+    const email = str(body.email);
+    if (email !== null && !looksLikeEmail(email)) {
+      throw badRequest(`"${email}" does not look like an email address`);
+    }
+    out.email = email;
+  }
+  if (!partial || has('status')) {
+    const status = str(body.status) ?? 'new';
+    if (!STATUSES.includes(status)) {
+      throw badRequest(`status must be one of: ${STATUSES.join(', ')}`);
+    }
+    out.status = status;
+  }
+  if (!partial || has('opted_out')) out.opted_out = bool(body.opted_out) ? 1 : 0;
+  if (has('last_contacted_at')) out.last_contacted_at = str(body.last_contacted_at);
+  // Reassigning a lead: an id of an existing user, or null to unassign.
+  if (has('assigned_to')) out.assigned_to = normAssignee(body.assigned_to);
+
+  return out;
+}
+
+/** A lead owner is a real user id, or null (unassigned). */
+function normAssignee(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const id = Number(v);
+  if (!Number.isInteger(id)) throw badRequest('assigned_to must be a team member id.');
+  if (!db.prepare('SELECT 1 FROM users WHERE id = ?').get(id)) {
+    throw badRequest('No such team member.');
+  }
+  return id;
+}
+
+/**
+ * A trading name ending in "Ltd" is not evidence of incorporation. Google shows
+ * TRADING names, which routinely differ from registered names, and the PECR
+ * "subscriber" is whoever contracts for the communications service -- not
+ * whoever the map listing names. So classifying a lead as a corporate
+ * subscriber requires a company number on the record: "the listing said Ltd"
+ * is not an answer to "how did you know they were a corporate subscriber?".
+ */
+function requireCorporateEvidence(next) {
+  if (next.entity_type !== 'corporate') return;
+  const number = (next.company_number ?? '').replace(/\s+/g, '');
+  if (!number) {
+    throw badRequest(
+      'To mark a lead as a limited company you must record its company number. ' +
+      'Look the business up on the Companies House register — a trading name ' +
+      'ending in "Ltd" is not evidence of incorporation.'
+    );
+  }
+  if (!/^[A-Z0-9]{6,10}$/i.test(number)) {
+    throw badRequest(
+      `"${next.company_number}" does not look like a company number. UK company ` +
+      'numbers are 8 characters, for example 01234567 or SC123456.'
+    );
+  }
+}
+
+/** GET /api/leads — filter by status, free-text search, sort. */
+router.get('/', wrap((req, res) => {
+  const where = [];
+  const params = {};
+
+  const status = str(req.query.status);
+  if (status && status !== 'all') {
+    if (!STATUSES.includes(status)) throw badRequest(`unknown status "${status}"`);
+    where.push('status = @status');
+    params.status = status;
+  }
+
+  const pile = pileWhere(req.query.pile);
+  if (pile) where.push(pile);
+
+  const q = str(req.query.q);
+  if (q) {
+    where.push(`(business_name LIKE @q OR category LIKE @q OR location LIKE @q
+                 OR email LIKE @q OR phone LIKE @q OR notes LIKE @q)`);
+    params.q = `%${q}%`;
+  }
+
+  if (str(req.query.opted_out) !== null) {
+    where.push('opted_out = @opted');
+    params.opted = bool(req.query.opted_out) ? 1 : 0;
+  }
+  if (bool(req.query.has_email)) where.push("email IS NOT NULL AND email <> ''");
+
+  // Owner filter: "me" (this rep's own leads), "none" (unassigned), or a
+  // specific team member's id.
+  const who = str(req.query.assigned_to);
+  if (who === 'none') {
+    where.push('assigned_to IS NULL');
+  } else if (who === 'me') {
+    where.push('assigned_to = @me');
+    params.me = req.user?.id ?? -1;
+  } else if (who) {
+    where.push('assigned_to = @assignee');
+    params.assignee = Number(who) || -1;
+  }
+
+  const sql = `SELECT * FROM leads
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY ${Object.hasOwn(SORTS, req.query.sort ?? '') ? SORTS[req.query.sort] : SORTS.created}
+    LIMIT @limit OFFSET @offset`;
+
+  params.limit = Math.min(int(req.query.limit, 500), 2000);
+  params.offset = Math.max(int(req.query.offset, 0), 0);
+
+  res.json({ leads: db.prepare(sql).all(params).map(toApi) });
+}));
+
+/**
+ * GET /api/leads/stats — the numbers behind the stat tiles.
+ * "Awaiting reply" is deliberately the count of leads sat at `sent`: contacted
+ * but not yet heard back from.
+ */
+router.get('/stats', wrap((req, res) => {
+  // `?pile=` counts one screen's leads only, so the tiles above a list add up
+  // to the list under them.
+  const pile = pileWhere(req.query.pile);
+  const scoped = (cond) => {
+    const all = [cond, pile].filter(Boolean);
+    return all.length ? `WHERE ${all.map((c) => `(${c})`).join(' AND ')}` : '';
+  };
+  const byStatus = Object.fromEntries(STATUSES.map((s) => [s, 0]));
+  for (const row of db.prepare(
+    `SELECT status, COUNT(*) n FROM leads ${scoped(null)} GROUP BY status`
+  ).all()) {
+    byStatus[row.status] = row.n;
+  }
+  const count = (cond) => db.prepare(`SELECT COUNT(*) n FROM leads ${scoped(cond)}`).get().n;
+
+  res.json({
+    total:          count(null),
+    awaiting_reply: byStatus.sent,
+    replied:        byStatus.replied,
+    won:            byStatus.won,
+    lost:           byStatus.lost,
+    new:            byStatus.new,
+    by_status:      byStatus,
+    opted_out:      count('opted_out = 1'),
+    no_email:       count("email IS NULL OR email = ''"),
+    // "Emailable" means lawfully emailable, not merely "has an address".
+    emailable:      db.prepare(`SELECT * FROM leads ${scoped(null)}`).all()
+                      .filter((l) => sendability(l, { suppressed: isSuppressed(l.email) }).allowed).length,
+    // Everything whose legal form is not yet confirmed — this is what
+    // "Check register" actually looks up, so the count must match it. It used
+    // to also require an email (a leftover from when leads arrived with one),
+    // which read 0 for the phone-only leads the hunt files now and made the
+    // "Check register" dialog claim there was nothing to check.
+    // Every pile, deliberately: Check register looks them all up.
+    unclassified:   db.prepare(`SELECT COUNT(*) n FROM leads
+                                 WHERE entity_type = 'unknown' AND opted_out = 0`).get().n,
+    corporate:      count("entity_type = 'corporate'"),
+    individual:     count("entity_type = 'individual'"),
+    suppressed:     db.prepare('SELECT COUNT(*) n FROM suppression_list').get().n,
+    // How many leads each rep has been given today, keyed by user id (plus
+    // "none" for unassigned). The Leads screen turns this into "You 5 · …".
+    // Every pile: a lead found this morning and WhatsApped by lunch was
+    // still found today.
+    by_assignee_today: Object.fromEntries(
+      db.prepare(
+        `SELECT COALESCE(assigned_to, 'none') AS id, COUNT(*) AS n FROM leads
+          WHERE substr(created_at, 1, 10) = ? GROUP BY assigned_to`
+      ).all(nowIso().slice(0, 10)).map((r) => [String(r.id), r.n])
+    ),
+  });
+}));
+
+/**
+ * When this company was approached through another lead row (the same
+ * business filed twice, say one for each of the team), which one and whose:
+ * "already approached" on a lead nobody here touched reads as a mistake
+ * unless it says who did it.
+ */
+function contactedElsewhere(lead, at) {
+  if (!at || lead.last_contacted_at === at) return null;
+  const mine = [companyKey(lead), nameKey(lead)].filter(Boolean);
+  const other = db.prepare(
+    `SELECT l.*, u.name AS owner_name FROM leads l LEFT JOIN users u ON u.id = l.assigned_to
+      WHERE l.id <> ? AND l.last_contacted_at = ?`
+  ).all(lead.id, at).find((l) => [companyKey(l), nameKey(l)].some((k) => k && mine.includes(k)));
+  return other
+    ? { id: other.id, business_name: other.business_name, owner: other.owner_name ?? null }
+    : null;
+}
+
+/**
+ * GET /api/leads/follow-ups — the WhatsApp follow-ups due now: how many in
+ * all, and how many are yours (your leads, and nobody's), for the count on
+ * the WhatsApp tab.
+ */
+router.get('/follow-ups', wrap((req, res) => {
+  const due = dueFollowUps();
+  const me = req.user?.id ?? null;
+  // Nobody's: no owner, or one no longer on the team (the WhatsApp screen
+  // shows those under Unassigned, so they count for everyone there).
+  const active = new Set(db.prepare('SELECT id FROM users WHERE active = 1').all().map((u) => u.id));
+  const nobodys = (d) => d.assigned_to === null || !active.has(d.assigned_to);
+  res.json({
+    count: due.length,
+    mine: due.filter((d) => d.assigned_to === me || nobodys(d)).length,
+    due,
+  });
+}));
+
+router.get('/:id', wrap((req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+  if (!lead) throw notFound('Lead not found');
+  const history = db
+    .prepare('SELECT * FROM email_log WHERE lead_id = ? ORDER BY sent_at DESC')
+    .all(lead.id);
+  const out = toApi(lead);
+  out.contacted_elsewhere = out.contacted_before ? contactedElsewhere(lead, out.contacted_at) : null;
+  res.json({ lead: out, history });
+}));
+
+/**
+ * POST /api/leads/:id/consent — record that a business agreed to be messaged.
+ *
+ * The lawful route to a sole trader: you call them (regulation 21), and if
+ * they say yes to a WhatsApp/text/email, that agreement is consent under
+ * regulation 22 and unblocks those channels for this lead. Stamped with who
+ * recorded it and when, so it can be shown and proven. Pass consent:false to
+ * withdraw it (they changed their mind).
+ */
+/**
+ * POST /api/leads/:id/follow-up { origin } — the follow-up, written and ready.
+ *
+ * Builds their mock up if it isn't built yet (from their name, trade and
+ * town), and fills in the follow-up message with its link: the first
+ * follow-up shows them the site, a later one checks they saw it. Nothing is
+ * sent: the screen opens WhatsApp with it, as for a first message, and
+ * records it through /api/outreach/prepare with follow_up: true.
+ */
+router.post('/:id/follow-up', wrap((req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+  if (!lead) throw notFound('Lead not found');
+  const f = followUpFor(lead);
+  if (!f?.due) {
+    return res.status(422).json({ error: notDueReason(f), code: 'NOT_DUE', follow_up: f });
+  }
+  const mockup = ensureMockup(lead);
+  const link = mockupLink(str(req.body?.origin), mockup.token);
+  const template = followUpTemplate(f.step);
+  if (!template) throw notFound('The follow-up message is missing: restore it on the Templates screen.');
+  const { body } = renderTemplate(template, { ...lead, mockup_link: link }, undefined, leadVoice(lead, req.user));
+  res.json({
+    follow_up: { state: f.state, at: f.at, sent: f.sent, left: f.left, step: f.step },
+    days: followUpRules().days,
+    template_name: template.name,
+    text: body,
+    mockup: { id: mockup.id, token: mockup.token, url: `/m/${mockup.token}/`, link, built: mockup.built },
+  });
+}));
+
+router.post('/:id/consent', wrap((req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+  if (!lead) throw notFound('Lead not found');
+
+  const granting = req.body?.consent !== false;
+  db.prepare(
+    `UPDATE leads SET messaging_consent_at = @at, messaging_consent_by = @by,
+       messaging_consent_note = @note WHERE id = @id`
+  ).run({
+    id: lead.id,
+    at: granting ? nowIso() : null,
+    by: granting ? (req.user?.id ?? null) : null,
+    note: granting ? (str(req.body?.note) ?? 'Agreed on a call to be messaged') : null,
+  });
+  res.json({ lead: toApi(db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)) });
+}));
+
+/**
+ * POST /api/leads/:id/call-outcome — record how a call went, so no-answers are
+ * tried a sensible number of times and promised call-backs come back round.
+ *
+ *   no_answer | voicemail → counts as an attempt (both are "tried, no luck")
+ *   callback              → schedules a call-back (next_call_at required)
+ *   reached               → got through; clears any pending call-back
+ */
+const CALL_OUTCOMES = new Set(['no_answer', 'voicemail', 'callback', 'reached']);
+router.post('/:id/call-outcome', wrap((req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+  if (!lead) throw notFound('Lead not found');
+
+  const outcome = str(req.body?.outcome);
+  if (!CALL_OUTCOMES.has(outcome)) {
+    throw badRequest(`outcome must be one of: ${[...CALL_OUTCOMES].join(', ')}`);
+  }
+  const now = nowIso();
+  const tried = outcome === 'no_answer' || outcome === 'voicemail';
+  const DEFAULT_NOTE = {
+    no_answer: 'No answer', voicemail: 'Left a voicemail',
+    callback: 'Call-back arranged', reached: 'Got through',
+  };
+
+  let nextCall = lead.next_call_at ?? null;
+  if (outcome === 'callback') {
+    nextCall = str(req.body?.next_call_at);
+    if (!nextCall) throw badRequest('next_call_at is required to arrange a call-back.');
+  } else if (outcome === 'reached') {
+    nextCall = null;
+  }
+
+  db.prepare(
+    `UPDATE leads SET call_attempts = @attempts, last_call_at = @now,
+       next_call_at = @next, call_note = @note WHERE id = @id`
+  ).run({
+    id: lead.id,
+    attempts: (lead.call_attempts ?? 0) + (tried ? 1 : 0),
+    now,
+    next: nextCall,
+    note: str(req.body?.note) ?? DEFAULT_NOTE[outcome],
+  });
+  res.json({ lead: toApi(db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)) });
+}));
+
+/**
+ * POST /api/leads/:id/whatsapp-unsend — "that WhatsApp never went".
+ *
+ * Tapping "Open WhatsApp" in Reach is taken as the send, because it is the
+ * only moment the tool sees. When it did not go (the number is not on
+ * WhatsApp, the tab was closed), this puts things back: the lead returns to
+ * Leads. If that WhatsApp was the only contact the company has had, the
+ * contact is taken off the record too, so it can be approached properly.
+ * Any other contact (an email, a text, a call) is left exactly as it was.
+ */
+router.post('/:id/whatsapp-unsend', wrap((req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+  if (!lead) throw notFound('Lead not found');
+  // Only the latest: an earlier WhatsApp that really went stays on record.
+  const latest = db.prepare(
+    `SELECT id, confirmed_sent_at FROM outreach_events
+      WHERE lead_id = ? AND channel = 'whatsapp' AND confirmed_sent_at IS NOT NULL
+      ORDER BY confirmed_sent_at DESC, id DESC LIMIT 1`
+  ).get(lead.id);
+  if (!latest) throw badRequest('No WhatsApp is recorded as sent to this lead.');
+
+  const otherContact = Boolean(
+    db.prepare(
+      `SELECT 1 FROM outreach_events
+        WHERE lead_id = ? AND channel != 'whatsapp' AND confirmed_sent_at IS NOT NULL`
+    ).get(lead.id)
+    || db.prepare('SELECT 1 FROM email_log WHERE lead_id = ?').get(lead.id)
+  );
+
+  db.transaction(() => {
+    db.prepare('UPDATE outreach_events SET confirmed_sent_at = NULL WHERE id = ?').run(latest.id);
+    const earlier = db.prepare(
+      `SELECT MAX(confirmed_sent_at) AS at FROM outreach_events
+        WHERE lead_id = ? AND channel = 'whatsapp' AND confirmed_sent_at IS NOT NULL`
+    ).get(lead.id)?.at ?? null;
+
+    // The lead: untouched if anything else reached them, otherwise back to
+    // how it stood before that WhatsApp.
+    if (earlier) {
+      if (lead.last_contacted_at === latest.confirmed_sent_at) {
+        db.prepare('UPDATE leads SET last_contacted_at = ? WHERE id = ?').run(earlier, lead.id);
+      }
+    } else if (!otherContact) {
+      db.prepare(
+        `UPDATE leads SET last_contacted_at = NULL,
+           status = CASE WHEN status = 'sent' THEN 'new' ELSE status END WHERE id = ?`
+      ).run(lead.id);
+    }
+
+    // The company record: one contact fewer. Cleared only when this WhatsApp
+    // was the only contact it holds; any other (under this lead or an older
+    // one for the same company) keeps it, and keeps it blocked.
+    const filed = ledgerFor(lead);
+    if (!filed || filed.last_channel !== 'whatsapp') return;
+    const left = Math.max(0, (filed.times_contacted ?? 1) - 1);
+    // Before confirming became idempotent, one message tapped "Open" and "I
+    // sent it" counted twice. So when this lead has nothing else and the
+    // record's last contact IS this message, it was the only one.
+    const onlyThis = !earlier && !otherContact
+      && (left === 0 || String(filed.contacted_at ?? '') >= String(latest.confirmed_sent_at));
+    if (onlyThis) {
+      db.prepare(
+        `UPDATE company_ledger SET contacted_at = NULL, last_channel = NULL, times_contacted = 0
+          WHERE company_key = ?`
+      ).run(filed.company_key);
+    } else {
+      db.prepare(
+        `UPDATE company_ledger SET times_contacted = ?, contacted_at = COALESCE(?, contacted_at)
+          WHERE company_key = ?`
+      ).run(Math.max(1, left), earlier, filed.company_key);
+    }
+  })();
+
+  res.json({ lead: toApi(db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)) });
+}));
+
+router.post('/', wrap((req, res) => {
+  const lead = parseLeadBody(req.body);
+  requireCorporateEvidence(lead);
+  lead.created_at = nowIso();
+  lead.last_contacted_at = lead.last_contacted_at ?? null;
+  // A lead added by hand belongs to whoever added it, unless one was named.
+  if (!('assigned_to' in lead)) lead.assigned_to = req.user?.id ?? null;
+
+  const cols = Object.keys(lead);
+  try {
+    const info = db
+      .prepare(`INSERT INTO leads (${cols.join(', ')})
+                VALUES (${cols.map((c) => `@${c}`).join(', ')})`)
+      .run(lead);
+    // A lead created already opted out must go on the suppression list too --
+    // otherwise the opt-out is lost the moment the lead is deleted.
+    if (lead.opted_out === 1) {
+      suppress(lead.email, { businessName: lead.business_name, reason: 'created as opted out' });
+    }
+    const created = db.prepare('SELECT * FROM leads WHERE id = ?').get(info.lastInsertRowid);
+    recordFound(created);
+    if (created.last_contacted_at) recordContact(created, 'existing', created.last_contacted_at);
+    res.status(201).json({ lead: toApi(created) });
+  } catch (err) {
+    const msg = String(err.message);
+    // SQLite names the column, not the index, so match on the column.
+    if (msg.includes('UNIQUE') && msg.includes('leads.company_number')) {
+      // The partial unique index from migration 016. Two rows for one company
+      // are two independent targets, contacted independently, with nothing in
+      // the UI connecting them — the split identity the ledger exists to stop.
+      const held = db.prepare(
+        'SELECT id, business_name FROM leads WHERE company_number = ?'
+      ).get(lead.company_number);
+      throw conflict(
+        `Company ${lead.company_number} is already lead #${held?.id} `
+        + `(${held?.business_name}).`
+      );
+    }
+    if (msg.includes('UNIQUE') && lead.google_place_id) {
+      throw conflict('A lead with that Google place ID already exists');
+    }
+    throw err;
+  }
+}));
+
+router.patch('/:id', wrap((req, res) => {
+  const existing = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+  if (!existing) throw notFound('Lead not found');
+
+  const patch = parseLeadBody(req.body, { partial: true });
+  if (Object.keys(patch).length === 0) return res.json({ lead: toApi(existing) });
+  requireCorporateEvidence({ ...existing, ...patch });
+
+  // Moving a lead to "sent" by hand should stamp the contact date, unless the
+  // caller set one explicitly — or the lead already has one. Setting a lead
+  // that replied back to "awaiting reply" is a correction, not a second
+  // approach, and must not file one (bulk-status has always worked this way).
+  if (patch.status === 'sent' && existing.status !== 'sent' && !('last_contacted_at' in patch)) {
+    patch.last_contacted_at = existing.last_contacted_at ?? nowIso();
+  }
+  // Whatever route stamped the contact date, the ledger has to hear about
+  // it — it is the only record that survives this lead being deleted.
+  const contactedNow = patch.last_contacted_at
+    && patch.last_contacted_at !== existing.last_contacted_at;
+
+  db.prepare(`UPDATE leads SET ${Object.keys(patch).map((c) => `${c} = @${c}`).join(', ')}
+              WHERE id = @id`).run({ ...patch, id: existing.id });
+
+  if (contactedNow) {
+    recordContact({ ...existing, ...patch }, 'marked by hand', patch.last_contacted_at);
+  }
+
+  // An opt-out is recorded against the address, not just the row, so deleting
+  // or re-importing the lead cannot resurrect it as a target.
+  if (patch.opted_out === 1) {
+    suppress(patch.email ?? existing.email, {
+      businessName: patch.business_name ?? existing.business_name,
+      reason: 'marked opted out',
+    });
+    // suppression_list is keyed on an email address, so a phone-only lead —
+    // which most no-website trades are — could not be suppressed at all, and
+    // its opt-out died with the row. The ledger is keyed on the company, so
+    // it can carry one for a business that has never given us an address.
+    recordContact({ ...existing, ...patch }, 'opted out');
+  }
+
+  res.json({ lead: toApi(db.prepare('SELECT * FROM leads WHERE id = ?').get(existing.id)) });
+}));
+
+/**
+ * The bookkeeping a lead needs before its row goes.
+ *
+ * An opt-out is recorded against the address, and the PATCH that sets the
+ * flag does that — but only with an address to record. Most no-website trades
+ * are phone-only when they opt out, so the flag gets set with nothing to
+ * suppress, and if an email turns up afterwards the opt-out has no way to
+ * follow it. Checking again on the way out is the last chance to catch that.
+ *
+ * Returns whether an address was suppressed, so a bulk caller can report it.
+ */
+function retire(lead) {
+  if (!lead || lead.opted_out !== 1 || !lead.email) return false;
+  return suppress(lead.email, {
+    businessName: lead.business_name,
+    reason: 'opted out, then the lead was deleted',
+  });
+}
+
+router.delete('/:id', wrap((req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id);
+  if (!lead) throw notFound('Lead not found');
+  retire(lead);
+  db.prepare('DELETE FROM leads WHERE id = ?').run(lead.id);
+  res.status(204).end();
+}));
+
+/**
+ * POST /api/leads/bulk-delete — clear the list, or the part of it on screen.
+ *
+ * Two things deliberately outlive the rows:
+ *
+ *   suppression_list — an opted-out lead is suppressed on the way out, the
+ *     same as the single-lead path does, or the opt-out dies with the row and
+ *     the next import makes them contactable again.
+ *
+ *   company_ledger  — the record of who has already been approached. Wiping
+ *     the leads is how you say "this list is no good"; it is not a licence to
+ *     cold-message the same roofer a second time, which is what earns the
+ *     complaint that costs the mailbox.
+ *
+ * `forget` is the escape hatch, and it is deliberately narrow: it drops the
+ * ledger rows for companies that have never been contacted, so the hunt can
+ * find them again. A company with a contact date keeps its row whatever is
+ * asked, because the whole point of that date is that it cannot be argued
+ * away by deleting something.
+ */
+router.post('/bulk-delete', wrap((req, res) => {
+  const all = bool(req.body?.all);
+  const forget = bool(req.body?.forget);
+  const ids = Array.isArray(req.body?.ids)
+    ? req.body.ids.map(Number).filter(Number.isFinite)
+    : [];
+  if (!all && ids.length === 0) {
+    throw badRequest('Pass ids, or all: true to clear the whole list.');
+  }
+  // "Delete all" on the Leads screen means all of THAT screen. Without the
+  // pile it also took every lead on the WhatsApp screen, which it never showed.
+  const pile = pileWhere(req.body?.pile);
+
+  // One row at a time rather than an IN list: SQLite caps a statement at 999
+  // parameters, and "delete all" on a list of a thousand-odd is exactly the
+  // case this exists for.
+  const one = db.prepare('SELECT * FROM leads WHERE id = ?');
+  const drop = db.prepare('DELETE FROM leads WHERE id = ?');
+  const unfile = db.prepare(
+    'DELETE FROM company_ledger WHERE company_key = ? AND contacted_at IS NULL'
+  );
+
+  const out = { deleted: 0, suppressed: 0, forgotten: 0, reopened: 0, kept: 0 };
+  const forgottenTowns = new Set();
+
+  const run = db.transaction((rows) => {
+    for (const id of rows) {
+      const lead = one.get(id);
+      if (!lead) continue;
+
+      if (retire(lead)) out.suppressed += 1;
+
+      // Read the ledger row before the lead goes: ledgerFor() needs the
+      // lead's name and town to reach a row filed under the weaker key.
+      const filed = forget ? ledgerFor(lead) : null;
+      drop.run(id);
+      out.deleted += 1;
+
+      if (!filed) continue;
+      if (filed.contacted_at) { out.kept += 1; continue; }
+      const removed = unfile.run(filed.company_key).changes;
+      out.forgotten += removed;
+      if (removed && lead.location) forgottenTowns.add(lead.location);
+    }
+  });
+
+  run(all
+    ? db.prepare(`SELECT id FROM leads ${pile ? `WHERE ${pile}` : ''}`).all().map((r) => r.id)
+    : ids);
+
+  // Clearing the ledger is not enough on its own. The hunt reads the register
+  // one page at a time and remembers how far it got (the target's cursor), and
+  // it retires a town it has worked through (exhausted_at). So a forgotten
+  // business still never reappears — the run starts past the page it sits on.
+  // Re-open the towns we just forgot: rewind their cursor and un-retire them,
+  // so the next hunt reads them again from the top and re-finds the business.
+  if (forget && out.forgotten > 0) {
+    const norm = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const wanted = new Set([...forgottenTowns].map(norm));
+    const reopen = db.prepare(
+      'UPDATE hunt_targets SET cursor = 0, exhausted_at = NULL WHERE id = ?'
+    );
+    const targets = db.prepare('SELECT id, area FROM hunt_targets').all();
+    const reopenAll = db.transaction(() => {
+      for (const t of targets) {
+        // Match the town, or — if the forgotten leads carried no town to match
+        // on — re-open everything, so the escape hatch always actually works.
+        if (!wanted.size || wanted.has(norm(t.area))) out.reopened += reopen.run(t.id).changes;
+      }
+    });
+    reopenAll();
+  }
+
+  res.json(out);
+}));
+
+/** POST /api/leads/bulk-status — for multi-select actions in the list. */
+router.post('/bulk-status', wrap((req, res) => {
+  const status = requiredStr(req.body.status, 'status');
+  if (!STATUSES.includes(status)) throw badRequest(`unknown status "${status}"`);
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.map(Number).filter(Number.isFinite) : [];
+  if (ids.length === 0) throw badRequest('ids must be a non-empty array');
+
+  // Marking a batch as "sent" by hand is a claim that they were contacted, so
+  // it stamps the date exactly as the single-lead PATCH does. It did not, so
+  // the list showed a contacted lead with no contact date on it.
+  const now = nowIso();
+  const stmt = db.prepare('UPDATE leads SET status = ? WHERE id = ?');
+  const stamp = db.prepare(
+    'UPDATE leads SET status = ?, last_contacted_at = ? WHERE id = ? AND status != ?'
+  );
+  const run = db.transaction((rows) => {
+    for (const id of rows) {
+      if (status !== 'sent') { stmt.run(status, id); continue; }
+      const before = db.prepare('SELECT * FROM leads WHERE id = ?').get(id);
+      if (!before) continue;
+      stamp.run(status, before.last_contacted_at ?? now, id, 'sent');
+      if (!before.last_contacted_at) recordContact(before, 'marked by hand', now);
+    }
+  });
+  run(ids);
+  res.json({ updated: ids.length, status });
+}));
+
+/** POST /api/leads/bulk-assign — hand a batch of leads to a team member. */
+router.post('/bulk-assign', wrap((req, res) => {
+  const assignee = normAssignee(req.body?.assigned_to); // id, or null to unassign
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isFinite) : [];
+  if (ids.length === 0) throw badRequest('ids must be a non-empty array');
+
+  const stmt = db.prepare('UPDATE leads SET assigned_to = ? WHERE id = ?');
+  const run = db.transaction((rows) => { for (const id of rows) stmt.run(assignee, id); });
+  run(ids);
+  res.json({ updated: ids.length, assigned_to: assignee });
+}));
+
+/**
+ * POST /api/leads/import-emails — paste addresses in against business names.
+ *
+ * Neither Google nor Companies House holds an email address, so this is the
+ * step that is always manual. Making it bulk at least keeps it quick.
+ * Accepts "Business name, email" per line, in either order, comma or tab
+ * separated.
+ */
+router.post('/import-emails', wrap((req, res) => {
+  const text = String(req.body.text ?? '');
+  if (!text.trim()) throw badRequest('Nothing pasted.');
+
+  const leads = db.prepare('SELECT id, business_name, email FROM leads').all();
+  const norm = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const byName = new Map(leads.map((l) => [norm(l.business_name), l]));
+
+  const matched = [];
+  const unmatched = [];
+  const invalid = [];
+
+  const apply = db.transaction((rows) => {
+    for (const row of rows) {
+      db.prepare('UPDATE leads SET email = ? WHERE id = ?').run(row.email, row.id);
+    }
+  });
+
+  const staged = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const parts = line.split(/[\t,;]/).map((p) => p.trim()).filter(Boolean);
+    if (parts.length < 2) { unmatched.push({ line, reason: 'needs a name and an address' }); continue; }
+
+    const email = parts.find((p) => looksLikeEmail(p));
+    const name = parts.filter((p) => p !== email).join(' ').trim();
+    if (!email) { invalid.push({ line, reason: 'no valid email address on that line' }); continue; }
+    if (!name) { unmatched.push({ line, reason: 'no business name' }); continue; }
+
+    // Exact normalised match first, then a unique prefix match.
+    let lead = byName.get(norm(name));
+    if (!lead) {
+      const hits = leads.filter((l) => norm(l.business_name).startsWith(norm(name))
+                                    || norm(name).startsWith(norm(l.business_name)));
+      if (hits.length === 1) [lead] = hits;
+    }
+    if (!lead) { unmatched.push({ line, name, email, reason: 'no lead with that name' }); continue; }
+
+    staged.push({ id: lead.id, email, name: lead.business_name, replaced: Boolean(lead.email) });
+  }
+
+  apply(staged);
+  matched.push(...staged);
+
+  res.json({ matched: matched.length, updated: matched, unmatched, invalid });
+}));
+
+export default router;

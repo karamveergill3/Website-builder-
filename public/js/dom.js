@@ -130,7 +130,7 @@ export function modal({ title, body, footer, wide = false, onMount, onSubmit }) 
       const submitBtn = form.querySelector('[type="submit"]');
       if (submitBtn) submitBtn.disabled = true;
       try {
-        const result = onSubmit ? await onSubmit(Object.fromEntries(new FormData(form)), root) : true;
+        const result = onSubmit ? await onSubmit(Object.fromEntries(new FormData(form)), backdrop) : true;
         if (result !== undefined) close(result);
       } catch (err) {
         toast(err.message ?? 'Something went wrong', { error: true });
@@ -138,7 +138,13 @@ export function modal({ title, body, footer, wide = false, onMount, onSubmit }) 
       }
     });
 
-    onMount?.(root, close);
+    // Each dialog gets its own element, thrown away when it closes, so the
+    // handlers a dialog attaches go with it. They were attached to the
+    // permanent #modal-root and piled up: after messaging one business, its
+    // Reach handlers still ran on every later dialog, so pressing Prepare on
+    // a new business also re-prepared the one just messaged, and showed
+    // "Already contacted by whatsapp" over the new one.
+    onMount?.(backdrop, close);
     root.querySelector('input, textarea, select')?.focus();
   });
 }
